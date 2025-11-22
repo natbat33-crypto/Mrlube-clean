@@ -1,4 +1,3 @@
-
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: ["class"],
@@ -9,26 +8,17 @@ module.exports = {
     "./src/**/*.{ts,tsx,js,jsx,mdx}",
   ],
 
-  // ✅ Force-emit critical classes so prod styling can't be purged
   safelist: [
-    // global theme tokens
-    "bg-background","text-foreground",
-    "text-primary","bg-primary","border-primary","text-primary-foreground","bg-primary/10","border-primary/20",
+    "bg-background", "text-foreground",
+    "text-primary","bg-primary","border-primary",
+    "text-primary-foreground","bg-primary/10","border-primary/20",
     "text-muted-foreground","border-border",
-
-    // layout utilities used in your markup
     "max-w-6xl","mx-auto","px-4","lg:px-6","py-6",
     "grid","gap-3","lg:gap-4","grid-cols-1","sm:grid-cols-2","lg:grid-cols-4",
     "opacity-70",
-
-    // shadcn/ui + progress customization
     "h-2","[&>div]:bg-yellow-400",
-
-    // common text/rounded/shadow helpers
     "rounded","rounded-xl","rounded-full","shadow","hover:shadow-md","transition",
     "text-xs","text-sm","text-base","text-lg","text-xl","font-bold",
-
-    // dark mode token
     "dark",
   ],
 
@@ -63,17 +53,25 @@ module.exports = {
         "sidebar-border": "var(--sidebar-border)",
         "sidebar-ring": "var(--sidebar-ring)",
       },
+
+      borderColor: {
+        // ⭐️ THIS FIX ALLOWS border-border TO WORK
+        border: "var(--border)",
+      },
+
       borderRadius: {
         sm: "calc(var(--radius) - 4px)",
         md: "calc(var(--radius) - 2px)",
         lg: "var(--radius)",
         xl: "calc(var(--radius) + 4px)",
       },
+
       fontFamily: {
         sans: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['ui-monospace','SFMono-Regular','Consolas','Menlo','monospace'],
       },
     },
   },
+
   plugins: [],
 };
