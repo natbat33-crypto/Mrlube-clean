@@ -47,7 +47,6 @@ function pickReviewUid(): string {
   );
 }
 
-/* ---------- shared store resolver (matches week1–3 pattern) ---------- */
 async function resolveStoreId(): Promise<string> {
   const u = auth.currentUser;
   if (u) {
@@ -86,13 +85,14 @@ export default function SupervisorPage() {
   const [resolvingStore, setResolvingStore] = useState(true);
 
   const { storeId: resolvedStoreId, loading: storeCtxLoading } = useStoreCtx();
-  const trainees = useSupervisorTrainees(storeId);
+
+  // 🔥 RUN TRAINEE HOOK ONLY WHEN STOREID IS READY
+  const trainees = storeId ? useSupervisorTrainees(storeId) : [];
 
   const searchParams = useSearchParams();
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  /* ---------- keep ?as= override for deep review (not used in tiles) ---------- */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
@@ -103,14 +103,12 @@ export default function SupervisorPage() {
     }
   }, [uid]);
 
-  /* ---------- explicit store override (?store=) ---------- */
   useEffect(() => {
     if (!storeOverride) return;
     setStoreId(String(storeOverride));
     setResolvingStore(false);
   }, [storeOverride]);
 
-  /* ---------- if ?as=<uid>, try to read that user's storeId ---------- */
   useEffect(() => {
     if (!asUid) return;
     (async () => {
@@ -126,7 +124,6 @@ export default function SupervisorPage() {
     })();
   }, [asUid]);
 
-  /* ---------- prefer provider store when no overrides ---------- */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) {
@@ -135,7 +132,6 @@ export default function SupervisorPage() {
     }
   }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
 
-  /* ---------- fallback: infer store from user/employees/supervisorUid ---------- */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) return;
@@ -164,7 +160,6 @@ export default function SupervisorPage() {
           let sid: string | null =
             v?.storeId != null ? String(v.storeId) : null;
 
-          // infer from /stores/*/employees/{uid}
           if (!sid) {
             try {
               const storesSnap = await getDocs(collection(db, "stores"));
@@ -178,12 +173,9 @@ export default function SupervisorPage() {
                   break;
                 }
               }
-            } catch {
-              /* ignore */
-            }
+            } catch {}
           }
 
-          // infer from store.supervisorUid
           if (!sid) {
             try {
               const qs = await getDocs(
@@ -194,9 +186,7 @@ export default function SupervisorPage() {
                 )
               );
               if (!qs.empty) sid = qs.docs[0].id;
-            } catch {
-              /* ignore */
-            }
+            } catch {}
           }
 
           setStoreId(sid);
@@ -212,14 +202,27 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  /* ---------- aggregate counts across all trainees in this store ---------- */
+  // 🔥 PROTECT AGAINST EARLY RENDERING
+  if (!uid) {
+    return (
+      <div className="p-4 text-sm text-gray-600">Loading supervisor…</div>
+    );
+  }
+
+  if (resolvingStore) {
+    return (
+      <div className="p-4 text-sm text-gray-600">
+        Checking store assignment…
+      </div>
+    );
+  }
+
   useEffect(() => {
     let alive = true;
 
     async function tally() {
       setLoading(true);
 
-      // ensure we have a storeId (auto connect)
       let sid = storeId;
       if (!sid) {
         sid = await resolveStoreId();
@@ -255,18 +258,10 @@ export default function SupervisorPage() {
           );
 
           for (const d of progSnap.docs) {
-            const data = d.data() as {
-              path?: string;
-              done?: boolean;
-              approved?: boolean;
-              storeId?: string;
-              week?: string;
-            };
-
+            const data = d.data() as any;
             if (!data?.done) continue;
             if (data.storeId !== sid) continue;
 
-            // detect week from explicit week OR from path
             let wkNumber: 1 | 2 | 3 | 4 | null = null;
 
             if (typeof data.week === "string") {
@@ -327,7 +322,6 @@ export default function SupervisorPage() {
         </p>
       </header>
 
-      {/* Week cards */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {weeks.map((w) => (
           <Link
@@ -354,8 +348,7 @@ export default function SupervisorPage() {
         ))}
       </div>
 
-      {/* Trainees list (unchanged) */}
-      {storeId && (
+      {storeId && trainees && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
 
@@ -382,7 +375,6 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* Notes card */}
       {checking ? (
         <div className="rounded-xl border bg-white/60 p-4 text-sm text-gray-600">
           Checking store assignment…
@@ -414,9 +406,6 @@ export default function SupervisorPage() {
     </div>
   );
 }
-
-
-
 
 
 

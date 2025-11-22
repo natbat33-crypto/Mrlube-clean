@@ -18,7 +18,6 @@ import {
 import { onIdTokenChanged } from "firebase/auth";
 import { assignTrainee } from "@/lib/assignments";
 
-/* ---------- types ---------- */
 type Emp = {
   uid: string;
   role?: string;
@@ -33,14 +32,13 @@ type ManagerGate = {
   source: "employees" | "roster" | null;
 };
 
-/* ---------- helpers ---------- */
 async function isActiveManagerForStore(
   storeId: string,
   uid: string
 ): Promise<ManagerGate> {
-  // check employees subcollection
   const empRef = doc(db, "stores", storeId, "employees", uid);
   const empSnap = await getDoc(empRef);
+
   if (empSnap.exists()) {
     const d = empSnap.data() as any;
     const role = String(d.role || d.title || "").toLowerCase();
@@ -49,9 +47,9 @@ async function isActiveManagerForStore(
     }
   }
 
-  // fallback: roster subcollection
   const rosRef = doc(db, "stores", storeId, "roster", uid);
   const rosSnap = await getDoc(rosRef);
+
   if (rosSnap.exists()) {
     const d = rosSnap.data() as any;
     const role = String(d.role || d.title || "").toLowerCase();
@@ -60,16 +58,14 @@ async function isActiveManagerForStore(
     }
   }
 
-  // not an active manager for this store
   return { ok: false, source: null };
 }
 
-/* ---------- page ---------- */
 export default function ManagerStorePage() {
   const params = useParams<{ id: string }>();
   const storeId = String(params?.id || "");
-  const [uid, setUid] = useState<string | null>(null);
 
+  const [uid, setUid] = useState<string | null>(null);
   const [empCheck, setEmpCheck] =
     useState<"check" | "ok" | "missing" | "error">("check");
   const [empSource, setEmpSource] = useState<"employees" | "roster" | null>(
@@ -108,6 +104,7 @@ export default function ManagerStorePage() {
       );
       const s1 = await getDocs(q1);
       let rows = s1.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
+
       if (rows.length === 0) {
         const all = await getDocs(coll);
         rows = all.docs
@@ -115,9 +112,10 @@ export default function ManagerStorePage() {
           .filter(
             (e) =>
               e.active === true &&
-              String((e.role || "")).toLowerCase() === role
+              String(e.role || "").toLowerCase() === role
           );
       }
+
       return rows;
     } catch {
       const all = await getDocs(coll);
@@ -126,15 +124,17 @@ export default function ManagerStorePage() {
         .filter(
           (e) =>
             e.active === true &&
-            String((e.role || "")).toLowerCase() === role
+            String(e.role || "").toLowerCase() === role
         );
     }
   }
 
   useEffect(() => {
     let alive = true;
+
     (async () => {
       if (!uid || !storeId) return;
+
       setEmpCheck("check");
 
       try {
@@ -155,6 +155,7 @@ export default function ManagerStorePage() {
         setEveryone(allList);
 
         const gate = await isActiveManagerForStore(storeId, uid);
+
         if (gate.ok) {
           setEmpCheck("ok");
           setEmpSource(gate.source);
@@ -163,6 +164,7 @@ export default function ManagerStorePage() {
           const isMgr =
             me?.active === true &&
             String(me?.role || "").toLowerCase() === "manager";
+
           setEmpCheck(isMgr ? "ok" : "missing");
           setEmpSource(isMgr ? "employees" : null);
         }
@@ -175,6 +177,14 @@ export default function ManagerStorePage() {
       alive = false;
     };
   }, [uid, storeId]);
+
+  if (!uid) {
+    return (
+      <main className="max-w-4xl mx-auto p-4">
+        <p className="text-sm text-gray-600">Loading manager dashboard…</p>
+      </main>
+    );
+  }
 
   async function assign() {
     if (!uid || !storeId || !selTrainee || !selSupervisor) return;
@@ -192,10 +202,13 @@ export default function ManagerStorePage() {
   const mgrCount = useMemo(
     () =>
       everyone.filter(
-        (e) => e.active && String(e.role || "").toLowerCase() === "manager"
+        (e) =>
+          e.active &&
+          String(e.role || "").toLowerCase() === "manager"
       ).length,
     [everyone]
   );
+
   const supCount = useMemo(() => supervisors.length, [supervisors]);
   const trnCount = useMemo(() => trainees.length, [trainees]);
 
@@ -223,7 +236,6 @@ export default function ManagerStorePage() {
         </div>
       )}
 
-      {/* Supervisors */}
       <Block title="Supervisors">
         {supCount === 0 ? (
           "No supervisors yet."
@@ -236,7 +248,6 @@ export default function ManagerStorePage() {
         )}
       </Block>
 
-      {/* Trainees */}
       <Block title="Trainees">
         {trnCount === 0 ? (
           "No active trainees yet."
@@ -249,7 +260,6 @@ export default function ManagerStorePage() {
         )}
       </Block>
 
-      {/* EMPLOYEES SECTION — CLEAN & SAFE */}
       <Block title="Employees">
         {everyone.length === 0 ? (
           "Loading…"
@@ -267,7 +277,6 @@ export default function ManagerStorePage() {
         )}
       </Block>
 
-      {/* Assign Trainee → Supervisor */}
       <section className="rounded-2xl border border-gray-200 bg-white p-5">
         <h3 className="font-semibold mb-3">Assign Trainee → Supervisor</h3>
 
@@ -330,7 +339,6 @@ export default function ManagerStorePage() {
   );
 }
 
-/* ---------- tiny UI block ---------- */
 function Block({
   title,
   children,
