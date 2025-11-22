@@ -16,7 +16,7 @@ import {
   where,
 } from "firebase/firestore";
 import { onIdTokenChanged } from "firebase/auth";
-import { assignTrainee } from "@/lib/assignments";
+import { clientAssignTrainee } from "@/app/manager/client-assign";
 
 type Emp = {
   uid: string;
