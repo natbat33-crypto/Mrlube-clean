@@ -19,7 +19,7 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
     if (typeof window !== "undefined" && window.innerWidth >= 1024) setOpen(true);
   }, []);
 
-  // 🔐 Guard: if user becomes null, bounce to login
+  //  Guard: if user becomes null, bounce to login
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) router.replace("/auth/login");

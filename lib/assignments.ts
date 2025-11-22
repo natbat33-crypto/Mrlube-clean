@@ -1,7 +1,7 @@
 // lib/assignments.ts
 // Writes the assignment to /stores/{storeId}/trainees/{traineeUid}
 // to match the dashboards' reader (queries by supervisorId).
-
+"use server";
 import { doc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 
