@@ -1,4 +1,3 @@
-// appp/manager/stores/[id]/page.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +33,38 @@ type ManagerGate = {
   ok: boolean;
   source: "employees" | "roster" | null;
 };
+
+/* -------------------------------------------------------------------------- */
+/*                             GLOBAL DEBUG OVERLAY                            */
+/* -------------------------------------------------------------------------- */
+function GlobalDebug({ storeId, uid }: { storeId: string; uid: string | null }) {
+  if (typeof window === "undefined") return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 10,
+        right: 10,
+        background: "rgba(0,0,0,0.75)",
+        color: "#fff",
+        padding: "10px 14px",
+        borderRadius: 12,
+        fontSize: 12,
+        zIndex: 999999,
+        maxWidth: "70vw",
+        lineHeight: 1.4,
+      }}
+    >
+      <b>STORE DEBUG</b>
+      <div>store param: {String(storeId || "—")}</div>
+      <div>uid: {uid || "—"}</div>
+      <div>url: {typeof window !== "undefined" ? window.location.href : "—"}</div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 
 async function isActiveManagerForStore(storeId: string, uid: string): Promise<ManagerGate> {
   const empRef = doc(db, "stores", storeId, "employees", uid);
@@ -79,17 +110,31 @@ export default function ManagerStorePage() {
 
   const [debugOn, setDebugOn] = useState(false);
 
+  /* -- auth listener ------------------------------------------------------- */
   useEffect(() => {
     const stop = onIdTokenChanged(auth, (u) => setUid(u?.uid ?? null));
     return () => stop();
   }, []);
 
+  /* -- enable ?debug=1 ----------------------------------------------------- */
   useEffect(() => {
     if (typeof window !== "undefined") {
       const d = new URLSearchParams(window.location.search).get("debug");
       setDebugOn(d === "1");
     }
   }, []);
+
+  /* ------------------------------------------------------------------------ */
+  /*                        SAFETY: BLOCK RENDER EARLY                        */
+  /* ------------------------------------------------------------------------ */
+  if (!storeId || storeId === "undefined" || storeId === "") {
+    return (
+      <main className="max-w-4xl mx-auto p-4">
+        <GlobalDebug storeId={storeId} uid={uid} />
+        <p className="text-sm text-gray-600">Loading store (param missing)…</p>
+      </main>
+    );
+  }
 
   async function loadRole(role: string): Promise<Emp[]> {
     const coll = collection(db, "stores", storeId, "employees");
@@ -103,8 +148,7 @@ export default function ManagerStorePage() {
         rows = all.docs
           .map((d) => ({ uid: d.id, ...(d.data() as any) }))
           .filter(
-            (e) =>
-              e.active === true && String(e.role || "").toLowerCase() === role
+            (e) => e.active === true && String(e.role || "").toLowerCase() === role
           );
       }
       return rows;
@@ -113,12 +157,14 @@ export default function ManagerStorePage() {
       return all.docs
         .map((d) => ({ uid: d.id, ...(d.data() as any) }))
         .filter(
-          (e) =>
-            e.active === true && String(e.role || "").toLowerCase() === role
+          (e) => e.active === true && String(e.role || "").toLowerCase() === role
         );
     }
   }
 
+  /* ------------------------------------------------------------------------ */
+  /*                     LOAD EMPLOYEES + MANAGER VALIDATION                  */
+  /* ------------------------------------------------------------------------ */
   useEffect(() => {
     let alive = true;
 
@@ -151,7 +197,9 @@ export default function ManagerStorePage() {
           setEmpSource(gate.source);
         } else {
           const me = allList.find((e) => e.uid === uid);
-          const isMgr = me?.active && String(me?.role || "").toLowerCase() === "manager";
+          const isMgr =
+            me?.active && String(me?.role || "").toLowerCase() === "manager";
+
           setEmpCheck(isMgr ? "ok" : "missing");
           setEmpSource(isMgr ? "employees" : null);
         }
@@ -165,27 +213,41 @@ export default function ManagerStorePage() {
     };
   }, [uid, storeId]);
 
-  // ⭐ FIX — PREVENTS PROD WHITE SCREEN
-  if (!storeId || empCheck === "check" ||
-      (supervisors.length === 0 && trainees.length === 0 && everyone.length === 0)) {
+  /* ------------------------------------------------------------------------ */
+  /*                      SECOND FAIL-SAFE BEFORE FULL UI                     */
+  /* ------------------------------------------------------------------------ */
+  if (
+    empCheck === "check" ||
+    (supervisors.length === 0 &&
+      trainees.length === 0 &&
+      everyone.length === 0)
+  ) {
     return (
       <main className="max-w-4xl mx-auto p-4">
+        <GlobalDebug storeId={storeId} uid={uid} />
         <p className="text-sm text-gray-600">Loading store data…</p>
       </main>
     );
   }
-  // ⭐ END FIX
 
+  /* ------------------------------------------------------------------------ */
+  /*                        UID STILL LOADING (SAFE)                          */
+  /* ------------------------------------------------------------------------ */
   if (!uid) {
     return (
       <main className="max-w-4xl mx-auto p-4">
-        <p className="text-sm text-gray-600">Loading manager dashboard…</p>
+        <GlobalDebug storeId={storeId} uid={uid} />
+        <p className="text-sm text-gray-600">Authenticating…</p>
       </main>
     );
   }
 
+  /* ------------------------------------------------------------------------ */
+  /*                               ASSIGN LOGIC                               */
+  /* ------------------------------------------------------------------------ */
   async function assign() {
     if (!uid || !storeId || !selTrainee || !selSupervisor) return;
+
     try {
       setStatus("Assigning…");
       await clientAssignTrainee(storeId, selTrainee, selSupervisor);
@@ -197,17 +259,26 @@ export default function ManagerStorePage() {
     }
   }
 
+  /* ------------------------------------------------------------------------ */
+
   const mgrCount = useMemo(
     () =>
-      everyone.filter((e) => e.active && String(e.role || "").toLowerCase() === "manager").length,
+      everyone.filter(
+        (e) => e.active && String(e.role || "").toLowerCase() === "manager"
+      ).length,
     [everyone]
   );
 
   const supCount = useMemo(() => supervisors.length, [supervisors]);
   const trnCount = useMemo(() => trainees.length, [trainees]);
 
+  /* ------------------------------------------------------------------------ */
+  /*                                   UI                                     */
+  /* ------------------------------------------------------------------------ */
   return (
     <main className="max-w-4xl mx-auto p-4 lg:p-6 space-y-6">
+      <GlobalDebug storeId={storeId} uid={uid} />
+
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Store Details</h1>
         <Link
@@ -247,8 +318,8 @@ export default function ManagerStorePage() {
           "No active trainees yet."
         ) : (
           <ul className="text-sm">
-            {trainees.map((p) => (
-              <li key={p.uid}>{p.name || p.email || p.uid}</li>
+            {trainees.map((t) => (
+              <li key={t.uid}>{t.name || t.email || t.uid}</li>
             ))}
           </ul>
         )}
@@ -329,6 +400,8 @@ export default function ManagerStorePage() {
     </main>
   );
 }
+
+/* -------------------------------------------------------------------------- */
 
 function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
