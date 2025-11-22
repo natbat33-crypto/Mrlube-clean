@@ -1,7 +1,6 @@
 // app/supervisor/week3/page.tsx
 "use client";
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
