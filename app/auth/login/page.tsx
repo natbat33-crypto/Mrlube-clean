@@ -33,7 +33,7 @@ function LoginContent() {
 
   useEffect(() => {
     if (qs?.get("verify") === "1") {
-      setMsg("✅ Check your email to verify your account, then sign in.");
+      setMsg("Check your email to verify your account, then sign in.");
     }
   }, [qs]);
 
@@ -89,11 +89,11 @@ function LoginContent() {
     }
 
     if (role === "trainee" || role === "employee") {
-      router.replace("/dashboard/trainees");
+      router.replace("/dashboard");
       return;
     }
 
-    router.replace("/dashboard/trainees");
+    router.replace("/dashboard");
   }
 
   async function onSubmit(e: FormEvent) {

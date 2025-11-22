@@ -88,8 +88,6 @@ const TraineeNotesCardWrapper: FC<TraineeNotesCardWrapperProps> = ({
   storeId,
   traineeUid,
 }) => {
-  // Cast props as any going into the child so TS stops complaining,
-  // but keep strong typing at this level.
   return (
     <TraineeNotesCard
       {...({ storeId, traineeUid } as any)}
@@ -111,7 +109,7 @@ export default function DashboardPage() {
   // per-week done counts for this trainee
   const [weekDone, setWeekDone] = useState<Record<number, number>>({});
 
-  // Resolve current user + storeId WITHOUT any external provider
+  /* ---------- FIXED TRAINEE STORE RESOLVER ---------- */
   useEffect(() => {
     const stop = onIdTokenChanged(auth, async (u) => {
       setStoreError(null);
@@ -129,23 +127,17 @@ export default function DashboardPage() {
       try {
         let sid: string | null = null;
 
-        // Try users/<uid>
+        // 1. users/<uid> is the REAL source of truth
         const userSnap = await getDoc(doc(db, "users", u.uid));
         if (userSnap.exists()) {
           const v: any = userSnap.data();
-          if (v?.storeId != null) sid = String(v.storeId);
+          if (v?.storeId) sid = String(v.storeId);
         }
 
-        // Try trainees/<uid>
-        if (!sid) {
-          const traineeSnap = await getDoc(doc(db, "trainees", u.uid));
-          if (traineeSnap.exists()) {
-            const tv: any = traineeSnap.data();
-            if (tv?.storeId != null) sid = String(tv.storeId);
-          }
-        }
+        // 2. REMOVE BROKEN: /trainees/<uid> lookup
+        // PROD does NOT use that collection.
 
-        // Fallback scan
+        // 3. fallback: scan stores/*/trainees/*
         if (!sid) {
           sid = await findStoreForTraineeWithoutIndex(u.uid);
         }
@@ -153,6 +145,7 @@ export default function DashboardPage() {
         if (!sid) {
           setStoreError("No store assigned to this trainee yet.");
         }
+
         setStoreId(sid);
       } catch (err) {
         console.error("Error resolving store for trainee:", err);
@@ -165,7 +158,7 @@ export default function DashboardPage() {
     return () => stop();
   }, []);
 
-  // Seed empty per-user Day 1 progress doc (only when both are known)
+  /* ---------- ENSURE DAY 1 PROGRESS DOC ---------- */
   useEffect(() => {
     if (storeId && traineeUid) {
       ensureDay1ProgressDoc(storeId, traineeUid).catch((err) =>
@@ -174,7 +167,7 @@ export default function DashboardPage() {
     }
   }, [storeId, traineeUid]);
 
-  // Load Week cards (shared defs only)
+  /* ---------- LOAD WEEK CARDS ---------- */
   useEffect(() => {
     let cancelled = false;
 
@@ -194,7 +187,7 @@ export default function DashboardPage() {
 
       const tasksCol = collection(db, "modules", weekId, "tasks");
       const total = (await getCountFromServer(tasksCol)).data().count || 0;
-      const done = 0; // per-user progress is loaded separately
+      const done = 0;
 
       return {
         week: weekNum,
@@ -229,7 +222,7 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // Load this trainee's done counts for weeks 1–4 from users/{uid}/progress
+  /* ---------- LOAD PER-WEEK DONE COUNTS ---------- */
   useEffect(() => {
     if (!traineeUid) return;
 
@@ -248,13 +241,11 @@ export default function DashboardPage() {
 
           let wkNum: number | null = null;
 
-          // Prefer explicit week field ("week1", "week2", etc.)
           if (typeof data.week === "string") {
             const m = data.week.match(/^week(\d)$/i);
             if (m) wkNum = Number(m[1]);
           }
 
-          // Fallback to ID pattern: modules__week2__tasks__<id>
           if (!wkNum) {
             const m2 = d.id.match(/^modules__week(\d)__tasks__/i);
             if (m2) wkNum = Number(m2[1]);
@@ -321,7 +312,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid gap-3 lg:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Day 1 per-user progress card */}
           {storeId && traineeUid ? (
             <Day1Card storeId={storeId} traineeUid={traineeUid} />
           ) : (
@@ -428,7 +418,7 @@ export default function DashboardPage() {
   );
 }
 
-/* ---------- Day 1 per-user card (typed so TS is happy) ---------- */
+/* ---------- DAY 1 CARD ---------- */
 
 interface Day1CardProps {
   storeId?: string;
@@ -450,7 +440,6 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
 
     (async () => {
       try {
-        // Shared title + tasks list (definitions)
         const dayDoc = await getDoc(doc(db, "days", "day-1"));
         if (alive && dayDoc.exists()) {
           const data = dayDoc.data() as Record<string, unknown>;
@@ -464,7 +453,6 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
         const taskIds = snap.docs.map((d) => d.id);
         setTotal(taskIds.length);
 
-        // Per-user completion (doesn't touch shared defs)
         let userDone = 0;
         if (storeId && traineeUid) {
           const progRef = doc(
@@ -524,4 +512,3 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
     </Link>
   );
 };
-

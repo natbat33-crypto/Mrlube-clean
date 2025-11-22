@@ -15,7 +15,7 @@ const firebaseConfig = {
 
 // --- DEV ERROR HELPER ---
 Object.entries(firebaseConfig).forEach(([key, val]) => {
-  if (!val) console.error(`🔥 Missing Firebase ENV: ${key}`);
+  if (!val) console.error(` Missing Firebase ENV: ${key}`);
 });
 
 // --- SINGLETON APP ---
@@ -32,8 +32,8 @@ const db = initializeFirestore(app, {
 // --- DEV LOGGING ---
 if (process.env.NODE_ENV === "development") {
   setLogLevel("debug");
-  console.log("🔥 Firebase project (runtime):", app.options.projectId);
+  console.log("Firebase project (runtime):", app.options.projectId);
 }
 
-// --- EXPORTS (ONE LINE. THIS IS THE CORRECT VERSION) ---
+// --- EXPORTS ---
 export { app, auth, db, firebaseConfig };
