@@ -4,9 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 
-// IMPORTANT: static import (fixes white screen)
 import { autoConnect } from "@/lib/autoConnect";
 
 type Store = {
@@ -39,28 +38,52 @@ export default function ManagerDashboard() {
       let sid: string | null = null;
 
       try {
-        // 1) Check users/{uid}
+        // 1) users/{uid}
         const userSnap = await getDoc(doc(db, "users", u.uid));
         if (userSnap.exists()) {
           const d = userSnap.data() as any;
           if (d?.storeId) sid = String(d.storeId);
         }
 
-        // 2) Fallback to autoConnect
+        // 2) fallback autoConnect
         if (!sid) {
           const res = await autoConnect();
           if (res?.storeId) sid = String(res.storeId);
         }
-      } catch {
+      } catch (err) {
         /* ignore */
       }
 
       setStoreId(sid);
 
-      // 3) Fetch store doc
+      // 3) Load store data safely
       if (sid) {
-        const snap = await getDoc(doc(db, "stores", sid));
-        setStore(snap.exists() ? (snap.data() as Store) : null);
+        const storeRef = doc(db, "stores", sid);
+        let storeData: Store | null = null;
+
+        try {
+          const root = await getDoc(storeRef);
+
+          if (root.exists()) {
+            storeData = root.data() as Store;
+          } else {
+            // fallback: build store object based on employees
+            const empColl = collection(db, "stores", sid, "employees");
+            const empDocs = await getDocs(empColl);
+
+            if (!empDocs.empty) {
+              storeData = {
+                number: Number(sid),
+                name: `Store #${sid}`,
+                address: "N/A",
+              };
+            }
+          }
+        } catch {
+          storeData = null;
+        }
+
+        setStore(storeData);
       }
 
       setLoading(false);
@@ -99,6 +122,7 @@ export default function ManagerDashboard() {
   }
 
   /* ---------- MAIN DASHBOARD ---------- */
+
   return (
     <main className="max-w-6xl mx-auto p-8 space-y-6">
       <header>
@@ -106,7 +130,6 @@ export default function ManagerDashboard() {
         <p className="text-gray-600">What you manage.</p>
       </header>
 
-      {/* Store card */}
       {store && (
         <section className="rounded-2xl border border-gray-200 bg-white p-5">
           <div className="flex items-start justify-between gap-6">
@@ -159,7 +182,6 @@ export default function ManagerDashboard() {
     </main>
   );
 }
-
 
 
 
