@@ -1,6 +1,6 @@
+// appp/manager/stores/[id]/page.tsx
 "use client";
 
-// 🚨 REQUIRED for Vercel to NOT SSR this page
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
@@ -19,7 +19,6 @@ import {
 } from "firebase/firestore";
 import { onIdTokenChanged } from "firebase/auth";
 
-// 🚨 Correct import for assignment
 import { clientAssignTrainee } from "@/lib/client-assign";
 
 type Emp = {
@@ -165,6 +164,17 @@ export default function ManagerStorePage() {
       alive = false;
     };
   }, [uid, storeId]);
+
+  // ⭐ FIX — PREVENTS PROD WHITE SCREEN
+  if (!storeId || empCheck === "check" ||
+      (supervisors.length === 0 && trainees.length === 0 && everyone.length === 0)) {
+    return (
+      <main className="max-w-4xl mx-auto p-4">
+        <p className="text-sm text-gray-600">Loading store data…</p>
+      </main>
+    );
+  }
+  // ⭐ END FIX
 
   if (!uid) {
     return (
