@@ -1,4 +1,3 @@
-// app/manager/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -6,6 +5,9 @@ import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
+
+// IMPORTANT: static import (fixes white screen)
+import { autoConnect } from "@/lib/autoConnect";
 
 type Store = {
   number: number;
@@ -31,37 +33,44 @@ export default function ManagerDashboard() {
         setLoading(false);
         return;
       }
+
       setUid(u.uid);
 
-      // Prefer users/{uid}.storeId; fallback once to autoConnect()
       let sid: string | null = null;
+
       try {
+        // 1) Check users/{uid}
         const userSnap = await getDoc(doc(db, "users", u.uid));
         if (userSnap.exists()) {
           const d = userSnap.data() as any;
           if (d?.storeId) sid = String(d.storeId);
         }
+
+        // 2) Fallback to autoConnect
         if (!sid) {
-          const { autoConnect } = await import("@/lib/autoConnect");
           const res = await autoConnect();
           if (res?.storeId) sid = String(res.storeId);
         }
       } catch {
-        /* noop */
+        /* ignore */
       }
 
       setStoreId(sid);
+
+      // 3) Fetch store doc
       if (sid) {
         const snap = await getDoc(doc(db, "stores", sid));
         setStore(snap.exists() ? (snap.data() as Store) : null);
       }
+
       setLoading(false);
     });
 
     return () => unsub();
   }, []);
 
-  // --- UI states (styles per your screenshot) ---
+  /* ---------- UI STATES ---------- */
+
   if (!uid) {
     return (
       <main className="max-w-6xl mx-auto p-8">
@@ -89,19 +98,22 @@ export default function ManagerDashboard() {
     );
   }
 
+  /* ---------- MAIN DASHBOARD ---------- */
   return (
     <main className="max-w-6xl mx-auto p-8 space-y-6">
-      <div>
+      <header>
         <h1 className="text-[22px] font-extrabold">Manager Dashboard</h1>
         <p className="text-gray-600">What you manage.</p>
-      </div>
+      </header>
 
       {/* Store card */}
       {store && (
         <section className="rounded-2xl border border-gray-200 bg-white p-5">
           <div className="flex items-start justify-between gap-6">
             <div>
-              <div className="text-[15px] font-semibold">Store #{store.number}</div>
+              <div className="text-[15px] font-semibold">
+                Store #{store.number}
+              </div>
               <div className="text-sm text-gray-700">{store.name}</div>
               <div className="text-sm text-gray-700">{store.address}</div>
             </div>
@@ -116,7 +128,7 @@ export default function ManagerDashboard() {
         </section>
       )}
 
-      {/* Notes tile — opens your dedicated notes page */}
+      {/* Notes tile */}
       <section className="rounded-2xl border border-gray-200 bg-white p-5">
         <Link
           href={`/manager/notes?store=${storeId}`}
@@ -133,17 +145,20 @@ export default function ManagerDashboard() {
               <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V6a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v9Z" />
             </svg>
           </div>
+
           <div>
-            <div className="font-semibold text-gray-900">Notes &amp; Messages</div>
-            <div className="text-sm text-gray-600">Tap to view and send messages</div>
+            <div className="font-semibold text-gray-900">Notes & Messages</div>
+            <div className="text-sm text-gray-600">
+              Tap to view and send messages
+            </div>
           </div>
+
           <span className="text-gray-500">→</span>
         </Link>
       </section>
     </main>
   );
 }
-
 
 
 
