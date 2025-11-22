@@ -324,4 +324,3 @@ function TimerCard({ task, uid, storeId }: { task: any; uid: string; storeId: st
     </div>
   );
 }
-

@@ -1,32 +1,20 @@
-// app/api/set-role/route.ts
-export const runtime = "nodejs";            // ⬅️ needed because we use fs in firebase-admin
+import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
-import { adminAuth, adminDb } from "@/lib/firebase-admin";
+export async function GET() {
+  return NextResponse.json({
+    NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ? "OK" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ? "OK" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ? "OK" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ? "OK" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ? "OK" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ? "OK" : "MISSING",
 
-export async function POST(req: Request) {
-  try {
-    const { email, uid, role, storeId } = await req.json();
-    if (!role || (!email && !uid)) {
-      return NextResponse.json({ error: "Provide role and email or uid" }, { status: 400 });
-    }
+    FIREBASE_ADMIN_PROJECT_ID: process.env.FIREBASE_ADMIN_PROJECT_ID || "MISSING",
+    FIREBASE_ADMIN_CLIENT_EMAIL: process.env.FIREBASE_ADMIN_CLIENT_EMAIL || "MISSING",
 
-    const user = uid ? await adminAuth.getUser(uid) : await adminAuth.getUserByEmail(email);
-
-    await adminAuth.setCustomUserClaims(user.uid, {
-      role,
-      ...(storeId ? { storeId } : {}),
-    });
-
-    // optional: mirror to Firestore
-    await adminDb.collection("users").doc(user.uid).set(
-      { role, store_id: storeId ?? null },
-      { merge: true }
-    );
-
-    return NextResponse.json({ ok: true, uid: user.uid, email: user.email, role, storeId: storeId ?? null });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
-  }
+    FIREBASE_ADMIN_PRIVATE_KEY_START: process.env.FIREBASE_ADMIN_PRIVATE_KEY
+      ? process.env.FIREBASE_ADMIN_PRIVATE_KEY.slice(0, 30)
+      : "MISSING",
+  });
 }
