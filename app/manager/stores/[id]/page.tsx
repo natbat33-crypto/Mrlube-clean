@@ -1,7 +1,9 @@
-// app/manager/stores/[id]/page.tsx
 "use client";
+
+// 🚨 REQUIRED for Vercel to NOT SSR this page
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -16,6 +18,8 @@ import {
   where,
 } from "firebase/firestore";
 import { onIdTokenChanged } from "firebase/auth";
+
+// 🚨 Correct import for assignment
 import { clientAssignTrainee } from "@/app/manager/client-assign";
 
 type Emp = {
@@ -32,10 +36,7 @@ type ManagerGate = {
   source: "employees" | "roster" | null;
 };
 
-async function isActiveManagerForStore(
-  storeId: string,
-  uid: string
-): Promise<ManagerGate> {
+async function isActiveManagerForStore(storeId: string, uid: string): Promise<ManagerGate> {
   const empRef = doc(db, "stores", storeId, "employees", uid);
   const empSnap = await getDoc(empRef);
 
@@ -66,11 +67,8 @@ export default function ManagerStorePage() {
   const storeId = String(params?.id || "");
 
   const [uid, setUid] = useState<string | null>(null);
-  const [empCheck, setEmpCheck] =
-    useState<"check" | "ok" | "missing" | "error">("check");
-  const [empSource, setEmpSource] = useState<"employees" | "roster" | null>(
-    null
-  );
+  const [empCheck, setEmpCheck] = useState<"check" | "ok" | "missing" | "error">("check");
+  const [empSource, setEmpSource] = useState<"employees" | "roster" | null>(null);
 
   const [supervisors, setSupervisors] = useState<Emp[]>([]);
   const [trainees, setTrainees] = useState<Emp[]>([]);
@@ -97,11 +95,7 @@ export default function ManagerStorePage() {
   async function loadRole(role: string): Promise<Emp[]> {
     const coll = collection(db, "stores", storeId, "employees");
     try {
-      const q1 = query(
-        coll,
-        where("active", "==", true),
-        where("role", "==", role)
-      );
+      const q1 = query(coll, where("active", "==", true), where("role", "==", role));
       const s1 = await getDocs(q1);
       let rows = s1.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
 
@@ -111,11 +105,9 @@ export default function ManagerStorePage() {
           .map((d) => ({ uid: d.id, ...(d.data() as any) }))
           .filter(
             (e) =>
-              e.active === true &&
-              String(e.role || "").toLowerCase() === role
+              e.active === true && String(e.role || "").toLowerCase() === role
           );
       }
-
       return rows;
     } catch {
       const all = await getDocs(coll);
@@ -123,8 +115,7 @@ export default function ManagerStorePage() {
         .map((d) => ({ uid: d.id, ...(d.data() as any) }))
         .filter(
           (e) =>
-            e.active === true &&
-            String(e.role || "").toLowerCase() === role
+            e.active === true && String(e.role || "").toLowerCase() === role
         );
     }
   }
@@ -161,10 +152,7 @@ export default function ManagerStorePage() {
           setEmpSource(gate.source);
         } else {
           const me = allList.find((e) => e.uid === uid);
-          const isMgr =
-            me?.active === true &&
-            String(me?.role || "").toLowerCase() === "manager";
-
+          const isMgr = me?.active && String(me?.role || "").toLowerCase() === "manager";
           setEmpCheck(isMgr ? "ok" : "missing");
           setEmpSource(isMgr ? "employees" : null);
         }
@@ -190,7 +178,7 @@ export default function ManagerStorePage() {
     if (!uid || !storeId || !selTrainee || !selSupervisor) return;
     try {
       setStatus("Assigning…");
-      await assignTrainee(storeId, selTrainee, selSupervisor);
+      await clientAssignTrainee(storeId, selTrainee, selSupervisor);
       setStatus("Assigned ✓");
       setTimeout(() => setStatus(""), 1400);
     } catch (e: any) {
@@ -201,11 +189,7 @@ export default function ManagerStorePage() {
 
   const mgrCount = useMemo(
     () =>
-      everyone.filter(
-        (e) =>
-          e.active &&
-          String(e.role || "").toLowerCase() === "manager"
-      ).length,
+      everyone.filter((e) => e.active && String(e.role || "").toLowerCase() === "manager").length,
     [everyone]
   );
 
@@ -226,9 +210,9 @@ export default function ManagerStorePage() {
 
       {debugOn && (
         <div className="text-xs text-gray-500">
-          Debug: store <b>{storeId}</b> • employees <b>{everyone.length}</b> •
-          mgr <b>{mgrCount}</b> • sup <b>{supCount}</b> • trn <b>{trnCount}</b> •
-          auth <b>{uid ? "yes" : "no"}</b> • managerGate{" "}
+          Debug: store <b>{storeId}</b> • employees <b>{everyone.length}</b> • mgr{" "}
+          <b>{mgrCount}</b> • sup <b>{supCount}</b> • trn <b>{trnCount}</b> • auth{" "}
+          <b>{uid ? "yes" : "no"}</b> • managerGate{" "}
           <b>
             {empCheck}
             {empSource ? `:${empSource}` : ""}
@@ -269,8 +253,7 @@ export default function ManagerStorePage() {
               .filter((e) => e.active)
               .map((e) => (
                 <li key={e.uid}>
-                  {e.name || e.email || e.uid} —{" "}
-                  {String(e.role || "").toLowerCase()}
+                  {e.name || e.email || e.uid} — {String(e.role || "").toLowerCase()}
                 </li>
               ))}
           </ul>
@@ -328,9 +311,7 @@ export default function ManagerStorePage() {
               >
                 Assign
               </button>
-              {status && (
-                <span className="text-sm text-gray-600">{status}</span>
-              )}
+              {status && <span className="text-sm text-gray-600">{status}</span>}
             </div>
           </>
         )}
@@ -339,13 +320,7 @@ export default function ManagerStorePage() {
   );
 }
 
-function Block({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="border rounded-2xl bg-white p-5">
       <div className="font-semibold mb-2">{title}</div>
