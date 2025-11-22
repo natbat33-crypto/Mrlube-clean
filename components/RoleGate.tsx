@@ -1,69 +1,73 @@
-// components/RoleGate.tsx
 "use client";
 
 import { ReactNode, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
-import { onIdTokenChanged } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 
-type Props = {
-  /** Preferred: list of allowed roles */
-  allow?: string[];
-  /** Back-compat: single expected role */
-  expectedRole?: string;
+type AllowedRole =
+  | "admin"
+  | "manager"
+  | "supervisor"
+  | "trainee"
+  | "employee";
+
+interface RoleGateProps {
+  allow: AllowedRole[];
   children: ReactNode;
-};
+}
 
 /**
- * Role-based gate.
- * - Reads role from custom claims, then falls back to users/{uid}.role.
- * - If no `allow`/`expectedRole` provided, it doesn't gate (renders children).
+ * SAFE CLIENT ROLE GATE:
+ * • Never returns null unless redirecting
+ * • Shows loader while calculating
+ * • Guarantees no white screen
  */
-export default function RoleGate({ allow, expectedRole, children }: Props) {
-  const [ok, setOk] = useState<boolean>(true); // default permissive if no roles given
-  const [hasRulesChecked, setHasRulesChecked] = useState<boolean>(false);
+export default function RoleGate({ allow, children }: RoleGateProps) {
+  const router = useRouter();
+  const [status, setStatus] = useState<"checking" | "allowed" | "denied">(
+    "checking"
+  );
 
   useEffect(() => {
-    const wanted = allow ?? (expectedRole ? [expectedRole] : undefined);
-
-    // If no roles specified, don't gate
-    if (!wanted || wanted.length === 0) {
-      setOk(true);
-      setHasRulesChecked(true);
-      return;
-    }
-
-    setHasRulesChecked(false);
-    const unsub = onIdTokenChanged(auth, async (u) => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
-        setOk(false);
-        setHasRulesChecked(true);
+        setStatus("denied");
+        router.replace("/auth/login");
         return;
       }
+
       try {
-        // 1) try token claims
-        const t = await u.getIdTokenResult(true);
-        let role = (t.claims?.role as string | undefined) ?? null;
-        // 2) fallback to users/{uid}.role
-        if (!role) {
-          const snap = await getDoc(doc(db, "users", u.uid));
-          if (snap.exists()) {
-            const v = snap.data() as any;
-            if (typeof v?.role === "string") role = v.role;
-          }
+        const snap = await getDoc(doc(db, "users", u.uid));
+        const data = snap.exists() ? snap.data() : {};
+        const role = data?.role;
+
+        if (role && allow.includes(role)) {
+          setStatus("allowed");
+        } else {
+          setStatus("denied");
+          router.replace("/unauthorized");
         }
-        setOk(!!role && wanted.includes(role));
-      } catch {
-        setOk(false);
-      } finally {
-        setHasRulesChecked(true);
+      } catch (err) {
+        console.error("RoleGate error:", err);
+        setStatus("denied");
+        router.replace("/unauthorized");
       }
     });
 
     return () => unsub();
-  }, [allow, expectedRole]);
+  }, [allow, router]);
 
-  if (!hasRulesChecked) return null; // avoid flicker
-  if (!ok) return null;
+  if (status === "checking") {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-500 text-sm">
+        Checking access…
+      </div>
+    );
+  }
+
+  if (status === "denied") return null;
+
   return <>{children}</>;
 }
