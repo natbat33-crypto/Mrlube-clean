@@ -20,7 +20,7 @@ import {
 import { onIdTokenChanged } from "firebase/auth";
 
 // 🚨 Correct import for assignment
-import { clientAssignTrainee } from "@/app/manager/client-assign";
+import { clientAssignTrainee } from "@/lib/client-assign";
 
 type Emp = {
   uid: string;
