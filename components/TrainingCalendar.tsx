@@ -113,7 +113,7 @@ export default function TrainingCalendar({ startDate, endDate, durationDays = 30
               onClick={() => onDayClick(d)}
               className={[
                 "h-10 rounded-md border text-sm flex items-center justify-center relative",
-                isCurrentMonth ? "bg-white border-border text-foreground" : "bg-muted border-border/60 text-muted-foreground",
+                isCurrentMonth ? "bg-white text-foreground" : "bg-muted text-muted-foreground",
                 inRange ? "ring-1 ring-yellow-400" : "",
                 "active:scale-[0.98] transition"
               ].join(" ")}

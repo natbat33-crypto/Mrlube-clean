@@ -12,7 +12,6 @@ module.exports = {
     "bg-background", "text-foreground",
     "text-primary","bg-primary","border-primary",
     "text-primary-foreground","bg-primary/10","border-primary/20",
-    "text-muted-foreground","border-border",
     "max-w-6xl","mx-auto","px-4","lg:px-6","py-6",
     "grid","gap-3","lg:gap-4","grid-cols-1","sm:grid-cols-2","lg:grid-cols-4",
     "opacity-70",
@@ -55,7 +54,6 @@ module.exports = {
       },
 
       borderColor: {
-        // ⭐️ THIS FIX ALLOWS border-border TO WORK
         border: "var(--border)",
       },
 

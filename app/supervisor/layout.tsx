@@ -149,7 +149,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
             }`}
           >
             <div className="min-h-[calc(100vh-6rem)]">{children}</div>
-            <footer className="mt-6 lg:mt-8 pt-4 lg:pt-6 border-t border-border">
+           <footer>
               <div className="text-center text-xs lg:text-sm text-muted-foreground">
                 © {new Date().getFullYear()} Mr. Lube. All rights reserved.
               </div>

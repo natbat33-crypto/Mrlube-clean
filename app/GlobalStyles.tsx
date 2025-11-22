@@ -70,7 +70,6 @@ export default function GlobalStyles() {
 
       /* cards / borders / tints */
       .border{border:1px solid var(--border)}
-      .border-border{border-color:var(--border)}
       .rounded-lg{border-radius:var(--radius)}
       .shadow-sm{box-shadow:var(--shadow-sm)}
       .hover\\:shadow-md:hover{box-shadow:var(--shadow-md)}

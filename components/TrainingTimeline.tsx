@@ -41,7 +41,7 @@ export default function TrainingTimeline({
   return (
     <div className="border border-primary/20 rounded-xl bg-card">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 lg:p-5 border-b border-border">
+      <div className="flex items-center justify-between p-4 lg:p-5 border-b">
         <div className="flex items-center gap-2">
           <CalendarDays className="h-5 w-5 text-primary" />
           <div>
@@ -84,7 +84,7 @@ export default function TrainingTimeline({
       <div className="p-4 lg:p-5">
         <div className="grid gap-3">
           {weeks.map((row, i) => (
-            <div key={i} className="rounded-xl border border-border p-3">
+            <div key={i} className="rounded-xl p-3">
               <div className="text-xs font-semibold text-primary mb-2">Week {i + 1}</div>
               <div className="grid grid-cols-7 gap-2">
                 {row.map((d, j) => {
@@ -96,7 +96,7 @@ export default function TrainingTimeline({
                   const base =
                     "h-10 rounded-md border flex flex-col items-center justify-center text-[11px]";
                   const pastCls = "border-green-300 bg-green-50 text-green-800";
-                  const futureCls = "border-border bg-card text-muted-foreground";
+                  const futureCls = "bg-card text-muted-foreground";
                   const todayRing = "ring-2 ring-primary";
 
                   return (

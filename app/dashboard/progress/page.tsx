@@ -454,8 +454,7 @@ export default function ProgressPage() {
                       className={[
                         "h-8 rounded-md border text-sm flex items-center justify-center",
                         shaded
-                          ? "bg-blue-100 border-blue-200"
-                          : "border-border",
+                          ? "bg-blue-100 border-blue-200" : "",                     
                         isToday ? "ring-1 ring-primary" : "",
                         isDue
                           ? "bg-yellow-100 border-yellow-300 font-semibold"
