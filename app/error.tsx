@@ -3,24 +3,24 @@
 
 import { useEffect } from "react";
 
-export default function GlobalError({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string };
-  reset: () => void;
-}) {
+export default function GlobalError({ error, reset }: any) {
   useEffect(() => {
     console.error("GlobalError:", error);
   }, [error]);
 
   return (
-    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif", padding: 24 }}>
+    <div
+      style={{
+        fontFamily:
+          "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+        padding: 24,
+      }}
+    >
       <h1 style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>
         Something went wrong
       </h1>
       <p style={{ color: "#556070", marginBottom: 16 }}>
-        The page crashed. The exact error is in the browser console so we can fix it fast.
+        The page crashed. Check the browser console for details so we can fix it fast.
       </p>
       <button
         onClick={() => reset()}
@@ -36,10 +36,14 @@ export default function GlobalError({
       >
         Try again
       </button>
-      <a href="/debug" style={{ marginLeft: 12, color: "#0b53a6", fontWeight: 700 }}>
+      <a
+        href="/debug"
+        style={{ marginLeft: 12, color: "#0b53a6", fontWeight: 700 }}
+      >
         Open /debug
       </a>
     </div>
   );
 }
+
 
