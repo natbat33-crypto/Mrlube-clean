@@ -1,4 +1,3 @@
-// app/supervisor/page.tsx
 "use client";
 export const dynamic = "force-dynamic";
 
@@ -38,6 +37,7 @@ type WeekSummary = {
   approved: number;
 };
 
+/* ------------------ UID helper ------------------ */
 function pickReviewUid(): string {
   if (typeof window === "undefined") return "demo-user";
   return (
@@ -47,7 +47,7 @@ function pickReviewUid(): string {
   );
 }
 
-/* ---------- shared store resolver (matches week1–3 pattern) ---------- */
+/* ------------------ fallback store resolver ------------------ */
 async function resolveStoreId(): Promise<string> {
   const u = auth.currentUser;
   if (u) {
@@ -71,17 +71,20 @@ async function resolveStoreId(): Promise<string> {
   return "";
 }
 
+/* ============================================================
+   ================= SUPERVISOR PAGE ==========================
+   ============================================================ */
+
 export default function SupervisorPage() {
   const [uid, setUid] = useState<string>(() => pickReviewUid());
-
   const [weeks, setWeeks] = useState<WeekSummary[]>([
     { week: 1, waiting: 0, reviewed: 0, approved: 0 },
     { week: 2, waiting: 0, reviewed: 0, approved: 0 },
     { week: 3, waiting: 0, reviewed: 0, approved: 0 },
     { week: 4, waiting: 0, reviewed: 0, approved: 0 },
   ]);
-
   const [loading, setLoading] = useState(true);
+
   const [storeId, setStoreId] = useState<string | null>(null);
   const [resolvingStore, setResolvingStore] = useState(true);
 
@@ -92,25 +95,26 @@ export default function SupervisorPage() {
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  /* ---------- keep ?as= override for deep review (not used in tiles) ---------- */
+  /* keep ?as= override */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
 
+  /* remember reviewer uid */
   useEffect(() => {
     if (uid && typeof window !== "undefined") {
       localStorage.setItem("reviewUid", uid);
     }
   }, [uid]);
 
-  /* ---------- explicit store override (?store=) ---------- */
+  /* explicit store override */
   useEffect(() => {
     if (!storeOverride) return;
     setStoreId(String(storeOverride));
     setResolvingStore(false);
   }, [storeOverride]);
 
-  /* ---------- if ?as=<uid>, try to read that user's storeId ---------- */
+  /* resolve store from ?as user */
   useEffect(() => {
     if (!asUid) return;
     (async () => {
@@ -126,7 +130,7 @@ export default function SupervisorPage() {
     })();
   }, [asUid]);
 
-  /* ---------- prefer provider store when no overrides ---------- */
+  /* use provider store when available */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) {
@@ -135,7 +139,7 @@ export default function SupervisorPage() {
     }
   }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
 
-  /* ---------- fallback: infer store from user/employees/supervisorUid ---------- */
+  /* fallback store resolver */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) return;
@@ -164,7 +168,6 @@ export default function SupervisorPage() {
           let sid: string | null =
             v?.storeId != null ? String(v.storeId) : null;
 
-          // infer from /stores/*/employees/{uid}
           if (!sid) {
             try {
               const storesSnap = await getDocs(collection(db, "stores"));
@@ -178,12 +181,9 @@ export default function SupervisorPage() {
                   break;
                 }
               }
-            } catch {
-              /* ignore */
-            }
+            } catch {}
           }
 
-          // infer from store.supervisorUid
           if (!sid) {
             try {
               const qs = await getDocs(
@@ -194,9 +194,7 @@ export default function SupervisorPage() {
                 )
               );
               if (!qs.empty) sid = qs.docs[0].id;
-            } catch {
-              /* ignore */
-            }
+            } catch {}
           }
 
           setStoreId(sid);
@@ -212,86 +210,35 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  /* ---------- aggregate counts across all trainees in this store ---------- */
+  /* weekly tallies */
   useEffect(() => {
     let alive = true;
-
-    async function tally() {
-      setLoading(true);
-
-      // ensure we have a storeId (auto connect)
-      let sid = storeId;
-      if (!sid) {
-        sid = await resolveStoreId();
-        if (!alive) return;
-        if (sid) setStoreId(sid);
-      }
-
-      if (!sid) {
-        if (!alive) return;
-        setWeeks([
-          { week: 1, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 2, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 3, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 4, waiting: 0, reviewed: 0, approved: 0 },
-        ]);
-        setLoading(false);
-        return;
-      }
-
-      const tallies: Record<number, WeekSummary> = {
-        1: { week: 1, waiting: 0, reviewed: 0, approved: 0 },
-        2: { week: 2, waiting: 0, reviewed: 0, approved: 0 },
-        3: { week: 3, waiting: 0, reviewed: 0, approved: 0 },
-        4: { week: 4, waiting: 0, reviewed: 0, approved: 0 },
-      };
-
+    (async () => {
       try {
-        const usersSnap = await getDocs(collection(db, "users"));
-        for (const user of usersSnap.docs) {
-          const traineeId = user.id;
-          const progSnap = await getDocs(
-            collection(db, "users", traineeId, "progress")
-          );
+        setLoading(true);
+        const snap = await getDocs(collection(db, "users", uid, "progress"));
 
-          for (const d of progSnap.docs) {
-            const data = d.data() as {
-              path?: string;
-              done?: boolean;
-              approved?: boolean;
-              storeId?: string;
-              week?: string;
-            };
+        const tallies: Record<number, WeekSummary> = {
+          1: { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+          2: { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+          3: { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+          4: { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+        };
 
-            if (!data?.done) continue;
-            if (data.storeId !== sid) continue;
+        for (const d of snap.docs) {
+          const data = d.data() as {
+            path?: string;
+            done?: boolean;
+            approved?: boolean;
+          };
+          const wkMatch = (data.path || "").match(/modules\/week(\d)\//i);
+          if (!wkMatch) continue;
 
-            // detect week from explicit week OR from path
-            let wkNumber: 1 | 2 | 3 | 4 | null = null;
-
-            if (typeof data.week === "string") {
-              if (data.week === "week1") wkNumber = 1;
-              else if (data.week === "week2") wkNumber = 2;
-              else if (data.week === "week3") wkNumber = 3;
-              else if (data.week === "week4") wkNumber = 4;
-            }
-
-            if (!wkNumber && data.path) {
-              const wkMatch = data.path.match(/modules\/week(\d)\//i);
-              if (wkMatch) {
-                const n = Number(wkMatch[1]);
-                if (n === 1 || n === 2 || n === 3 || n === 4) {
-                  wkNumber = n as 1 | 2 | 3 | 4;
-                }
-              }
-            }
-
-            if (!wkNumber) continue;
-
-            const bucket = tallies[wkNumber];
-            bucket.reviewed += 1;
-            if (data.approved) bucket.approved += 1;
-            else bucket.waiting += 1;
+          const wk = Number(wkMatch[1]) as 1 | 2 | 3 | 4;
+          if (data.done) {
+            tallies[wk].reviewed += 1;
+            if (data.approved) tallies[wk].approved += 1;
+            else tallies[wk].waiting += 1;
           }
         }
 
@@ -308,15 +255,18 @@ export default function SupervisorPage() {
       } finally {
         if (alive) setLoading(false);
       }
-    }
+    })();
 
-    tally();
     return () => {
       alive = false;
     };
-  }, [storeId]);
+  }, [uid]);
 
   const checking = resolvingStore || storeCtxLoading;
+
+  /* ============================================================
+     ===================== RENDER UI =============================
+     ============================================================ */
 
   return (
     <div className="space-y-6">
@@ -332,7 +282,7 @@ export default function SupervisorPage() {
         {weeks.map((w) => (
           <Link
             key={w.week}
-            href={`/supervisor/week${w.week}`}
+            href={`/supervisor/week${w.week}${uid ? `?as=${encodeURIComponent(uid)}` : ""}`}
             className="block focus:outline-none"
           >
             <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
@@ -341,20 +291,16 @@ export default function SupervisorPage() {
                 <CardDescription>
                   {loading
                     ? "Loading…"
-                    : `${w.waiting} task${w.waiting === 1 ? "" : "s"} pending approval`}
+                    : `${w.waiting} pending, ${w.approved}/${w.reviewed} approved`}
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">
-                  {loading ? "—" : `${w.approved}/${w.reviewed} approved`}
-                </p>
-              </CardContent>
+              <CardContent></CardContent>
             </Card>
           </Link>
         ))}
       </div>
 
-      {/* Trainees list (unchanged) */}
+      {/* Trainees list */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
@@ -414,6 +360,7 @@ export default function SupervisorPage() {
     </div>
   );
 }
+
 
 
 
