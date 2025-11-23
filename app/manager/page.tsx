@@ -38,17 +38,39 @@ export default function ManagerDashboard() {
       let sid: string | null = null;
 
       try {
-        // 1) users/{uid}
+        // --- 1) users/{uid}
         const userSnap = await getDoc(doc(db, "users", u.uid));
         if (userSnap.exists()) {
           const d = userSnap.data() as any;
           if (d?.storeId) sid = String(d.storeId);
         }
 
-        // 2) fallback autoConnect
+        // --- 2) fallback: autoConnect()
         if (!sid) {
           const res = await autoConnect();
           if (res?.storeId) sid = String(res.storeId);
+        }
+
+        // --- ⭐ 3) FINAL FIX: scan employees table
+        if (!sid) {
+          try {
+            const storesSnap = await getDocs(collection(db, "stores"));
+            for (const s of storesSnap.docs) {
+              const empSnap = await getDocs(
+                collection(db, "stores", s.id, "employees")
+              );
+              const found = empSnap.docs.find((e) => {
+                const d = e.data() as any;
+                return d.uid === u.uid && d.active !== false;
+              });
+              if (found) {
+                sid = s.id;
+                break;
+              }
+            }
+          } catch (err) {
+            console.error("employees scan failed:", err);
+          }
         }
       } catch (err) {
         /* ignore */
@@ -56,7 +78,7 @@ export default function ManagerDashboard() {
 
       setStoreId(sid);
 
-      // 3) Load store data safely
+      // --- Load store data safely
       if (sid) {
         const storeRef = doc(db, "stores", sid);
         let storeData: Store | null = null;
@@ -67,7 +89,7 @@ export default function ManagerDashboard() {
           if (root.exists()) {
             storeData = root.data() as Store;
           } else {
-            // fallback: build store object based on employees
+            // fallback: build store from employees
             const empColl = collection(db, "stores", sid, "employees");
             const empDocs = await getDocs(empColl);
 
@@ -165,12 +187,14 @@ export default function ManagerDashboard() {
               stroke="currentColor"
               strokeWidth="1.7"
             >
-              <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V6a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v9Z" />
+              <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V6a4 4 0 0 1 4-4h10a 4 4 0 0 1 4 4v9Z" />
             </svg>
           </div>
 
           <div>
-            <div className="font-semibold text-gray-900">Notes & Messages</div>
+            <div className="font-semibold text-gray-900">
+              Notes & Messages
+            </div>
             <div className="text-sm text-gray-600">
               Tap to view and send messages
             </div>
