@@ -1,44 +1,53 @@
-// app/supervisor/layout.tsx
 "use client";
 
 import * as React from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { Menu, X, Users, ClipboardCheck, LogOut, ChevronDown } from "lucide-react";
+import { usePathname } from "next/navigation";
+import {
+  Menu,
+  X,
+  Users,
+  ClipboardCheck,
+  LogOut,
+  ChevronDown,
+} from "lucide-react";
 import { auth } from "@/lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
+import { signOut } from "firebase/auth";
 import RoleGate from "@/components/RoleGate";
 
-export default function SupervisorLayout({ children }: { children: ReactNode }) {
+export default function SupervisorLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const pathname = usePathname();
-  const router = useRouter();
   const [open, setOpen] = React.useState(false);
 
-  // Open sidebar by default on desktop
+  // Open sidebar automatically on desktop
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1024) setOpen(true);
+    if (typeof window !== "undefined" && window.innerWidth >= 1024)
+      setOpen(true);
   }, []);
 
-  // Auth guard — if user becomes null, go back to login
-  React.useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      if (!u) router.replace("/auth/login");
-    });
-    return () => unsub();
-  }, [router]);
-
-  const NavLink = ({ href, children }: { href: string; children: ReactNode }) => {
+  const NavLink = ({
+    href,
+    children,
+  }: {
+    href: string;
+    children: ReactNode;
+  }) => {
     const active = pathname === href;
     return (
       <Link
         href={href}
         onClick={() => setOpen(false)}
-        className={`flex items-center gap-3 px-3 py-3 lg:py-2 rounded-lg transition-colors text-sm lg:text-base ${
-          active
-            ? "bg-primary-foreground/20 text-primary-foreground"
-            : "text-primary-foreground/80 hover:text-primary-foreground hover:bg-primary-foreground/10"
-        }`}
+        className={`flex items-center gap-3 px-3 py-3 lg:py-2 rounded-lg transition-colors text-sm lg:text-base
+          ${
+            active
+              ? "bg-[#e8eef9] text-[#0b53a6] font-semibold"
+              : "text-[#1b1b1b]/80 hover:bg-[#e8eef9] hover:text-[#0b53a6]"
+          }`}
       >
         {children}
       </Link>
@@ -54,9 +63,9 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
 
   return (
     <RoleGate allow={["supervisor", "admin"]}>
-      <div className="min-h-screen bg-background">
-        {/* Top bar */}
-        <div className="h-14 bg-primary text-primary-foreground sticky top-0 z-50 shadow-sm">
+      <div className="min-h-screen bg-[#f5f5f5]">
+        {/* TOP BAR — matches screenshot */}
+        <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">
           <div className="h-full px-3 flex items-center justify-between">
             {/* Brand */}
             <div className="flex items-center gap-2 sm:gap-3">
@@ -70,9 +79,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
 
             <button
               onClick={() => setOpen((v) => !v)}
-              className="p-2 rounded hover:bg-primary-foreground/10"
-              aria-label="Toggle menu"
-              title={open ? "Hide menu" : "Show menu"}
+              className="p-2 rounded hover:bg-white/20"
             >
               {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
@@ -80,9 +87,10 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         </div>
 
         <div className="relative">
-          {/* Sidebar */}
+          {/* SIDEBAR — colors fixed */}
           <aside
-            className={`fixed left-0 z-40 w-72 bg-primary text-primary-foreground shadow-lg
+            className={`fixed left-0 z-40 w-72 bg-white text-[#1b1b1b]
+                        border-r border-gray-200
                         transition-transform duration-300 ease-in-out
                         top-14 bottom-0
                         ${open ? "translate-x-0" : "-translate-x-full"}
@@ -99,13 +107,14 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </ul>
 
               <div className="mt-4">
-                <div className="w-full flex items-center justify-between px-3 py-3 lg:py-2 rounded-lg text-sm lg:text-base text-primary-foreground/80">
+                <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm lg:text-base text-[#1b1b1b]/80">
                   <span className="inline-flex items-center gap-3">
                     <ClipboardCheck className="h-5 w-5 lg:h-4 lg:w-4" />
                     Review
                   </span>
                   <ChevronDown className="h-4 w-4 opacity-60" />
                 </div>
+
                 <ul className="mt-1 pl-9 space-y-1">
                   {reviewLinks.map(({ href, label }) => {
                     const active = pathname === href;
@@ -116,8 +125,8 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
                           onClick={() => setOpen(false)}
                           className={`block px-3 py-2 rounded-lg text-sm lg:text-base transition-colors ${
                             active
-                              ? "bg-primary-foreground/20 text-primary-foreground"
-                              : "text-primary-foreground/80 hover:text-primary-foreground hover:bg-primary-foreground/10"
+                              ? "bg-[#e8eef9] text-[#0b53a6] font-semibold"
+                              : "text-[#1b1b1b]/80 hover:bg-[#e8eef9] hover:text-[#0b53a6]"
                           }`}
                         >
                           {label}
@@ -128,29 +137,35 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
                 </ul>
               </div>
 
-              {/* ✅ Sign out goes to logout route (no blank, no race) */}
-              <Link
-                href="/auth/logout"
-                className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-sm lg:text-base text-red-100 hover:bg-red-500/20"
+              {/* Sign out */}
+              <button
+                onClick={() => signOut(auth)}
+                className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-sm lg:text-base text-red-600 hover:bg-red-100"
               >
                 <LogOut className="h-5 w-5" />
                 Sign out
-              </Link>
+              </button>
             </div>
           </aside>
 
           {/* Click-away overlay */}
-          {open && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setOpen(false)} />}
+          {open && (
+            <div
+              className="fixed inset-0 bg-black/40 z-30 lg:hidden"
+              onClick={() => setOpen(false)}
+            />
+          )}
 
-          {/* Content */}
+          {/* CONTENT AREA — light, centered, matches screenshot */}
           <main
-            className={`relative z-10 p-4 lg:p-6 transition-[margin] duration-300 ${
+            className={`relative z-10 p-4 lg:p-8 transition-[margin] duration-300 ${
               open ? "lg:ml-64" : "lg:ml-0"
             }`}
           >
             <div className="min-h-[calc(100vh-6rem)]">{children}</div>
-           <footer>
-              <div className="text-center text-xs lg:text-sm text-muted-foreground">
+
+            <footer className="mt-8 pt-6 border-t border-gray-200">
+              <div className="text-center text-xs lg:text-sm text-gray-600">
                 © {new Date().getFullYear()} Mr. Lube. All rights reserved.
               </div>
             </footer>
