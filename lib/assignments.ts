@@ -1,7 +1,10 @@
 // lib/assignments.ts
 // Writes the assignment to /stores/{storeId}/trainees/{traineeUid}
-// to match the dashboards' reader (queries by supervisorId).
-"use server";
+// This file MUST be client-side because we use auth + Firestore client SDK.
+
+// ❌ DO NOT USE: "use server"
+
+// Firestore client SDK
 import { doc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 
@@ -11,18 +14,20 @@ export async function assignTrainee(
   traineeUid: string,
   supervisorUid: string
 ) {
-  const store = String(storeId); // MUST be a string ("24"), not number 24
+  const store = String(storeId);
+
+  if (!auth.currentUser) {
+    throw new Error("Not signed in");
+  }
+
   const ref = doc(db, "stores", store, "trainees", traineeUid);
 
-  if (!auth.currentUser) throw new Error("Not signed in");
-
-  // Payload matches the Firestore rules exactly
   await setDoc(
     ref,
     {
-      storeId: store,                  // string
-      traineeId: traineeUid,           // equals doc id
-      supervisorId: supervisorUid,     // dashboards query by this
+      storeId: store,
+      traineeId: traineeUid,
+      supervisorId: supervisorUid,
       active: true,
       createdBy: auth.currentUser.uid,
       createdAt: serverTimestamp(),
@@ -32,7 +37,7 @@ export async function assignTrainee(
   );
 }
 
-/** Remove an assignment (optional helper). */
+/** Remove an assignment. */
 export async function unassignTrainee(
   storeId: string | number,
   traineeUid: string
@@ -42,6 +47,5 @@ export async function unassignTrainee(
   await deleteDoc(ref);
 }
 
-// Support both named and default imports
-export default { assignTrainee, unassignTrainee };
-
+// ✔ Named exports ONLY — no default export in client utility files
+export { assignTrainee, unassignTrainee };
