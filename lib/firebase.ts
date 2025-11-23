@@ -13,11 +13,6 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// --- DEV ERROR HELPER ---
-Object.entries(firebaseConfig).forEach(([key, val]) => {
-  if (!val) console.error(` Missing Firebase ENV: ${key}`);
-});
-
 // --- SINGLETON APP ---
 const app: FirebaseApp =
   getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
