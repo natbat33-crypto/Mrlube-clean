@@ -75,13 +75,10 @@ function LoginContent() {
     }
 
     if (role === "manager") {
-      if (storeId) {
-        router.replace(`/manager/stores/${storeId}`);
-      } else {
-        router.replace("/manager");
-      }
-      return;
-    }
+  router.replace("/manager");
+  return;
+}
+
 
     if (role === "supervisor") {
       router.replace("/supervisor");

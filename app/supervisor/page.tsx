@@ -71,7 +71,14 @@ async function resolveStoreId(): Promise<string> {
 }
 
 export default function SupervisorPage() {
-  const [uid, setUid] = useState<string>(() => pickReviewUid());
+  // ⭐ FIX: we wait for Firebase to give UID, not demo-user
+  const [uid, setUid] = useState<string | null>(null);
+
+  useEffect(() => {
+    return onIdTokenChanged(auth, (u) => {
+      setUid(u?.uid ?? null);
+    });
+  }, []);
 
   const [weeks, setWeeks] = useState<WeekSummary[]>([
     { week: 1, waiting: 0, reviewed: 0, approved: 0 },
@@ -86,7 +93,6 @@ export default function SupervisorPage() {
 
   const { storeId: resolvedStoreId, loading: storeCtxLoading } = useStoreCtx();
 
-  // 🔥 RUN TRAINEE HOOK ONLY WHEN STOREID IS READY
   const trainees = storeId ? useSupervisorTrainees(storeId) : [];
 
   const searchParams = useSearchParams();
@@ -202,7 +208,6 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  // 🔥 PROTECT AGAINST EARLY RENDERING
   if (!uid) {
     return (
       <div className="p-4 text-sm text-gray-600">Loading supervisor…</div>
@@ -275,9 +280,7 @@ export default function SupervisorPage() {
               const wkMatch = data.path.match(/modules\/week(\d)\//i);
               if (wkMatch) {
                 const n = Number(wkMatch[1]);
-                if (n === 1 || n === 2 || n === 3 || n === 4) {
-                  wkNumber = n as 1 | 2 | 3 | 4;
-                }
+                if (n >= 1 && n <= 4) wkNumber = n as 1 | 2 | 3 | 4;
               }
             }
 
