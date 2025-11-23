@@ -38,40 +38,8 @@ type WeekSummary = {
   approved: number;
 };
 
-function pickReviewUid(): string {
-  if (typeof window === "undefined") return "demo-user";
-  return (
-    localStorage.getItem("reviewUid") ||
-    localStorage.getItem("uid") ||
-    "demo-user"
-  );
-}
-
-async function resolveStoreId(): Promise<string> {
-  const u = auth.currentUser;
-  if (u) {
-    const tok = await u.getIdTokenResult(true);
-    if (tok?.claims?.storeId) return String(tok.claims.storeId);
-  }
-
-  if (typeof window !== "undefined") {
-    const ls = localStorage.getItem("storeId");
-    if (ls) return String(ls);
-  }
-
-  if (u) {
-    const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
-    for (const sid of peek) {
-      const snap = await getDoc(doc(db, "stores", sid, "employees", u.uid));
-      if (snap.exists()) return sid;
-    }
-  }
-
-  return "";
-}
-
+// -------- REAL UID ONLY — NO DEMO, NO OVERRIDES ----------
 export default function SupervisorPage() {
-  // ⭐ FIX: we wait for Firebase to give UID, not demo-user
   const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {
@@ -92,44 +60,34 @@ export default function SupervisorPage() {
   const [resolvingStore, setResolvingStore] = useState(true);
 
   const { storeId: resolvedStoreId, loading: storeCtxLoading } = useStoreCtx();
-
   const trainees = storeId ? useSupervisorTrainees(storeId) : [];
 
   const searchParams = useSearchParams();
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  useEffect(() => {
-    if (asUid && asUid !== uid) setUid(asUid);
-  }, [asUid, uid]);
-
-  useEffect(() => {
-    if (uid && typeof window !== "undefined") {
-      localStorage.setItem("reviewUid", uid);
-    }
-  }, [uid]);
-
+  // -------- STORE OVERRIDE ----------
   useEffect(() => {
     if (!storeOverride) return;
     setStoreId(String(storeOverride));
     setResolvingStore(false);
   }, [storeOverride]);
 
+  // -------- PICK STORE FROM asUid WHEN REVIEWING ----------
   useEffect(() => {
     if (!asUid) return;
+
     (async () => {
       setResolvingStore(true);
-      try {
-        const snap = await getDoc(doc(db, "users", asUid));
-        const v: any = snap.exists() ? snap.data() : null;
-        const sid = v?.storeId ?? null;
-        setStoreId(sid != null ? String(sid) : null);
-      } finally {
-        setResolvingStore(false);
-      }
+      const snap = await getDoc(doc(db, "users", asUid));
+      const v: any = snap.exists() ? snap.data() : null;
+      const sid = v?.storeId ?? null;
+      setStoreId(sid ? String(sid) : null);
+      setResolvingStore(false);
     })();
   }, [asUid]);
 
+  // -------- PROVIDER STORE WHEN AVAILABLE ----------
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) {
@@ -138,6 +96,7 @@ export default function SupervisorPage() {
     }
   }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
 
+  // -------- FALLBACK: INFERS STORE FROM EMPLOYEES / SUPERVISOR ----------
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) return;
@@ -159,47 +118,36 @@ export default function SupervisorPage() {
       setResolvingStore(true);
       const userRef = doc(db, "users", u.uid);
 
-      stopUserListener = onSnapshot(
-        userRef,
-        async (snap) => {
-          const v: any = snap.exists() ? snap.data() : null;
-          let sid: string | null =
-            v?.storeId != null ? String(v.storeId) : null;
+      stopUserListener = onSnapshot(userRef, async (snap) => {
+        const v: any = snap.exists() ? snap.data() : null;
+        let sid: string | null = v?.storeId ?? null;
 
-          if (!sid) {
-            try {
-              const storesSnap = await getDocs(collection(db, "stores"));
-              for (const s of storesSnap.docs) {
-                const empRef = doc(db, "stores", s.id, "employees", u.uid);
-                const empSnap = await getDoc(empRef);
-                if (empSnap.exists()) {
-                  const data: any = empSnap.data();
-                  if (data?.active === false) continue;
-                  sid = s.id;
-                  break;
-                }
-              }
-            } catch {}
+        if (!sid) {
+          const storesSnap = await getDocs(collection(db, "stores"));
+          for (const s of storesSnap.docs) {
+            const empRef = doc(db, "stores", s.id, "employees", u.uid);
+            const empSnap = await getDoc(empRef);
+            if (empSnap.exists() && empSnap.data()?.active !== false) {
+              sid = s.id;
+              break;
+            }
           }
+        }
 
-          if (!sid) {
-            try {
-              const qs = await getDocs(
-                query(
-                  collection(db, "stores"),
-                  where("supervisorUid", "==", u.uid),
-                  limit(1)
-                )
-              );
-              if (!qs.empty) sid = qs.docs[0].id;
-            } catch {}
-          }
+        if (!sid) {
+          const qs = await getDocs(
+            query(
+              collection(db, "stores"),
+              where("supervisorUid", "==", u.uid),
+              limit(1)
+            )
+          );
+          if (!qs.empty) sid = qs.docs[0].id;
+        }
 
-          setStoreId(sid);
-          setResolvingStore(false);
-        },
-        () => setResolvingStore(false)
-      );
+        setStoreId(sid);
+        setResolvingStore(false);
+      });
     });
 
     return () => {
@@ -208,12 +156,14 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
+  // -------- BLOCK UNTIL UID EXISTS ----------
   if (!uid) {
     return (
       <div className="p-4 text-sm text-gray-600">Loading supervisor…</div>
     );
   }
 
+  // -------- BLOCK UNTIL STORE IS KNOWN ----------
   if (resolvingStore) {
     return (
       <div className="p-4 text-sm text-gray-600">
@@ -222,21 +172,14 @@ export default function SupervisorPage() {
     );
   }
 
+  // -------- TALLY LOGIC (unchanged) ----------
   useEffect(() => {
     let alive = true;
 
     async function tally() {
       setLoading(true);
 
-      let sid = storeId;
-      if (!sid) {
-        sid = await resolveStoreId();
-        if (!alive) return;
-        if (sid) setStoreId(sid);
-      }
-
-      if (!sid) {
-        if (!alive) return;
+      if (!storeId) {
         setWeeks([
           { week: 1, waiting: 0, reviewed: 0, approved: 0 },
           { week: 2, waiting: 0, reviewed: 0, approved: 0 },
@@ -265,23 +208,17 @@ export default function SupervisorPage() {
           for (const d of progSnap.docs) {
             const data = d.data() as any;
             if (!data?.done) continue;
-            if (data.storeId !== sid) continue;
+            if (data.storeId !== storeId) continue;
 
             let wkNumber: 1 | 2 | 3 | 4 | null = null;
 
             if (typeof data.week === "string") {
-              if (data.week === "week1") wkNumber = 1;
-              else if (data.week === "week2") wkNumber = 2;
-              else if (data.week === "week3") wkNumber = 3;
-              else if (data.week === "week4") wkNumber = 4;
+              wkNumber = parseInt(data.week.replace("week", "")) as any;
             }
 
             if (!wkNumber && data.path) {
-              const wkMatch = data.path.match(/modules\/week(\d)\//i);
-              if (wkMatch) {
-                const n = Number(wkMatch[1]);
-                if (n >= 1 && n <= 4) wkNumber = n as 1 | 2 | 3 | 4;
-              }
+              const wkMatch = data.path.match(/week(\d)/i);
+              if (wkMatch) wkNumber = Number(wkMatch[1]) as any;
             }
 
             if (!wkNumber) continue;
@@ -293,16 +230,15 @@ export default function SupervisorPage() {
           }
         }
 
-        if (!alive) return;
-        setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
+        if (alive) setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
       } catch {
-        if (!alive) return;
-        setWeeks([
-          { week: 1, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 2, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 3, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 4, waiting: 0, reviewed: 0, approved: 0 },
-        ]);
+        if (alive)
+          setWeeks([
+            { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+            { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+            { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+            { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+          ]);
       } finally {
         if (alive) setLoading(false);
       }
@@ -325,6 +261,7 @@ export default function SupervisorPage() {
         </p>
       </header>
 
+      {/* Week cards */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {weeks.map((w) => (
           <Link
@@ -351,6 +288,7 @@ export default function SupervisorPage() {
         ))}
       </div>
 
+      {/* Trainee list */}
       {storeId && trainees && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
@@ -378,6 +316,7 @@ export default function SupervisorPage() {
         </div>
       )}
 
+      {/* Notes card */}
       {checking ? (
         <div className="rounded-xl border bg-white/60 p-4 text-sm text-gray-600">
           Checking store assignment…
