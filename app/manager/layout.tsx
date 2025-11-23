@@ -11,15 +11,21 @@ import RoleGate from "@/components/RoleGate";
 
 export default function ManagerLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false);
+
+  // IMPORTANT: Always send manager to dashboard, not store page
+  // This prevents the automatic redirect to /manager/stores/{id}
   const [storeHref, setStoreHref] = React.useState<string>("/manager");
+
   const router = useRouter();
 
   // Open sidebar by default on desktop
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1024) setOpen(true);
+    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+      setOpen(true);
+    }
   }, []);
 
-  //  Guard: if user becomes null, bounce to login
+  // Guard: if user becomes null, send to login
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) router.replace("/auth/login");
@@ -27,16 +33,15 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
     return () => unsub();
   }, [router]);
 
-  // Resolve manager's store link from custom claim
+  // FIX: Prevent store redirect — ALWAYS set menu link to /manager
   React.useEffect(() => {
     const unsub = onIdTokenChanged(auth, async (u) => {
       if (!u) {
         setStoreHref("/manager");
         return;
       }
-      const token = await u.getIdTokenResult(true);
-      const sid = token.claims?.storeId as string | undefined;
-      setStoreHref(sid ? `/manager/stores/${sid}` : "/manager");
+      // Always point to dashboard — never redirect to /manager/stores/{id}
+      setStoreHref("/manager");
     });
     return () => unsub();
   }, []);
@@ -70,7 +75,11 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
                         ${open ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}
           >
             <div className="h-full flex flex-col p-4">
-              <div className="text-xs uppercase tracking-wide opacity-80 mb-2">Navigation</div>
+              <div className="text-xs uppercase tracking-wide opacity-80 mb-2">
+                Navigation
+              </div>
+
+              {/* Sidebar Link now safely points to Dashboard */}
               <nav className="flex-1 space-y-2">
                 <Link
                   href={storeHref}
@@ -81,7 +90,7 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
                 </Link>
               </nav>
 
-              {/* ✅ Sign out goes to /auth/logout (that page signs out + redirects) */}
+              {/* Sign out */}
               <Link
                 href="/auth/logout"
                 className="mt-auto w-full text-left px-3 py-2 rounded hover:bg-red-500/20 flex items-center gap-2 text-red-100"
@@ -91,7 +100,7 @@ export default function ManagerLayout({ children }: { children: React.ReactNode 
             </div>
           </aside>
 
-          {/* Click-away overlay (mobile only) */}
+          {/* Mobile click-away overlay */}
           {open && (
             <div
               className="fixed inset-0 bg-black/50 z-20 lg:hidden"

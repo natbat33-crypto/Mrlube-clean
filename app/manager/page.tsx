@@ -1,25 +1,99 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { onAuthStateChanged, onIdTokenChanged } from "firebase/auth";
+import {
+  doc,
+  getDoc,
+  getDocs,
+  collection,
+  query,
+  where,
+} from "firebase/firestore";
+import { assignTrainee } from "@/lib/assignments";
 
+/* ---------- types ---------- */
+type Emp = {
+  uid: string;
+  role?: string;
+  name?: string;
+  email?: string;
+  active?: boolean;
+  storeId?: string | number;
+};
+
+type Store = {
+  number: number;
+  name: string;
+  address: string;
+};
+
+type ManagerGate = {
+  ok: boolean;
+  source: "employees" | "roster" | null;
+};
+
+/* ---------- manager gate ---------- */
+async function isActiveManagerForStore(
+  storeId: string,
+  uid: string
+): Promise<ManagerGate> {
+  // employees collection
+  const empRef = doc(db, "stores", storeId, "employees", uid);
+  const empSnap = await getDoc(empRef);
+  if (empSnap.exists()) {
+    const d = empSnap.data() as any;
+    const role = String(d.role || d.title || "").toLowerCase();
+    if (role === "manager" && d.active !== false) {
+      return { ok: true, source: "employees" };
+    }
+  }
+
+  // roster fallback
+  const rosRef = doc(db, "stores", storeId, "roster", uid);
+  const rosSnap = await getDoc(rosRef);
+  if (rosSnap.exists()) {
+    const d = rosSnap.data() as any;
+    const role = String(d.role || d.title || "").toLowerCase();
+    if (role === "manager" && d.active !== false) {
+      return { ok: true, source: "roster" };
+    }
+  }
+
+  return { ok: false, source: null };
+}
+
+/* ===========================================================
+   MANAGER DASHBOARD (FINAL MERGED)
+   =========================================================== */
 export default function ManagerDashboard() {
   const [uid, setUid] = useState<string | null>(null);
   const [storeId, setStoreId] = useState<string | null>(null);
-  const [store, setStore] = useState<any>(null);
+  const [store, setStore] = useState<Store | null>(null);
+
+  // store staff
+  const [supervisors, setSupervisors] = useState<Emp[]>([]);
+  const [trainees, setTrainees] = useState<Emp[]>([]);
+  const [everyone, setEveryone] = useState<Emp[]>([]);
+
+  // manager gate
+  const [empCheck, setEmpCheck] =
+    useState<"check" | "ok" | "missing" | "error">("check");
+  const [empSource, setEmpSource] = useState<"employees" | "roster" | null>(
+    null
+  );
+
+  // assignment panel
+  const [selTrainee, setSelTrainee] = useState("");
+  const [selSupervisor, setSelSupervisor] = useState("");
+  const [status, setStatus] = useState("");
+
   const [loading, setLoading] = useState(true);
-
-  // Staff data
-  const [trainees, setTrainees] = useState<any[]>([]);
-  const [employees, setEmployees] = useState<any[]>([]);
-  const [staffLoading, setStaffLoading] = useState(true);
-
-  // Collapsible toggle
   const [openStaff, setOpenStaff] = useState(false);
 
+  /* ---------- auth ---------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setLoading(true);
@@ -32,12 +106,12 @@ export default function ManagerDashboard() {
 
       setUid(u.uid);
 
-      // try user doc
+      // load storeId via users collection (your existing logic)
       let sid: string | null = null;
       try {
         const userSnap = await getDoc(doc(db, "users", u.uid));
         if (userSnap.exists()) {
-          const d = userSnap.data() as any;
+          const d: any = userSnap.data();
           if (d?.storeId) sid = String(d.storeId);
         }
 
@@ -53,7 +127,7 @@ export default function ManagerDashboard() {
 
       if (sid) {
         const snap = await getDoc(doc(db, "stores", sid));
-        setStore(snap.exists() ? snap.data() : null);
+        setStore(snap.exists() ? (snap.data() as Store) : null);
       }
 
       setLoading(false);
@@ -62,98 +136,171 @@ export default function ManagerDashboard() {
     return () => unsub();
   }, []);
 
-  // Load staff when storeId arrives
-  useEffect(() => {
-    if (!storeId) return;
-
-    async function loadPeople() {
-      setStaffLoading(true);
-
-      const qPeople = query(
-        collection(db, "employees"),
-        where("storeId", "==", storeId)
+  /* ---------- load store staff ---------- */
+  async function loadRole(role: string): Promise<Emp[]> {
+    const coll = collection(db, "stores", storeId!, "employees");
+    try {
+      const q1 = query(
+        coll,
+        where("active", "==", true),
+        where("role", "==", role)
       );
-      const res = await getDocs(qPeople);
+      const s1 = await getDocs(q1);
+      let rows = s1.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
 
-      const all: any[] = [];
-      res.forEach((d) => all.push({ id: d.id, ...d.data() }));
+      if (rows.length === 0) {
+        const all = await getDocs(coll);
+        rows = all.docs
+          .map((d) => ({ uid: d.id, ...(d.data() as any) }))
+          .filter(
+            (e) =>
+              e.active === true &&
+              String((e.role || "")).toLowerCase() === role
+          );
+      }
 
-      setEmployees(all.filter((p) => p.role === "employee"));
-      setTrainees(all.filter((p) => p.role === "trainee"));
-
-      setStaffLoading(false);
+      return rows;
+    } catch {
+      const all = await getDocs(coll);
+      return all.docs
+        .map((d) => ({ uid: d.id, ...(d.data() as any) }))
+        .filter(
+          (e) =>
+            e.active === true &&
+            String((e.role || "")).toLowerCase() === role
+        );
     }
-
-    loadPeople();
-  }, [storeId]);
-
-  // ---------------------------------------------------------------------
-
-  if (!uid) {
-    return (
-      <main className="max-w-6xl mx-auto p-8">
-        <h1 className="text-[22px] font-extrabold">Manager Dashboard</h1>
-        <p className="text-gray-600 mt-1">Please sign in.</p>
-      </main>
-    );
   }
 
-  if (loading) {
-    return (
-      <main className="max-w-6xl mx-auto p-8">
-        <h1 className="text-[22px] font-extrabold">Manager Dashboard</h1>
-        <p className="text-gray-600 mt-1">Loading…</p>
-      </main>
-    );
+  /* ---------- load everything ---------- */
+  useEffect(() => {
+    if (!uid || !storeId) return;
+
+    let alive = true;
+    (async () => {
+      setEmpCheck("check");
+
+      try {
+        const [supList, trnList, allList] = await Promise.all([
+          loadRole("supervisor"),
+          loadRole("trainee"),
+          (async () => {
+            const coll = collection(db, "stores", storeId, "employees");
+            const s = await getDocs(query(coll, where("active", "==", true)));
+            return s.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
+          })(),
+        ]);
+
+        if (!alive) return;
+
+        setSupervisors(supList);
+        setTrainees(trnList);
+        setEveryone(allList);
+
+        const gate = await isActiveManagerForStore(storeId, uid);
+        if (gate.ok) {
+          setEmpCheck("ok");
+          setEmpSource(gate.source);
+        } else {
+          const me = allList.find((e) => e.uid === uid);
+          const isMgr =
+            me?.active === true &&
+            String(me?.role || "").toLowerCase() === "manager";
+          setEmpCheck(isMgr ? "ok" : "missing");
+          setEmpSource(isMgr ? "employees" : null);
+        }
+      } catch {
+        if (alive) setEmpCheck("error");
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [uid, storeId]);
+
+  /* ---------- assign trainee ---------- */
+  async function doAssign() {
+    if (!uid || !storeId || !selTrainee || !selSupervisor) return;
+
+    try {
+      setStatus("Assigning…");
+      await assignTrainee(storeId, selTrainee, selSupervisor);
+      setStatus("Assigned ✓");
+      setTimeout(() => setStatus(""), 1400);
+    } catch (e: any) {
+      console.error("assign error:", e);
+      setStatus("Failed");
+    }
   }
 
-  if (!storeId) {
+  /* ---------- counts ---------- */
+  const supCount = useMemo(() => supervisors.length, [supervisors]);
+  const trnCount = useMemo(() => trainees.length, [trainees]);
+
+  /* ===========================================================
+     RENDER
+     =========================================================== */
+
+  if (!uid)
     return (
-      <main className="max-w-6xl mx-auto p-8">
-        <h1 className="text-[22px] font-extrabold">Manager Dashboard</h1>
-        <p className="text-gray-600 mt-1">No store assigned yet.</p>
+      <main className="p-8">
+        <h1 className="text-xl font-bold">Manager Dashboard</h1>
+        <p>Please sign in.</p>
       </main>
     );
-  }
 
-  // ---------------------------------------------------------------------
+  if (loading)
+    return (
+      <main className="p-8">
+        <h1 className="text-xl font-bold">Manager Dashboard</h1>
+        <p>Loading…</p>
+      </main>
+    );
+
+  if (!storeId)
+    return (
+      <main className="p-8">
+        <h1 className="text-xl font-bold">Manager Dashboard</h1>
+        <p>No store assigned.</p>
+      </main>
+    );
 
   return (
-    <main className="max-w-6xl mx-auto p-8 space-y-6">
+    <main className="max-w-5xl mx-auto p-6 space-y-6">
 
-      {/* Header */}
+      {/* HEADER */}
       <div>
         <h1 className="text-[22px] font-extrabold">Manager Dashboard</h1>
         <p className="text-gray-600">What you manage.</p>
       </div>
 
-      {/* Assigned store */}
+      {/* STORE CARD */}
       {store && (
-        <section className="rounded-2xl border border-gray-200 bg-white p-5">
-          <div className="flex items-start justify-between gap-6">
+        <section className="rounded-2xl border bg-white p-5">
+          <div className="flex items-start justify-between">
             <div>
-              <div className="text-[15px] font-semibold">Store #{store.number}</div>
+              <div className="text-[15px] font-semibold">
+                Store #{store.number}
+              </div>
               <div className="text-sm text-gray-700">{store.name}</div>
               <div className="text-sm text-gray-700">{store.address}</div>
             </div>
 
-            <button
-              disabled
-              className="inline-flex h-9 items-center rounded-full border border-gray-300 px-3 text-sm text-gray-400 cursor-default"
-            >
-              View store →
-            </button>
+            <div className="inline-flex h-9 items-center rounded-full border px-3 text-sm text-gray-400 cursor-default">
+              Store Loaded
+            </div>
           </div>
         </section>
       )}
 
-      {/* Notes link */}
-      <section className="rounded-2xl border border-gray-200 bg-white p-5">
+      {/* NOTES LINK */}
+      <section className="rounded-2xl border bg-white p-5">
         <Link
           href={`/manager/notes?store=${storeId}`}
           className="grid grid-cols-[40px_1fr_auto] items-center gap-3"
         >
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border bg-white">
             <svg
               viewBox="0 0 24 24"
               className="h-5 w-5 text-gray-700"
@@ -165,21 +312,24 @@ export default function ManagerDashboard() {
             </svg>
           </div>
           <div>
-            <div className="font-semibold text-gray-900">Notes & Messages</div>
-            <div className="text-sm text-gray-600">Tap to view and send messages</div>
+            <div className="font-semibold text-gray-900">
+              Notes & Messages
+            </div>
+            <div className="text-sm text-gray-600">
+              Tap to view and send messages
+            </div>
           </div>
           <span className="text-gray-500">→</span>
         </Link>
       </section>
 
-      {/* Store Staff — collapsible */}
-      <section className="rounded-2xl border border-gray-200 bg-white p-5">
-
+      {/* STAFF COLLAPSE */}
+      <section className="rounded-2xl border bg-white p-5">
         <button
           onClick={() => setOpenStaff(!openStaff)}
           className="grid w-full grid-cols-[40px_1fr_auto] items-center gap-3 text-left"
         >
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border bg-white">
             <svg
               viewBox="0 0 24 24"
               className="h-5 w-5 text-gray-700"
@@ -190,61 +340,123 @@ export default function ManagerDashboard() {
               <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm-7 9a7 7 0 0 1 14 0Z" />
             </svg>
           </div>
-
           <div>
             <div className="font-semibold text-gray-900">Store Staff</div>
             <div className="text-sm text-gray-600">
-              Trainees & employees assigned to your store
+              Trainees, supervisors & employees
             </div>
           </div>
-
           <span className="text-gray-500">{openStaff ? "▲" : "▼"}</span>
         </button>
 
-        {/* Collapsible content */}
         {openStaff && (
-          <div className="mt-5 space-y-8">
+          <div className="mt-6 space-y-8">
+
+            {/* Supervisors */}
+            <Block title="Supervisors">
+              {supCount === 0 ? (
+                "No supervisors yet."
+              ) : (
+                <ul className="text-sm">
+                  {supervisors.map((p) => (
+                    <li key={p.uid}>{p.name || p.email || p.uid}</li>
+                  ))}
+                </ul>
+              )}
+            </Block>
 
             {/* Trainees */}
-            <div>
-              <h2 className="font-semibold mb-2">Trainees</h2>
-              {staffLoading && <p className="text-sm text-gray-500">Loading…</p>}
-              {!staffLoading && trainees.length === 0 && (
-                <p className="text-sm text-gray-500">No trainees found.</p>
+            <Block title="Trainees">
+              {trnCount === 0 ? (
+                "No active trainees yet."
+              ) : (
+                <ul className="text-sm">
+                  {trainees.map((p) => (
+                    <li key={p.uid}>{p.name || p.email || p.uid}</li>
+                  ))}
+                </ul>
               )}
-
-              <div className="space-y-3">
-                {trainees.map((t) => (
-                  <div key={t.id} className="border p-4 rounded-lg bg-gray-50">
-                    <div className="font-semibold">{t.name}</div>
-                    <Link
-                      href={`/supervisor/${t.id}`}
-                      className="text-blue-600 underline text-sm"
-                    >
-                      View trainee progress
-                    </Link>
-                  </div>
-                ))}
-              </div>
-            </div>
+            </Block>
 
             {/* Employees */}
-            <div>
-              <h2 className="font-semibold mb-2">Employees</h2>
-              {staffLoading && <p className="text-sm text-gray-500">Loading…</p>}
-              {!staffLoading && employees.length === 0 && (
-                <p className="text-sm text-gray-500">No employees found.</p>
+            <Block title="Employees">
+              {everyone.length === 0 ? (
+                "Loading…"
+              ) : (
+                <ul className="text-sm">
+                  {everyone
+                    .filter((e) => e.active)
+                    .map((e) => (
+                      <li key={e.uid}>
+                        {e.name || e.email || e.uid} —{" "}
+                        {String(e.role || "").toLowerCase()}
+                      </li>
+                    ))}
+                </ul>
               )}
+            </Block>
 
-              <div className="space-y-3">
-                {employees.map((e) => (
-                  <div key={e.id} className="border p-4 rounded-lg bg-gray-50">
-                    <div className="font-semibold">{e.name}</div>
+            {/* Assignment Section */}
+            <section className="rounded-2xl border bg-white p-5">
+              <h3 className="font-semibold mb-3">
+                Assign Trainee → Supervisor
+              </h3>
+
+              {empCheck !== "ok" ? (
+                <p className="text-sm text-gray-600">
+                  You must be an <b>active manager</b> to assign.
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <label className="text-sm">
+                      Trainee
+                      <select
+                        className="mt-1 block w-full rounded-md border p-2 text-sm"
+                        value={selTrainee}
+                        onChange={(e) => setSelTrainee(e.target.value)}
+                      >
+                        <option value="">Select trainee…</option>
+                        {trainees.map((t) => (
+                          <option key={t.uid} value={t.uid}>
+                            {t.name || t.email || t.uid}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="text-sm">
+                      Supervisor
+                      <select
+                        className="mt-1 block w-full rounded-md border p-2 text-sm"
+                        value={selSupervisor}
+                        onChange={(e) => setSelSupervisor(e.target.value)}
+                      >
+                        <option value="">Select supervisor…</option>
+                        {supervisors.map((s) => (
+                          <option key={s.uid} value={s.uid}>
+                            {s.name || s.email || s.uid}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
-                ))}
-              </div>
-            </div>
 
+                  <div className="mt-3 flex items-center gap-3">
+                    <button
+                      onClick={doAssign}
+                      disabled={!selTrainee || !selSupervisor}
+                      className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      Assign
+                    </button>
+                    {status && (
+                      <span className="text-sm text-gray-600">{status}</span>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
           </div>
         )}
       </section>
@@ -252,4 +464,18 @@ export default function ManagerDashboard() {
   );
 }
 
-
+/* ---------- simple block UI ---------- */
+function Block({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border rounded-2xl bg-white p-5">
+      <div className="font-semibold mb-2">{title}</div>
+      <div className="text-sm">{children}</div>
+    </div>
+  );
+}
