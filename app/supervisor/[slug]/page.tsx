@@ -1,199 +1,419 @@
+// app/supervisor/page.tsx
 "use client";
+export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { db } from "@/lib/firebase";
+
+import { useSupervisorTrainees } from "@/lib/useSupervisorTrainees";
+import { db, auth } from "@/lib/firebase";
+import { onIdTokenChanged } from "firebase/auth";
+
 import {
   collection,
-  query,
-  where,
   getDocs,
   doc,
   getDoc,
-  setDoc,
-  Timestamp,
+  limit,
+  onSnapshot,
+  query,
+  where,
 } from "firebase/firestore";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 
-/** demo → replace with auth later */
-function getUid() {
-  if (typeof window !== "undefined") return localStorage.getItem("uid") || "demo-user";
-  return "demo-user";
-}
-function getReviewUid() {
-  if (typeof window !== "undefined") return localStorage.getItem("reviewUid") || getUid();
-  return getUid();
-}
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
-/** parse "modules/week2/tasks/t08" */
-function parsePath(p: string) {
-  const m = p.match(/^modules\/(week\d+)\/tasks\/([^/]+)$/i);
-  return m ? { weekId: m[1], taskId: m[2] } : null;
-}
+import { useStoreCtx } from "@/app/providers/StoreProvider";
 
-type ProgressDoc = {
-  path: string;             // e.g. "modules/week1/tasks/t01..."
-  done?: boolean;
-  completedAt?: Timestamp;
-  supervisorApproved?: boolean;
+type WeekSummary = {
+  week: 1 | 2 | 3 | 4;
+  waiting: number;
+  reviewed: number;
+  approved: number;
 };
 
-export default function SupervisorWeekPage({
-  params,
-}: {
-  params: { slug: string }; // "week1" | "week2" | "week3" | "week4"
-}) {
-  const search = useSearchParams();
-  const slug = params.slug; // e.g. "week1"
-  const weekNum = Number(slug.replace("week", ""));
-  const reviewUid = search.get("uid") || getReviewUid();
+function pickReviewUid(): string {
+  if (typeof window === "undefined") return "demo-user";
+  return (
+    localStorage.getItem("reviewUid") ||
+    localStorage.getItem("uid") ||
+    "demo-user"
+  );
+}
 
-  const [rows, setRows] = useState<
-    { key: string; title: string; path: string; supervisorApproved?: boolean }[]
-  >([]);
+/* ---------- shared store resolver (matches week1–3 pattern) ---------- */
+async function resolveStoreId(): Promise<string> {
+  const u = auth.currentUser;
+  if (u) {
+    const tok = await u.getIdTokenResult(true);
+    if (tok?.claims?.storeId) return String(tok.claims.storeId);
+  }
+
+  if (typeof window !== "undefined") {
+    const ls = localStorage.getItem("storeId");
+    if (ls) return String(ls);
+  }
+
+  if (u) {
+    const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
+    for (const sid of peek) {
+      const snap = await getDoc(doc(db, "stores", sid, "employees", u.uid));
+      if (snap.exists()) return sid;
+    }
+  }
+
+  return "";
+}
+
+export default function SupervisorPage() {
+  const [uid, setUid] = useState<string>(() => pickReviewUid());
+
+  const [weeks, setWeeks] = useState<WeekSummary[]>([
+    { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+    { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+    { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+    { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+  ]);
+
   const [loading, setLoading] = useState(true);
+  const [storeId, setStoreId] = useState<string | null>(null);
+  const [resolvingStore, setResolvingStore] = useState(true);
 
-  // Load trainee’s completed items for THIS week and attach pretty titles
+  const { storeId: resolvedStoreId, loading: storeCtxLoading } = useStoreCtx();
+  const trainees = useSupervisorTrainees(storeId);
+
+  const searchParams = useSearchParams();
+  const storeOverride = searchParams.get("store");
+  const asUid = searchParams.get("as");
+
+  /* ---------- keep ?as= override for deep review (not used in tiles) ---------- */
+  useEffect(() => {
+    if (asUid && asUid !== uid) setUid(asUid);
+  }, [asUid, uid]);
+
+  useEffect(() => {
+    if (uid && typeof window !== "undefined") {
+      localStorage.setItem("reviewUid", uid);
+    }
+  }, [uid]);
+
+  /* ---------- explicit store override (?store=) ---------- */
+  useEffect(() => {
+    if (!storeOverride) return;
+    setStoreId(String(storeOverride));
+    setResolvingStore(false);
+  }, [storeOverride]);
+
+  /* ---------- if ?as=<uid>, try to read that user's storeId ---------- */
+  useEffect(() => {
+    if (!asUid) return;
+    (async () => {
+      setResolvingStore(true);
+      try {
+        const snap = await getDoc(doc(db, "users", asUid));
+        const v: any = snap.exists() ? snap.data() : null;
+        const sid = v?.storeId ?? null;
+        setStoreId(sid != null ? String(sid) : null);
+      } finally {
+        setResolvingStore(false);
+      }
+    })();
+  }, [asUid]);
+
+  /* ---------- prefer provider store when no overrides ---------- */
+  useEffect(() => {
+    if (storeOverride || asUid) return;
+    if (resolvedStoreId) {
+      setStoreId(resolvedStoreId);
+      setResolvingStore(false);
+    }
+  }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
+
+  /* ---------- fallback: infer store from user/employees/supervisorUid ---------- */
+  useEffect(() => {
+    if (storeOverride || asUid) return;
+    if (resolvedStoreId) return;
+
+    let stopUserListener: (() => void) | null = null;
+
+    const stopAuth = onIdTokenChanged(auth, (u) => {
+      if (stopUserListener) {
+        stopUserListener();
+        stopUserListener = null;
+      }
+
+      if (!u) {
+        setStoreId(null);
+        setResolvingStore(false);
+        return;
+      }
+
+      setResolvingStore(true);
+      const userRef = doc(db, "users", u.uid);
+
+      stopUserListener = onSnapshot(
+        userRef,
+        async (snap) => {
+          const v: any = snap.exists() ? snap.data() : null;
+          let sid: string | null =
+            v?.storeId != null ? String(v.storeId) : null;
+
+          // infer from /stores/*/employees/{uid}
+          if (!sid) {
+            try {
+              const storesSnap = await getDocs(collection(db, "stores"));
+              for (const s of storesSnap.docs) {
+                const empRef = doc(db, "stores", s.id, "employees", u.uid);
+                const empSnap = await getDoc(empRef);
+                if (empSnap.exists()) {
+                  const data: any = empSnap.data();
+                  if (data?.active === false) continue;
+                  sid = s.id;
+                  break;
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+
+          // infer from store.supervisorUid
+          if (!sid) {
+            try {
+              const qs = await getDocs(
+                query(
+                  collection(db, "stores"),
+                  where("supervisorUid", "==", u.uid),
+                  limit(1)
+                )
+              );
+              if (!qs.empty) sid = qs.docs[0].id;
+            } catch {
+              /* ignore */
+            }
+          }
+
+          setStoreId(sid);
+          setResolvingStore(false);
+        },
+        () => setResolvingStore(false)
+      );
+    });
+
+    return () => {
+      if (stopUserListener) stopUserListener();
+      stopAuth();
+    };
+  }, [storeOverride, asUid, resolvedStoreId]);
+
+  /* ---------- aggregate counts across all trainees in this store ---------- */
   useEffect(() => {
     let alive = true;
 
-    (async () => {
+    async function tally() {
+      setLoading(true);
+
+      // ensure we have a storeId (auto connect)
+      let sid = storeId;
+      if (!sid) {
+        sid = await resolveStoreId();
+        if (!alive) return;
+        if (sid) setStoreId(sid);
+      }
+
+      if (!sid) {
+        if (!alive) return;
+        setWeeks([
+          { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+        ]);
+        setLoading(false);
+        return;
+      }
+
+      const tallies: Record<number, WeekSummary> = {
+        1: { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+        2: { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+        3: { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+        4: { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+      };
+
       try {
-        setLoading(true);
+        const usersSnap = await getDocs(collection(db, "users"));
+        for (const user of usersSnap.docs) {
+          const traineeId = user.id;
+          const progSnap = await getDocs(
+            collection(db, "users", traineeId, "progress")
+          );
 
-        const progCol = collection(db, "users", reviewUid, "progress");
-        // only this week + must be done
-        const q = query(
-          progCol,
-          where("done", "==", true),
-          where("path", ">=", `modules/${slug}/tasks/`),
-          where("path", "<",  `modules/${slug}/tasks0`) // prefix range
-        );
+          for (const d of progSnap.docs) {
+            const data = d.data() as {
+              path?: string;
+              done?: boolean;
+              approved?: boolean;
+              storeId?: string;
+              week?: string;
+            };
 
-        const snap = await getDocs(q);
-        const items: { key: string; path: string; supervisorApproved?: boolean }[] =
-          snap.docs.map(d => {
-            const data = d.data() as ProgressDoc;
-            return { key: d.id, path: data.path, supervisorApproved: data.supervisorApproved };
-          });
+            if (!data?.done) continue;
+            if (data.storeId !== sid) continue;
 
-        // Fetch task titles for each progress item
-        const withTitles = await Promise.all(
-          items.map(async (it) => {
-            const parsed = parsePath(it.path);
-            if (!parsed) return { ...it, title: it.path }; // fallback
-            const tRef = doc(db, "modules", parsed.weekId, "tasks", parsed.taskId);
-            const tSnap = await getDoc(tRef);
-            const tData = tSnap.exists() ? (tSnap.data() as any) : null;
-            const title = (tData?.title as string) || parsed.taskId;
-            return { ...it, title };
-          })
-        );
+            // detect week from explicit week OR from path
+            let wkNumber: 1 | 2 | 3 | 4 | null = null;
 
-        if (alive) setRows(withTitles);
+            if (typeof data.week === "string") {
+              if (data.week === "week1") wkNumber = 1;
+              else if (data.week === "week2") wkNumber = 2;
+              else if (data.week === "week3") wkNumber = 3;
+              else if (data.week === "week4") wkNumber = 4;
+            }
+
+            if (!wkNumber && data.path) {
+              const wkMatch = data.path.match(/modules\/week(\d)\//i);
+              if (wkMatch) {
+                const n = Number(wkMatch[1]);
+                if (n === 1 || n === 2 || n === 3 || n === 4) {
+                  wkNumber = n as 1 | 2 | 3 | 4;
+                }
+              }
+            }
+
+            if (!wkNumber) continue;
+
+            const bucket = tallies[wkNumber];
+            bucket.reviewed += 1;
+            if (data.approved) bucket.approved += 1;
+            else bucket.waiting += 1;
+          }
+        }
+
+        if (!alive) return;
+        setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
+      } catch {
+        if (!alive) return;
+        setWeeks([
+          { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+        ]);
       } finally {
         if (alive) setLoading(false);
       }
-    })();
+    }
 
+    tally();
     return () => {
       alive = false;
     };
-  }, [reviewUid, slug]);
+  }, [storeId]);
 
-  const reviewed = rows.length;
-  const approved = rows.filter(r => r.supervisorApproved).length;
-  const pct = useMemo(() => (reviewed ? Math.round((approved / reviewed) * 100) : 0), [approved, reviewed]);
-
-  async function approve(key: string, ok: boolean) {
-    // Write approval flag onto the trainee’s progress doc
-    await setDoc(
-      doc(db, "users", reviewUid, "progress", key),
-      { supervisorApproved: ok },
-      { merge: true }
-    );
-    setRows(prev => prev.map(r => (r.key === key ? { ...r, supervisorApproved: ok } : r)));
-  }
+  const checking = resolvingStore || storeCtxLoading;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Link href="/supervisor" className="text-sm underline">← Back to Overview</Link>
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-bold text-primary">Supervisor Dashboard</h1>
+        <p className="text-muted-foreground mt-1">
+          Review trainee tasks and approve what’s done.
+        </p>
+      </header>
 
-        {/* quick UID switcher (optional) */}
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const input = (e.currentTarget.elements.namedItem("uid") as HTMLInputElement);
-            if (typeof window !== "undefined") localStorage.setItem("reviewUid", input.value || "");
-            window.location.search = `?uid=${encodeURIComponent(input.value)}`;
-          }}
-        >
-          <input
-            name="uid"
-            defaultValue={reviewUid}
-            placeholder="trainee uid"
-            className="text-sm border rounded px-2 py-1"
-          />
-          <button className="text-sm px-2 py-1 border rounded">Switch trainee</button>
-        </form>
+      {/* Week cards */}
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        {weeks.map((w) => (
+          <Link
+            key={w.week}
+            href={`/supervisor/week${w.week}`}
+            className="block focus:outline-none"
+          >
+            <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Week {w.week}</CardTitle>
+                <CardDescription>
+                  {loading
+                    ? "Loading…"
+                    : `${w.waiting} task${w.waiting === 1 ? "" : "s"} pending approval`}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground">
+                  {loading ? "—" : `${w.approved}/${w.reviewed} approved`}
+                </p>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
       </div>
 
-      <Card className="border-primary/20">
-        <CardHeader>
-          <CardTitle>Review — Week {weekNum}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <span>{reviewed - approved} waiting • {approved} approved • {pct}% approved</span>
-            <div className="min-w-[200px]">
-              <Progress value={pct} className="h-2 [&>div]:bg-yellow-400" />
-            </div>
-          </div>
+      {/* Trainees list (unchanged) */}
+      {storeId && (
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold">Your Trainees</h2>
 
-          {loading && <div className="text-sm">Loading…</div>}
-          {!loading && reviewed === 0 && (
-            <div className="text-sm text-muted-foreground">
-              No completed tasks for this week yet.
-              <div className="mt-1">Reviewing trainee: <code>{reviewUid}</code>.</div>
+          {trainees.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No trainees assigned yet.
+            </p>
+          ) : (
+            <div className="grid gap-2">
+              {trainees.map((t) => (
+                <Link
+                  key={t.id}
+                  href={`/supervisor/week1?as=${t.traineeId}`}
+                  className="block border p-3 rounded-lg bg-white hover:bg-primary/5 transition"
+                >
+                  <div className="font-medium">{t.traineeId}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Tap to review
+                  </div>
+                </Link>
+              ))}
             </div>
           )}
+        </div>
+      )}
 
-          {/* Completed items (pretty titles) */}
-          <ul className="space-y-2">
-            {rows.map((r, i) => (
-              <li key={r.key} className="flex items-center justify-between border rounded-lg px-3 py-2">
-                <div className="font-medium">
-                  {i + 1}. {r.title}
-                </div>
-                <div className="flex items-center gap-2">
-                  {r.supervisorApproved ? (
-                    <span className="text-green-700 text-xs font-semibold">Approved</span>
-                  ) : (
-                    <button
-                      onClick={() => approve(r.key, true)}
-                      className="text-xs px-2 py-1 border rounded hover:bg-accent/10"
-                    >
-                      Approve
-                    </button>
-                  )}
-                  {r.supervisorApproved && (
-                    <button
-                      onClick={() => approve(r.key, false)}
-                      className="text-xs px-2 py-1 border rounded hover:bg-accent/10"
-                    >
-                      Undo
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
+      {/* Notes card */}
+      {checking ? (
+        <div className="rounded-xl border bg-white/60 p-4 text-sm text-gray-600">
+          Checking store assignment…
+        </div>
+      ) : storeId ? (
+        <Link
+          href={`/supervisor/notes?store=${encodeURIComponent(storeId)}`}
+          className="block focus:outline-none"
+        >
+          <Card className="border-primary/30 bg-white hover:bg-primary/5 transition">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold text-primary">
+                Notes
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground">
+              Open your notes
+            </CardContent>
+          </Card>
+        </Link>
+      ) : (
+        <div className="rounded-xl border bg-white/60 p-4 text-sm">
+          <div className="font-semibold mb-1">No store assigned</div>
+          <div className="text-gray-600">
+            Ask an admin to assign this supervisor to a store.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+
+
