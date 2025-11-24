@@ -1,25 +1,6 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-/* ============================
-   SUPER SAFE TESTER BLOCK
-   ============================ */
-const Tester = () => (
-  <div
-    style={{
-      padding: "10px",
-      background: "#ff006e",
-      color: "white",
-      fontWeight: "bold",
-      borderRadius: "8px",
-      marginBottom: "20px",
-    }}
-  >
-    SUPERVISOR PAGE TESTER: THIS PAGE IS LOADING ✔️
-  </div>
-);
-/* ============================ */
-
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -99,7 +80,6 @@ export default function SupervisorPage() {
 
   const [loading, setLoading] = useState(true);
   const [storeId, setStoreId] = useState<string | null>(null);
-  const [resolvingStore, setResolvingStore] = useState(true);
 
   const { storeId: resolvedStoreId, loading: storeCtxLoading } = useStoreCtx();
   const trainees = useSupervisorTrainees(storeId);
@@ -108,45 +88,41 @@ export default function SupervisorPage() {
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
+  /** AS UID */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
 
+  /** Save UID */
   useEffect(() => {
     if (uid && typeof window !== "undefined") {
       localStorage.setItem("reviewUid", uid);
     }
   }, [uid]);
 
+  /** store override via ?store= */
   useEffect(() => {
     if (!storeOverride) return;
     setStoreId(String(storeOverride));
-    setResolvingStore(false);
   }, [storeOverride]);
 
+  /** resolve store from ?as */
   useEffect(() => {
     if (!asUid) return;
     (async () => {
-      setResolvingStore(true);
-      try {
-        const snap = await getDoc(doc(db, "users", asUid));
-        const v: any = snap.exists() ? snap.data() : null;
-        const sid = v?.storeId ?? null;
-        setStoreId(sid != null ? String(sid) : null);
-      } finally {
-        setResolvingStore(false);
-      }
+      const snap = await getDoc(doc(db, "users", asUid));
+      const v: any = snap.exists() ? snap.data() : null;
+      setStoreId(v?.storeId ? String(v.storeId) : null);
     })();
   }, [asUid]);
 
+  /** store via provider */
   useEffect(() => {
     if (storeOverride || asUid) return;
-    if (resolvedStoreId) {
-      setStoreId(resolvedStoreId);
-      setResolvingStore(false);
-    }
+    if (resolvedStoreId) setStoreId(resolvedStoreId);
   }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
 
+  /** fallback store resolver */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) return;
@@ -161,54 +137,45 @@ export default function SupervisorPage() {
 
       if (!u) {
         setStoreId(null);
-        setResolvingStore(false);
         return;
       }
 
-      setResolvingStore(true);
       const userRef = doc(db, "users", u.uid);
+      stopUserListener = onSnapshot(userRef, async (snap) => {
+        const v: any = snap.exists() ? snap.data() : null;
+        let sid: string | null = v?.storeId ?? null;
 
-      stopUserListener = onSnapshot(
-        userRef,
-        async (snap) => {
-          const v: any = snap.exists() ? snap.data() : null;
-          let sid: string | null =
-            v?.storeId != null ? String(v.storeId) : null;
-
-          if (!sid) {
-            try {
-              const storesSnap = await getDocs(collection(db, "stores"));
-              for (const s of storesSnap.docs) {
-                const empRef = doc(db, "stores", s.id, "employees", u.uid);
-                const empSnap = await getDoc(empRef);
-                if (empSnap.exists()) {
-                  const data: any = empSnap.data();
-                  if (data?.active === false) continue;
-                  sid = s.id;
-                  break;
-                }
+        if (!sid) {
+          try {
+            const storesSnap = await getDocs(collection(db, "stores"));
+            for (const s of storesSnap.docs) {
+              const empRef = doc(db, "stores", s.id, "employees", u.uid);
+              const empSnap = await getDoc(empRef);
+              if (empSnap.exists()) {
+                const data: any = empSnap.data();
+                if (data?.active === false) continue;
+                sid = s.id;
+                break;
               }
-            } catch {}
-          }
+            }
+          } catch {}
+        }
 
-          if (!sid) {
-            try {
-              const qs = await getDocs(
-                query(
-                  collection(db, "stores"),
-                  where("supervisorUid", "==", u.uid),
-                  limit(1)
-                )
-              );
-              if (!qs.empty) sid = qs.docs[0].id;
-            } catch {}
-          }
+        if (!sid) {
+          try {
+            const qs = await getDocs(
+              query(
+                collection(db, "stores"),
+                where("supervisorUid", "==", u.uid),
+                limit(1)
+              )
+            );
+            if (!qs.empty) sid = qs.docs[0].id;
+          } catch {}
+        }
 
-          setStoreId(sid);
-          setResolvingStore(false);
-        },
-        () => setResolvingStore(false)
-      );
+        setStoreId(sid);
+      });
     });
 
     return () => {
@@ -217,6 +184,7 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
+  /** tally weeks */
   useEffect(() => {
     let alive = true;
 
@@ -251,6 +219,7 @@ export default function SupervisorPage() {
 
       try {
         const usersSnap = await getDocs(collection(db, "users"));
+
         for (const user of usersSnap.docs) {
           const traineeId = user.id;
           const progSnap = await getDocs(
@@ -286,7 +255,6 @@ export default function SupervisorPage() {
         if (!alive) return;
         setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
       } catch {
-        if (!alive) return;
       } finally {
         if (alive) setLoading(false);
       }
@@ -298,13 +266,8 @@ export default function SupervisorPage() {
     };
   }, [storeId]);
 
-  const checking = resolvingStore || storeCtxLoading;
-
   return (
     <div className="space-y-6">
-      {/* TESTER AT TOP */}
-      <Tester />
-
       <header>
         <h1 className="text-2xl font-bold text-primary">Supervisor Dashboard</h1>
         <p className="text-muted-foreground mt-1">
@@ -312,6 +275,7 @@ export default function SupervisorPage() {
         </p>
       </header>
 
+      {/* WEEK CARDS */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {weeks.map((w) => (
           <Link
@@ -334,6 +298,7 @@ export default function SupervisorPage() {
         ))}
       </div>
 
+      {/* TRAINEES */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
@@ -363,11 +328,8 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {checking ? (
-        <div className="rounded-xl border bg-white/60 p-4 text-sm text-gray-600">
-          Checking store assignment…
-        </div>
-      ) : storeId ? (
+      {/* NOTES — permanently on dashboard */}
+      {storeId && (
         <Link
           href={`/supervisor/notes?store=${encodeURIComponent(storeId)}`}
           className="block focus:outline-none"
@@ -383,11 +345,6 @@ export default function SupervisorPage() {
             </CardContent>
           </Card>
         </Link>
-      ) : (
-        <div className="rounded-xl border bg-white/60 p-4 text-sm">
-          <div className="font-semibold mb-1">No store assigned</div>
-          <div className="text-gray-600">Ask an admin to assign a store.</div>
-        </div>
       )}
     </div>
   );
