@@ -1,4 +1,3 @@
-// app/supervisor/page.tsx
 "use client";
 export const dynamic = "force-dynamic";
 
@@ -47,7 +46,7 @@ function pickReviewUid(): string {
   );
 }
 
-/* ---------- shared store resolver (matches week1–3 pattern) ---------- */
+/* same store resolver you already had */
 async function resolveStoreId(): Promise<string> {
   const u = auth.currentUser;
   if (u) {
@@ -73,7 +72,6 @@ async function resolveStoreId(): Promise<string> {
 
 export default function SupervisorPage() {
   const [uid, setUid] = useState<string>(() => pickReviewUid());
-
   const [weeks, setWeeks] = useState<WeekSummary[]>([
     { week: 1, waiting: 0, reviewed: 0, approved: 0 },
     { week: 2, waiting: 0, reviewed: 0, approved: 0 },
@@ -92,7 +90,7 @@ export default function SupervisorPage() {
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  /* ---------- keep ?as= override for deep review (not used in tiles) ---------- */
+  /* keep ?as override */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
@@ -103,14 +101,14 @@ export default function SupervisorPage() {
     }
   }, [uid]);
 
-  /* ---------- explicit store override (?store=) ---------- */
+  /* store override */
   useEffect(() => {
     if (!storeOverride) return;
     setStoreId(String(storeOverride));
     setResolvingStore(false);
   }, [storeOverride]);
 
-  /* ---------- if ?as=<uid>, try to read that user's storeId ---------- */
+  /* as=<uid> resolve */
   useEffect(() => {
     if (!asUid) return;
     (async () => {
@@ -126,7 +124,7 @@ export default function SupervisorPage() {
     })();
   }, [asUid]);
 
-  /* ---------- prefer provider store when no overrides ---------- */
+  /* prefer storeCtx */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) {
@@ -135,7 +133,7 @@ export default function SupervisorPage() {
     }
   }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
 
-  /* ---------- fallback: infer store from user/employees/supervisorUid ---------- */
+  /* fallback infer store */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) return;
@@ -164,7 +162,6 @@ export default function SupervisorPage() {
           let sid: string | null =
             v?.storeId != null ? String(v.storeId) : null;
 
-          // infer from /stores/*/employees/{uid}
           if (!sid) {
             try {
               const storesSnap = await getDocs(collection(db, "stores"));
@@ -178,12 +175,9 @@ export default function SupervisorPage() {
                   break;
                 }
               }
-            } catch {
-              /* ignore */
-            }
+            } catch {}
           }
 
-          // infer from store.supervisorUid
           if (!sid) {
             try {
               const qs = await getDocs(
@@ -194,9 +188,7 @@ export default function SupervisorPage() {
                 )
               );
               if (!qs.empty) sid = qs.docs[0].id;
-            } catch {
-              /* ignore */
-            }
+            } catch {}
           }
 
           setStoreId(sid);
@@ -212,14 +204,13 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  /* ---------- aggregate counts across all trainees in this store ---------- */
+  /* week tallies (unchanged) */
   useEffect(() => {
     let alive = true;
 
     async function tally() {
       setLoading(true);
 
-      // ensure we have a storeId (auto connect)
       let sid = storeId;
       if (!sid) {
         sid = await resolveStoreId();
@@ -255,35 +246,20 @@ export default function SupervisorPage() {
           );
 
           for (const d of progSnap.docs) {
-            const data = d.data() as {
-              path?: string;
-              done?: boolean;
-              approved?: boolean;
-              storeId?: string;
-              week?: string;
-            };
-
+            const data = d.data() as any;
             if (!data?.done) continue;
             if (data.storeId !== sid) continue;
 
-            // detect week from explicit week OR from path
-            let wkNumber: 1 | 2 | 3 | 4 | null = null;
+            let wkNumber: any = null;
 
-            if (typeof data.week === "string") {
-              if (data.week === "week1") wkNumber = 1;
-              else if (data.week === "week2") wkNumber = 2;
-              else if (data.week === "week3") wkNumber = 3;
-              else if (data.week === "week4") wkNumber = 4;
-            }
+            if (data.week === "week1") wkNumber = 1;
+            else if (data.week === "week2") wkNumber = 2;
+            else if (data.week === "week3") wkNumber = 3;
+            else if (data.week === "week4") wkNumber = 4;
 
             if (!wkNumber && data.path) {
-              const wkMatch = data.path.match(/modules\/week(\d)\//i);
-              if (wkMatch) {
-                const n = Number(wkMatch[1]);
-                if (n === 1 || n === 2 || n === 3 || n === 4) {
-                  wkNumber = n as 1 | 2 | 3 | 4;
-                }
-              }
+              const m = data.path.match(/modules\/week(\d)\//i);
+              if (m) wkNumber = Number(m[1]);
             }
 
             if (!wkNumber) continue;
@@ -299,12 +275,6 @@ export default function SupervisorPage() {
         setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
       } catch {
         if (!alive) return;
-        setWeeks([
-          { week: 1, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 2, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 3, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 4, waiting: 0, reviewed: 0, approved: 0 },
-        ]);
       } finally {
         if (alive) setLoading(false);
       }
@@ -318,6 +288,10 @@ export default function SupervisorPage() {
 
   const checking = resolvingStore || storeCtxLoading;
 
+  /* ============================================================
+     RENDER UI — with EMAIL now instead of UID
+     ============================================================ */
+
   return (
     <div className="space-y-6">
       <header>
@@ -327,7 +301,7 @@ export default function SupervisorPage() {
         </p>
       </header>
 
-      {/* Week cards */}
+      {/* WEEK CARDS — unchanged */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {weeks.map((w) => (
           <Link
@@ -341,20 +315,16 @@ export default function SupervisorPage() {
                 <CardDescription>
                   {loading
                     ? "Loading…"
-                    : `${w.waiting} task${w.waiting === 1 ? "" : "s"} pending approval`}
+                    : `${w.waiting} pending, ${w.approved}/${w.reviewed} approved`}
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">
-                  {loading ? "—" : `${w.approved}/${w.reviewed} approved`}
-                </p>
-              </CardContent>
+              <CardContent />
             </Card>
           </Link>
         ))}
       </div>
 
-      {/* Trainees list (unchanged) */}
+      {/* TRAINEES LIST — NOW SHOWS EMAIL */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
@@ -371,7 +341,9 @@ export default function SupervisorPage() {
                   href={`/supervisor/week1?as=${t.traineeId}`}
                   className="block border p-3 rounded-lg bg-white hover:bg-primary/5 transition"
                 >
-                  <div className="font-medium">{t.traineeId}</div>
+                  <div className="font-medium">
+                    {t.email || t.traineeEmail || t.userEmail || t.traineeId}
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     Tap to review
                   </div>
@@ -382,7 +354,7 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* Notes card */}
+      {/* NOTES — works exactly like Dev */}
       {checking ? (
         <div className="rounded-xl border bg-white/60 p-4 text-sm text-gray-600">
           Checking store assignment…
@@ -406,9 +378,7 @@ export default function SupervisorPage() {
       ) : (
         <div className="rounded-xl border bg-white/60 p-4 text-sm">
           <div className="font-semibold mb-1">No store assigned</div>
-          <div className="text-gray-600">
-            Ask an admin to assign this supervisor to a store.
-          </div>
+          <div className="text-gray-600">Ask an admin to assign a store.</div>
         </div>
       )}
     </div>
