@@ -131,6 +131,9 @@ export default function SupervisorPage() {
         <p className="text-muted-foreground mt-1">
           Review trainee tasks and approve what’s done.
         </p>
+
+        {/* 🔥 TEST INDICATOR */}
+        <p className="text-red-600 font-bold text-lg mt-2">TEST999</p>
       </header>
 
       {/* Week cards */}
