@@ -47,34 +47,6 @@ function pickReviewUid(): string {
   );
 }
 
-/* ------------------ fallback store resolver ------------------ */
-async function resolveStoreId(): Promise<string> {
-  const u = auth.currentUser;
-  if (u) {
-    const tok = await u.getIdTokenResult(true);
-    if (tok?.claims?.storeId) return String(tok.claims.storeId);
-  }
-
-  if (typeof window !== "undefined") {
-    const ls = localStorage.getItem("storeId");
-    if (ls) return String(ls);
-  }
-
-  if (u) {
-    const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
-    for (const sid of peek) {
-      const snap = await getDoc(doc(db, "stores", sid, "employees", u.uid));
-      if (snap.exists()) return sid;
-    }
-  }
-
-  return "";
-}
-
-/* ============================================================
-   ================= SUPERVISOR PAGE ==========================
-   ============================================================ */
-
 export default function SupervisorPage() {
   const [uid, setUid] = useState<string>(() => pickReviewUid());
   const [weeks, setWeeks] = useState<WeekSummary[]>([
@@ -86,129 +58,28 @@ export default function SupervisorPage() {
   const [loading, setLoading] = useState(true);
 
   const [storeId, setStoreId] = useState<string | null>(null);
-  const [resolvingStore, setResolvingStore] = useState(true);
+  const { storeId: ctxStore, loading: ctxLoading } = useStoreCtx();
 
-  const { storeId: resolvedStoreId, loading: storeCtxLoading } = useStoreCtx();
   const trainees = useSupervisorTrainees(storeId);
-
   const searchParams = useSearchParams();
-  const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  /* keep ?as= override */
+  /* use ?as override */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
 
-  /* remember reviewer uid */
+  /* remember reviewer */
   useEffect(() => {
     if (uid && typeof window !== "undefined") {
       localStorage.setItem("reviewUid", uid);
     }
   }, [uid]);
 
-  /* explicit store override */
+  /* get storeId from provider */
   useEffect(() => {
-    if (!storeOverride) return;
-    setStoreId(String(storeOverride));
-    setResolvingStore(false);
-  }, [storeOverride]);
-
-  /* resolve store from ?as user */
-  useEffect(() => {
-    if (!asUid) return;
-    (async () => {
-      setResolvingStore(true);
-      try {
-        const snap = await getDoc(doc(db, "users", asUid));
-        const v: any = snap.exists() ? snap.data() : null;
-        const sid = v?.storeId ?? null;
-        setStoreId(sid != null ? String(sid) : null);
-      } finally {
-        setResolvingStore(false);
-      }
-    })();
-  }, [asUid]);
-
-  /* use provider store when available */
-  useEffect(() => {
-    if (storeOverride || asUid) return;
-    if (resolvedStoreId) {
-      setStoreId(resolvedStoreId);
-      setResolvingStore(false);
-    }
-  }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
-
-  /* fallback store resolver */
-  useEffect(() => {
-    if (storeOverride || asUid) return;
-    if (resolvedStoreId) return;
-
-    let stopUserListener: (() => void) | null = null;
-
-    const stopAuth = onIdTokenChanged(auth, (u) => {
-      if (stopUserListener) {
-        stopUserListener();
-        stopUserListener = null;
-      }
-
-      if (!u) {
-        setStoreId(null);
-        setResolvingStore(false);
-        return;
-      }
-
-      setResolvingStore(true);
-      const userRef = doc(db, "users", u.uid);
-
-      stopUserListener = onSnapshot(
-        userRef,
-        async (snap) => {
-          const v: any = snap.exists() ? snap.data() : null;
-          let sid: string | null =
-            v?.storeId != null ? String(v.storeId) : null;
-
-          if (!sid) {
-            try {
-              const storesSnap = await getDocs(collection(db, "stores"));
-              for (const s of storesSnap.docs) {
-                const empRef = doc(db, "stores", s.id, "employees", u.uid);
-                const empSnap = await getDoc(empRef);
-                if (empSnap.exists()) {
-                  const data: any = empSnap.data();
-                  if (data?.active === false) continue;
-                  sid = s.id;
-                  break;
-                }
-              }
-            } catch {}
-          }
-
-          if (!sid) {
-            try {
-              const qs = await getDocs(
-                query(
-                  collection(db, "stores"),
-                  where("supervisorUid", "==", u.uid),
-                  limit(1)
-                )
-              );
-              if (!qs.empty) sid = qs.docs[0].id;
-            } catch {}
-          }
-
-          setStoreId(sid);
-          setResolvingStore(false);
-        },
-        () => setResolvingStore(false)
-      );
-    });
-
-    return () => {
-      if (stopUserListener) stopUserListener();
-      stopAuth();
-    };
-  }, [storeOverride, asUid, resolvedStoreId]);
+    if (!ctxLoading && ctxStore) setStoreId(ctxStore);
+  }, [ctxStore, ctxLoading]);
 
   /* weekly tallies */
   useEffect(() => {
@@ -226,19 +97,15 @@ export default function SupervisorPage() {
         };
 
         for (const d of snap.docs) {
-          const data = d.data() as {
-            path?: string;
-            done?: boolean;
-            approved?: boolean;
-          };
+          const data = d.data() as any;
           const wkMatch = (data.path || "").match(/modules\/week(\d)\//i);
           if (!wkMatch) continue;
 
           const wk = Number(wkMatch[1]) as 1 | 2 | 3 | 4;
           if (data.done) {
-            tallies[wk].reviewed += 1;
-            if (data.approved) tallies[wk].approved += 1;
-            else tallies[wk].waiting += 1;
+            tallies[wk].reviewed++;
+            if (data.approved) tallies[wk].approved++;
+            else tallies[wk].waiting++;
           }
         }
 
@@ -246,12 +113,6 @@ export default function SupervisorPage() {
         setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
       } catch {
         if (!alive) return;
-        setWeeks([
-          { week: 1, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 2, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 3, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 4, waiting: 0, reviewed: 0, approved: 0 },
-        ]);
       } finally {
         if (alive) setLoading(false);
       }
@@ -262,12 +123,7 @@ export default function SupervisorPage() {
     };
   }, [uid]);
 
-  const checking = resolvingStore || storeCtxLoading;
-
-  /* ============================================================
-     ===================== RENDER UI =============================
-     ============================================================ */
-
+  /* ---------------- RENDER UI ---------------- */
   return (
     <div className="space-y-6">
       <header>
@@ -282,10 +138,10 @@ export default function SupervisorPage() {
         {weeks.map((w) => (
           <Link
             key={w.week}
-            href={`/supervisor/week${w.week}${uid ? `?as=${encodeURIComponent(uid)}` : ""}`}
-            className="block focus:outline-none"
+            href={`/supervisor/week${w.week}?as=${uid}`}
+            className="block"
           >
-            <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
+            <Card className="border-primary/20 hover:shadow-md cursor-pointer transition">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Week {w.week}</CardTitle>
                 <CardDescription>
@@ -294,21 +150,18 @@ export default function SupervisorPage() {
                     : `${w.waiting} pending, ${w.approved}/${w.reviewed} approved`}
                 </CardDescription>
               </CardHeader>
-              <CardContent></CardContent>
             </Card>
           </Link>
         ))}
       </div>
 
-      {/* Trainees list */}
+      {/* Trainees */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
 
           {trainees.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No trainees assigned yet.
-            </p>
+            <p className="text-sm text-muted-foreground">No trainees assigned yet.</p>
           ) : (
             <div className="grid gap-2">
               {trainees.map((t) => (
@@ -317,10 +170,10 @@ export default function SupervisorPage() {
                   href={`/supervisor/week1?as=${t.traineeId}`}
                   className="block border p-3 rounded-lg bg-white hover:bg-primary/5 transition"
                 >
-                  <div className="font-medium">{t.traineeId}</div>
-                  <div className="text-xs text-muted-foreground">
-                    Tap to review
+                  <div className="font-medium">
+                    {t.traineeEmail || t.traineeId}
                   </div>
+                  <div className="text-xs text-muted-foreground">Tap to review</div>
                 </Link>
               ))}
             </div>
@@ -328,14 +181,10 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* Notes card */}
-      {checking ? (
-        <div className="rounded-xl border bg-white/60 p-4 text-sm text-gray-600">
-          Checking store assignment…
-        </div>
-      ) : storeId ? (
+      {/* Notes link */}
+      {storeId && (
         <Link
-          href={`/supervisor/notes?store=${encodeURIComponent(storeId)}`}
+          href={`/supervisor/notes?store=${storeId}`}
           className="block focus:outline-none"
         >
           <Card className="border-primary/30 bg-white hover:bg-primary/5 transition">
@@ -349,17 +198,11 @@ export default function SupervisorPage() {
             </CardContent>
           </Card>
         </Link>
-      ) : (
-        <div className="rounded-xl border bg-white/60 p-4 text-sm">
-          <div className="font-semibold mb-1">No store assigned</div>
-          <div className="text-gray-600">
-            Ask an admin to assign this supervisor to a store.
-          </div>
-        </div>
       )}
     </div>
   );
 }
+
 
 
 
