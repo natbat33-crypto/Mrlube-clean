@@ -14,17 +14,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
 
-  // Open by default on desktop
+  // Open sidebar on desktop
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1024) setOpen(true);
+    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+      setOpen(true);
+    }
   }, []);
 
-  // Close sidebar on route change (useful on mobile)
+  // Close sidebar on route change (mobile)
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 1024) setOpen(false);
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setOpen(false);
+    }
   }, [pathname]);
 
-  // 🔐 Auth guard — bounce to login if user is null
+  // If not logged in → redirect
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) router.replace("/auth/login");
@@ -38,9 +42,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const idle = "hover:bg-white/10 text-white/90";
 
   return (
-    <RoleGate expectedRole="admin">
+    // ✅ FIXED — correct prop for RoleGate
+    <RoleGate allow={["admin"]}>
       <div className="min-h-screen bg-background">
-        {/* Brand bar */}
+        {/* Top Brand Bar */}
         <div className="w-full bg-[#0b53a6] sticky top-0 z-40">
           <div className="px-4 sm:px-6 py-3 flex items-center justify-between">
             <Link href="/admin" className="flex items-center gap-3">
@@ -54,7 +59,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               className="p-2 rounded text-white hover:bg-white/10 lg:hidden"
               onClick={() => setOpen((v) => !v)}
               aria-label="Toggle sidebar"
-              title={open ? "Hide sidebar" : "Show sidebar"}
             >
               {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
@@ -83,9 +87,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <Building className="h-5 w-5" />
                   <span>Stores</span>
                 </Link>
+
+                <Link
+                  href="/admin/notes"
+                  className={`${item} ${pathname.startsWith("/admin/notes") ? active : idle}`}
+                  onClick={() => setOpen(false)}
+                >
+                 
+                  <span>Notes</span>
+                </Link>
               </nav>
 
-              {/* ✅ Sign out goes to /auth/logout (that page signs out + redirects) */}
+              {/* Sign out */}
               <div className="mt-auto px-2 pb-4">
                 <Link
                   href="/auth/logout"
@@ -98,12 +111,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           </aside>
 
-          {/* Click-away overlay (mobile) */}
+          {/* Overlay on mobile */}
           {open && (
             <button
               className="fixed inset-0 bg-black/50 z-20 lg:hidden"
               onClick={() => setOpen(false)}
-              aria-label="Close sidebar"
             />
           )}
 
