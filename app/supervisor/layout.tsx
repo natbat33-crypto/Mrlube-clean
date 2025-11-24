@@ -127,6 +127,9 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               <span className="px-3 py-1 rounded-full bg-[#f2b705] text-black font-semibold">
                 Training
               </span>
+
+              {/* 🔥 TEST INDICATOR */}
+              <span className="text-white font-bold text-sm">TEST123</span>
             </div>
 
             {/* Burger */}
@@ -180,7 +183,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </ul>
             </div>
 
-            {/* NOTES — FIXED WITH storeId */}
+            {/* NOTES */}
             {storeId && (
               <div className="mt-6">
                 <NavLink
@@ -222,7 +225,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
             © {new Date().getFullYear()} Mr. Lube. All rights reserved.
           </footer>
         </main>
-
       </div>
     </RoleGate>
   );
