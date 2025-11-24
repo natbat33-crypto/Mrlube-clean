@@ -1,6 +1,25 @@
 "use client";
 export const dynamic = "force-dynamic";
 
+/* ============================
+   SUPER SAFE TESTER BLOCK
+   ============================ */
+const Tester = () => (
+  <div
+    style={{
+      padding: "10px",
+      background: "#ff006e",
+      color: "white",
+      fontWeight: "bold",
+      borderRadius: "8px",
+      marginBottom: "20px",
+    }}
+  >
+    SUPERVISOR PAGE TESTER: THIS PAGE IS LOADING ✔️
+  </div>
+);
+/* ============================ */
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -46,7 +65,6 @@ function pickReviewUid(): string {
   );
 }
 
-/* same store resolver you already had */
 async function resolveStoreId(): Promise<string> {
   const u = auth.currentUser;
   if (u) {
@@ -90,7 +108,6 @@ export default function SupervisorPage() {
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  /* keep ?as override */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
@@ -101,14 +118,12 @@ export default function SupervisorPage() {
     }
   }, [uid]);
 
-  /* store override */
   useEffect(() => {
     if (!storeOverride) return;
     setStoreId(String(storeOverride));
     setResolvingStore(false);
   }, [storeOverride]);
 
-  /* as=<uid> resolve */
   useEffect(() => {
     if (!asUid) return;
     (async () => {
@@ -124,7 +139,6 @@ export default function SupervisorPage() {
     })();
   }, [asUid]);
 
-  /* prefer storeCtx */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) {
@@ -133,7 +147,6 @@ export default function SupervisorPage() {
     }
   }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
 
-  /* fallback infer store */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) return;
@@ -204,7 +217,6 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  /* week tallies (unchanged) */
   useEffect(() => {
     let alive = true;
 
@@ -288,12 +300,11 @@ export default function SupervisorPage() {
 
   const checking = resolvingStore || storeCtxLoading;
 
-  /* ============================================================
-     RENDER UI — with EMAIL now instead of UID
-     ============================================================ */
-
   return (
     <div className="space-y-6">
+      {/* TESTER AT TOP */}
+      <Tester />
+
       <header>
         <h1 className="text-2xl font-bold text-primary">Supervisor Dashboard</h1>
         <p className="text-muted-foreground mt-1">
@@ -301,7 +312,6 @@ export default function SupervisorPage() {
         </p>
       </header>
 
-      {/* WEEK CARDS — unchanged */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {weeks.map((w) => (
           <Link
@@ -324,7 +334,6 @@ export default function SupervisorPage() {
         ))}
       </div>
 
-      {/* TRAINEES LIST — NOW SHOWS EMAIL */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
@@ -354,7 +363,6 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* NOTES — works exactly like Dev */}
       {checking ? (
         <div className="rounded-xl border bg-white/60 p-4 text-sm text-gray-600">
           Checking store assignment…
@@ -384,7 +392,6 @@ export default function SupervisorPage() {
     </div>
   );
 }
-
 
 
 
