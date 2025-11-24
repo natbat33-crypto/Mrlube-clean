@@ -14,25 +14,18 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { auth, db } from "@/lib/firebase";
-import { signOut, onAuthStateChanged } from "firebase/auth";
+import { signOut } from "firebase/auth";
 import RoleGate from "@/components/RoleGate";
 import { doc, getDoc } from "firebase/firestore";
 
 export default function SupervisorLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+
+  // FORCE SIDEBAR CLOSED unless user opens it
   const [open, setOpen] = React.useState(false);
-  const [email, setEmail] = React.useState<string | null>(null);
   const [storeId, setStoreId] = React.useState<string | null>(null);
 
-  /* Load user email */
-  React.useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setEmail(u?.email ?? null);
-    });
-    return () => unsub();
-  }, []);
-
-  /* Load Store ID */
+  // Load storeId
   React.useEffect(() => {
     async function load() {
       const u = auth.currentUser;
@@ -57,7 +50,8 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
     load();
   }, []);
 
-  /* ❗ FIXED — Removed auto-open (THIS was the entire problem) */
+  // 🔥 WE REMOVE THE DESKTOP AUTO-OPEN ENTIRELY
+  // This is WHY it wouldn't close before.
 
   const NavLink = ({
     href,
@@ -74,12 +68,12 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         href={href}
         onClick={() => setOpen(false)}
         className={`flex items-center gap-3 px-3 py-3 lg:py-2 rounded-lg transition-colors
-        text-sm lg:text-base
-        ${
-          active
-            ? "bg-white/20 text-white font-semibold"
-            : "text-blue-100/80 hover:text-white hover:bg-white/10"
-        }`}
+          text-sm lg:text-base
+          ${
+            active
+              ? "bg-white/20 text-white font-semibold"
+              : "text-blue-100/80 hover:text-white hover:bg-white/10"
+          }`}
       >
         {icon}
         {label}
@@ -94,11 +88,11 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         href={href}
         onClick={() => setOpen(false)}
         className={`block px-3 py-2 rounded-lg text-sm lg:text-base transition-colors
-        ${
-          active
-            ? "bg-white/20 text-white font-semibold"
-            : "text-blue-100/80 hover:text-white hover:bg-white/10"
-        }`}
+          ${
+            active
+              ? "bg-white/20 text-white font-semibold"
+              : "text-blue-100/80 hover:text-white hover:bg-white/10"
+          }`}
       >
         {label}
       </Link>
@@ -108,7 +102,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
   return (
     <RoleGate allow={["supervisor", "admin"]}>
       <div className="min-h-screen bg-[#f7f7f7]">
-
+        
         {/* TOP BAR */}
         <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">
           <div className="h-full px-4 flex items-center justify-between">
@@ -125,7 +119,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
 
             {/* BURGER */}
             <button
-              onClick={() => setOpen(!open)}
+              onClick={() => setOpen((p) => !p)}
               className="p-2 rounded hover:bg-white/10"
             >
               {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
@@ -136,21 +130,18 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         {/* SIDEBAR */}
         <aside
           className={`fixed top-14 bottom-0 left-0 w-72 bg-[#0b53a6] text-white shadow-xl
-          transition-transform duration-300 z-40
-          ${open ? "translate-x-0" : "-translate-x-full"}
-          lg:translate-x-0 lg:w-64`}
+            transition-transform duration-300 z-40
+            ${
+              open
+                ? "translate-x-0"
+                : "-translate-x-full"
+            }
+            lg:w-64`}
         >
           <div className="h-full flex flex-col p-4 lg:p-6">
 
-            {/* EMAIL */}
-            {email && (
-              <div className="mb-4 px-3 text-sm text-blue-100/90">
-                Logged in as:
-                <div className="font-semibold text-white">{email}</div>
-              </div>
-            )}
+            {/* REMOVED LOGGED IN AS PART */}
 
-            {/* DASHBOARD */}
             <NavLink
               href="/supervisor"
               label="Dashboard"
@@ -192,10 +183,11 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
             >
               <LogOut className="h-5 w-5" /> Sign out
             </button>
+
           </div>
         </aside>
 
-        {/* OVERLAY (only mobile) */}
+        {/* OVERLAY FOR MOBILE */}
         {open && (
           <div
             className="fixed inset-0 bg-black/40 z-30 lg:hidden"
@@ -215,6 +207,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
             © {new Date().getFullYear()} Mr. Lube. All rights reserved.
           </footer>
         </main>
+
       </div>
     </RoleGate>
   );
