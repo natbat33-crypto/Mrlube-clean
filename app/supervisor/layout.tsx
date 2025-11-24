@@ -24,7 +24,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
   const [email, setEmail] = React.useState<string | null>(null);
   const [storeId, setStoreId] = React.useState<string | null>(null);
 
-  // Load the logged-in user's email
+  // Load user email
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setEmail(u?.email ?? null);
@@ -32,20 +32,19 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
     return () => unsub();
   }, []);
 
-  // Load storeId for supervisor (required for Notes link)
+  // Load storeId
   React.useEffect(() => {
     async function loadStore() {
       const u = auth.currentUser;
       if (!u) return;
 
-      // First check token claims
       const tok = await u.getIdTokenResult(true);
       if (tok?.claims?.storeId) {
         setStoreId(String(tok.claims.storeId));
         return;
       }
 
-      // Fallback: match store in /stores/*/employees/{uid}
+      // Fallback employee lookup
       const knownStores = ["24", "26", "46", "79", "163", "262", "276", "298"];
       for (const sid of knownStores) {
         const ref = doc(db, "stores", sid, "employees", u.uid);
@@ -59,7 +58,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
     loadStore();
   }, []);
 
-  // Sidebar auto-open on desktop
+  // Auto-open sidebar on desktop
   React.useEffect(() => {
     if (typeof window !== "undefined" && window.innerWidth >= 1024) {
       setOpen(true);
@@ -119,7 +118,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         {/* TOP BAR */}
         <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">
           <div className="h-full px-4 flex items-center justify-between">
-            {/* Brand */}
+
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 rounded-full bg-[#0b53a6] text-white font-extrabold">
                 Mr. Lube
@@ -127,9 +126,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               <span className="px-3 py-1 rounded-full bg-[#f2b705] text-black font-semibold">
                 Training
               </span>
-
-              {/* 🔥 TEST INDICATOR */}
-              <span className="text-white font-bold text-sm">TEST123</span>
             </div>
 
             {/* Burger */}
@@ -151,7 +147,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         >
           <div className="h-full flex flex-col p-4 lg:p-6">
 
-            {/* USER EMAIL */}
+            {/* USER */}
             {email && (
               <div className="mb-4 px-3 text-sm text-blue-100/90">
                 Logged in as:
@@ -159,14 +155,14 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
-            {/* DASHBOARD */}
+            {/* Dashboard */}
             <NavLink
               href="/supervisor"
               label="Dashboard"
               icon={<Users className="h-5 w-5 lg:h-4 lg:w-4" />}
             />
 
-            {/* REVIEW BLOCK */}
+            {/* Review Section */}
             <div className="mt-4">
               <div className="px-3 py-2 text-white/70 flex items-center justify-between">
                 <span className="flex items-center gap-2">
@@ -183,7 +179,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </ul>
             </div>
 
-            {/* NOTES */}
+            {/* Notes */}
             {storeId && (
               <div className="mt-6">
                 <NavLink
@@ -194,7 +190,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
-            {/* SIGN OUT */}
+            {/* Sign Out */}
             <button
               onClick={() => signOut(auth)}
               className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-red-100 hover:bg-red-500/20"
@@ -205,7 +201,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
           </div>
         </aside>
 
-        {/* OVERLAY */}
+        {/* OVERLAY FOR MOBILE */}
         {open && (
           <div
             className="fixed inset-0 bg-black/40 z-30 lg:hidden"
@@ -213,7 +209,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
           />
         )}
 
-        {/* CONTENT */}
+        {/* MAIN CONTENT */}
         <main
           className={`transition-all duration-300 p-4 lg:p-6 ${
             open ? "lg:ml-64" : ""
