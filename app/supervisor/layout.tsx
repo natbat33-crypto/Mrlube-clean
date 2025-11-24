@@ -24,7 +24,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
   const [email, setEmail] = React.useState<string | null>(null);
   const [storeId, setStoreId] = React.useState<string | null>(null);
 
-  // Load user email
+  /* Load user email */
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setEmail(u?.email ?? null);
@@ -32,9 +32,9 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
     return () => unsub();
   }, []);
 
-  // Load storeId
+  /* Load Store ID */
   React.useEffect(() => {
-    async function loadStore() {
+    async function load() {
       const u = auth.currentUser;
       if (!u) return;
 
@@ -44,7 +44,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         return;
       }
 
-      // Fallback employee lookup
       const knownStores = ["24", "26", "46", "79", "163", "262", "276", "298"];
       for (const sid of knownStores) {
         const ref = doc(db, "stores", sid, "employees", u.uid);
@@ -55,15 +54,10 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         }
       }
     }
-    loadStore();
+    load();
   }, []);
 
-  // Auto-open sidebar on desktop
-  React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
-      setOpen(true);
-    }
-  }, []);
+  /* ❗ FIXED — Removed auto-open (THIS was the entire problem) */
 
   const NavLink = ({
     href,
@@ -80,12 +74,12 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         href={href}
         onClick={() => setOpen(false)}
         className={`flex items-center gap-3 px-3 py-3 lg:py-2 rounded-lg transition-colors
-          text-sm lg:text-base
-          ${
-            active
-              ? "bg-white/20 text-white font-semibold"
-              : "text-blue-100/80 hover:text-white hover:bg-white/10"
-          }`}
+        text-sm lg:text-base
+        ${
+          active
+            ? "bg-white/20 text-white font-semibold"
+            : "text-blue-100/80 hover:text-white hover:bg-white/10"
+        }`}
       >
         {icon}
         {label}
@@ -100,11 +94,11 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         href={href}
         onClick={() => setOpen(false)}
         className={`block px-3 py-2 rounded-lg text-sm lg:text-base transition-colors
-          ${
-            active
-              ? "bg-white/20 text-white font-semibold"
-              : "text-blue-100/80 hover:text-white hover:bg-white/10"
-          }`}
+        ${
+          active
+            ? "bg-white/20 text-white font-semibold"
+            : "text-blue-100/80 hover:text-white hover:bg-white/10"
+        }`}
       >
         {label}
       </Link>
@@ -119,6 +113,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">
           <div className="h-full px-4 flex items-center justify-between">
 
+            {/* BRAND */}
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 rounded-full bg-[#0b53a6] text-white font-extrabold">
                 Mr. Lube
@@ -128,7 +123,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </span>
             </div>
 
-            {/* Burger */}
+            {/* BURGER */}
             <button
               onClick={() => setOpen(!open)}
               className="p-2 rounded hover:bg-white/10"
@@ -141,13 +136,13 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
         {/* SIDEBAR */}
         <aside
           className={`fixed top-14 bottom-0 left-0 w-72 bg-[#0b53a6] text-white shadow-xl
-            transition-transform duration-300 z-40
-            ${open ? "translate-x-0" : "-translate-x-full"}
-            lg:translate-x-0 lg:w-64`}
+          transition-transform duration-300 z-40
+          ${open ? "translate-x-0" : "-translate-x-full"}
+          lg:translate-x-0 lg:w-64`}
         >
           <div className="h-full flex flex-col p-4 lg:p-6">
 
-            {/* USER */}
+            {/* EMAIL */}
             {email && (
               <div className="mb-4 px-3 text-sm text-blue-100/90">
                 Logged in as:
@@ -155,14 +150,14 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
-            {/* Dashboard */}
+            {/* DASHBOARD */}
             <NavLink
               href="/supervisor"
               label="Dashboard"
               icon={<Users className="h-5 w-5 lg:h-4 lg:w-4" />}
             />
 
-            {/* Review Section */}
+            {/* REVIEW */}
             <div className="mt-4">
               <div className="px-3 py-2 text-white/70 flex items-center justify-between">
                 <span className="flex items-center gap-2">
@@ -179,7 +174,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </ul>
             </div>
 
-            {/* Notes */}
+            {/* NOTES */}
             {storeId && (
               <div className="mt-6">
                 <NavLink
@@ -190,18 +185,17 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
-            {/* Sign Out */}
+            {/* SIGN OUT */}
             <button
               onClick={() => signOut(auth)}
               className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-red-100 hover:bg-red-500/20"
             >
               <LogOut className="h-5 w-5" /> Sign out
             </button>
-
           </div>
         </aside>
 
-        {/* OVERLAY FOR MOBILE */}
+        {/* OVERLAY (only mobile) */}
         {open && (
           <div
             className="fixed inset-0 bg-black/40 z-30 lg:hidden"
