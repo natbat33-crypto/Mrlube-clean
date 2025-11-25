@@ -24,7 +24,7 @@ type Store = {
   number: number;
   name: string;
   address: string;
-  managerUid?: string | null;
+  managerId?: string | null;   // <--- FIXED (was managerUid)
 };
 
 type UserLite = {
@@ -52,27 +52,27 @@ export default function StoresPage() {
         // 1) Load stores
         const qy = query(collection(db, "stores"), orderBy("number", "asc"));
         const snap = await getDocs(qy);
+
         const list: Store[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) }));
+
         if (!alive) return;
         setStores(list);
 
-        // 2) Load manager names (but use employees subcollection for the email)
+        // 2) Load manager names using store employees subcollection
         const nameMap: Record<string, UserLite> = {};
 
         for (const store of list) {
-          if (!store.managerUid) continue;
+          if (!store.managerId) continue;
 
-          // Get manager doc from store employees
           const empRef = collection(db, "stores", store.id, "employees");
-          const qemp = query(empRef, where("uid", "==", store.managerUid));
+          const qemp = query(empRef, where("uid", "==", store.managerId));
           const empSnap = await getDocs(qemp);
 
           empSnap.forEach((e) => {
             const data = e.data() as any;
-            nameMap[store.managerUid!] = {
-              displayName:
-                data.displayName ?? data.name ?? null,
+            nameMap[store.managerId!] = {
+              displayName: data.displayName ?? data.name ?? null,
               name: data.name ?? null,
               email: data.email ?? null,
             };
@@ -85,6 +85,7 @@ export default function StoresPage() {
         if (alive) setLoading(false);
       }
     })();
+
     return () => {
       alive = false;
     };
@@ -93,7 +94,8 @@ export default function StoresPage() {
   const cards = useMemo(
     () =>
       stores.map((s) => {
-        const uinfo = s.managerUid ? mgrNames[s.managerUid] : undefined;
+        const uinfo = s.managerId ? mgrNames[s.managerId] : undefined;
+
         const friendly =
           uinfo?.displayName ??
           uinfo?.name ??
@@ -106,6 +108,7 @@ export default function StoresPage() {
                 <CardTitle className="text-[15px] font-semibold">
                   Store #{s.number}
                 </CardTitle>
+
                 {s.name ? (
                   <CardDescription className="muted line-clamp-1">
                     {s.name}
@@ -118,7 +121,8 @@ export default function StoresPage() {
 
                 <div className="mt-3 flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Manager</span>
-                  {s.managerUid ? (
+
+                  {s.managerId ? (
                     <span className="pill">{friendly ?? "Assigned"}</span>
                   ) : (
                     <span className="pill-warning">Unassigned</span>
