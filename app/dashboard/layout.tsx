@@ -14,38 +14,32 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // 👇 Allow BOTH legacy "employee" and new "trainee" roles
   return (
     <>
-      <RoleGate expectedRole="employee">
+      {/* FIXED: NEW RoleGate syntax */}
+      <RoleGate allow={["employee"]}>
         <DashboardShell>{children}</DashboardShell>
       </RoleGate>
 
-      <RoleGate expectedRole="trainee">
+      <RoleGate allow={["trainee"]}>
         <DashboardShell>{children}</DashboardShell>
       </RoleGate>
     </>
   );
 }
 
-/**
- * DashboardShell = your existing trainee layout.
- * We use it for both employee + trainee via RoleGate above.
- */
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [modulesOpen, setModulesOpen] = React.useState(false);
 
-  // Open sidebar by default on desktop
   React.useEffect(() => {
     if (typeof window !== "undefined" && window.innerWidth >= 1024) {
       setOpen(true);
     }
   }, []);
 
-  // 🔐 Guard: if auth user becomes null (sign out / token expiry), go to login
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) router.replace("/auth/login");
@@ -84,7 +78,6 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         <nav className="px-3 py-4 space-y-1 text-sm">
           <NavLink href="/dashboard" label="Dashboard Home" />
 
-          {/* Training modules dropdown */}
           <div>
             <button
               onClick={() => setModulesOpen((v) => !v)}
@@ -97,6 +90,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 }`}
               />
             </button>
+
             {modulesOpen && (
               <div className="ml-4 mt-1 space-y-1">
                 <NavLink href="/modules/week1" label="Week 1 – Orientation" />
@@ -108,7 +102,6 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </nav>
 
-        {/* Sign out */}
         <div className="absolute bottom-0 left-0 w-full px-3 py-4 border-t border-[#09448a]">
           <button
             type="button"
@@ -116,7 +109,6 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               try {
                 await signOut(auth);
               } finally {
-                // Hard navigation ensures we leave any protected layout instantly
                 window.location.assign("/auth/login");
               }
             }}
@@ -128,9 +120,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main content area */}
       <div className="flex-1 flex flex-col">
-        {/* Top bar */}
         <header className="w-full bg-[#0b53a6] text-white sticky top-0 z-30 flex items-center justify-between px-4 py-3 shadow">
           <button onClick={() => setOpen((v) => !v)} className="lg:hidden">
             <Menu className="w-6 h-6" />
