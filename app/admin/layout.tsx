@@ -52,7 +52,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </span>
             </Link>
 
-            {/* Mobile toggle only (lg:hidden) */}
+            {/* Mobile toggle */}
             <button
               className="p-2 rounded text-white hover:bg-white/10 lg:hidden"
               onClick={() => setOpen((v) => !v)}
@@ -66,10 +66,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="relative">
           {/* Sidebar */}
           <aside
-            className={`fixed top-[56px] left-0 bottom-0 z-30 w-64 bg-[#0b53a6] text-white shadow-lg
-              transform transition-transform duration-300 ease-in-out
+            className={`
+              fixed top-[56px] left-0 bottom-0 z-30 w-64 bg-[#0b53a6] text-white shadow-lg
+              transform 
+              transition-transform duration-300 ease-in-out
               ${open ? "translate-x-0" : "-translate-x-full"}
-              lg:translate-x-0`}
+              lg:translate-x-0
+            `}
           >
             <div className="h-full flex flex-col">
               <div className="px-4 py-3 text-xs uppercase tracking-wide opacity-80">
@@ -82,14 +85,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   className={`${item} ${
                     pathname.startsWith("/admin/stores") ? active : idle
                   }`}
-                  onClick={() => setOpen(false)} // mobile only
+                  onClick={() => setOpen(false)} // mobile close
                 >
                   <Building className="h-5 w-5" />
                   <span>Stores</span>
                 </Link>
               </nav>
 
-              {/* Sign out */}
               <div className="mt-auto px-2 pb-4">
                 <Link
                   href="/auth/logout"
@@ -119,4 +121,3 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     </RoleGate>
   );
 }
-
