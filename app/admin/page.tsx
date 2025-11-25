@@ -28,19 +28,7 @@ export default function AdminHome() {
           </Link>
         </div>
 
-        {/* Notes */}
-        <div className="rounded-xl border bg-white/50 p-6">
-          <h2 className="text-xl font-semibold mb-2">Notes</h2>
-          <p className="text-sm text-gray-600 mb-3">
-            Message any manager across any store.
-          </p>
-          <Link
-            href="/admin/notes"
-            className="inline-flex items-center text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
-          >
-            Open Notes →
-          </Link>
-        </div>
+        {/* Notes removed (no card here anymore) */}
       </main>
     </RoleGate>
   );
