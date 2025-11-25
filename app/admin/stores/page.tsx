@@ -1,4 +1,3 @@
-// app/admin/stores/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -50,7 +49,7 @@ export default function StoresPage() {
       try {
         setLoading(true);
 
-        // 1) stores
+        // 1) Load stores
         const qy = query(collection(db, "stores"), orderBy("number", "asc"));
         const snap = await getDocs(qy);
         const list: Store[] = [];
@@ -58,32 +57,28 @@ export default function StoresPage() {
         if (!alive) return;
         setStores(list);
 
-        // 2) manager names (optional)
-        const uids = Array.from(
-          new Set(
-            list
-              .map((s) => s.managerUid)
-              .filter((v): v is string => !!v && typeof v === "string")
-          )
-        );
-        if (uids.length === 0) {
-          if (!alive) return;
-          setMgrNames({});
-          return;
-        }
+        // 2) Load manager names (but use employees subcollection for the email)
         const nameMap: Record<string, UserLite> = {};
-        for (const ids of chunk(uids, 10)) {
-          const qUsers = query(collection(db, "users"), where(documentId(), "in", ids));
-          const userSnap = await getDocs(qUsers);
-          userSnap.forEach((ud) => {
-            const data = ud.data() as any;
-            nameMap[ud.id] = {
-              displayName: data?.displayName ?? data?.name ?? null,
-              name: data?.name ?? null,
-              email: data?.email ?? null,
+
+        for (const store of list) {
+          if (!store.managerUid) continue;
+
+          // Get manager doc from store employees
+          const empRef = collection(db, "stores", store.id, "employees");
+          const qemp = query(empRef, where("uid", "==", store.managerUid));
+          const empSnap = await getDocs(qemp);
+
+          empSnap.forEach((e) => {
+            const data = e.data() as any;
+            nameMap[store.managerUid!] = {
+              displayName:
+                data.displayName ?? data.name ?? null,
+              name: data.name ?? null,
+              email: data.email ?? null,
             };
           });
         }
+
         if (!alive) return;
         setMgrNames(nameMap);
       } finally {
@@ -100,7 +95,9 @@ export default function StoresPage() {
       stores.map((s) => {
         const uinfo = s.managerUid ? mgrNames[s.managerUid] : undefined;
         const friendly =
-          uinfo?.displayName ?? uinfo?.name ?? (uinfo?.email ? uinfo.email : null);
+          uinfo?.displayName ??
+          uinfo?.name ??
+          (uinfo?.email ? uinfo.email : null);
 
         return (
           <Link key={s.id} href={`/admin/stores/${s.id}`} className="block">
@@ -110,7 +107,9 @@ export default function StoresPage() {
                   Store #{s.number}
                 </CardTitle>
                 {s.name ? (
-                  <CardDescription className="muted line-clamp-1">{s.name}</CardDescription>
+                  <CardDescription className="muted line-clamp-1">
+                    {s.name}
+                  </CardDescription>
                 ) : null}
               </CardHeader>
 
@@ -120,9 +119,7 @@ export default function StoresPage() {
                 <div className="mt-3 flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Manager</span>
                   {s.managerUid ? (
-                    <span className="pill">
-                      {friendly ?? "Assigned"}
-                    </span>
+                    <span className="pill">{friendly ?? "Assigned"}</span>
                   ) : (
                     <span className="pill-warning">Unassigned</span>
                   )}
@@ -165,7 +162,6 @@ export default function StoresPage() {
         </div>
       )}
 
-      {/* Local styles for nicer spacing + mobile polish */}
       <style jsx global>{`
         .admin-stores {
           --line: #eaecef;
@@ -177,7 +173,7 @@ export default function StoresPage() {
           background: #fff;
           display: flex;
           flex-direction: column;
-          min-height: 150px;       /* consistent height without big empty space */
+          min-height: 150px;
         }
         .muted {
           color: #6b7280;
@@ -202,7 +198,6 @@ export default function StoresPage() {
           border-radius: 999px;
           line-height: 1;
         }
-        /* simple line clamp without Tailwind plugin */
         .line-clamp-1 {
           display: -webkit-box;
           -webkit-line-clamp: 1;
@@ -215,8 +210,6 @@ export default function StoresPage() {
           -webkit-box-orient: vertical;
           overflow: hidden;
         }
-
-        /* Mobile tweaks: larger tap area, tighter inner spacing */
         @media (max-width: 640px) {
           .store-card {
             border-radius: 12px;
@@ -229,4 +222,5 @@ export default function StoresPage() {
     </main>
   );
 }
+
 
