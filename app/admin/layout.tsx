@@ -13,21 +13,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
 
-  // Open sidebar by default on desktop
+  // Open by default on desktop
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
-      setOpen(true);
-    }
+    if (window.innerWidth >= 1024) setOpen(true);
   }, []);
 
-  // Close on route change for mobile only
+  // Close on route change (mobile only)
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 1024) {
-      setOpen(false);
-    }
+    if (window.innerWidth < 1024) setOpen(false);
   }, [pathname]);
 
-  // Redirect if not logged in
+  // Auth guard
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) router.replace("/auth/login");
@@ -42,7 +38,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <RoleGate allow={["admin"]}>
       <div className="min-h-screen bg-background">
-        {/* Top Bar */}
+        {/* HEADER */}
         <div className="w-full bg-[#0b53a6] sticky top-0 z-40">
           <div className="px-4 sm:px-6 py-3 flex items-center justify-between">
             <Link href="/admin" className="flex items-center gap-3">
@@ -52,7 +48,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </span>
             </Link>
 
-            {/* Mobile toggle */}
+            {/* MOBILE TOGGLE */}
             <button
               className="p-2 rounded text-white hover:bg-white/10 lg:hidden"
               onClick={() => setOpen((v) => !v)}
@@ -64,12 +60,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
 
         <div className="relative">
-          {/* Sidebar */}
+          {/* SIDEBAR */}
           <aside
             className={`
               fixed top-[56px] left-0 bottom-0 z-30 w-64 bg-[#0b53a6] text-white shadow-lg
-              transform 
-              transition-transform duration-300 ease-in-out
+              transform transition-transform duration-300 ease-in-out
               ${open ? "translate-x-0" : "-translate-x-full"}
               lg:translate-x-0
             `}
@@ -85,7 +80,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   className={`${item} ${
                     pathname.startsWith("/admin/stores") ? active : idle
                   }`}
-                  onClick={() => setOpen(false)} // mobile close
+                  onClick={() => setOpen(false)}
                 >
                   <Building className="h-5 w-5" />
                   <span>Stores</span>
@@ -104,7 +99,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           </aside>
 
-          {/* Mobile-only overlay */}
+          {/* BACKDROP */}
           {open && (
             <button
               className="fixed inset-0 bg-black/50 z-20 lg:hidden"
@@ -112,8 +107,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             />
           )}
 
-          {/* Main content */}
-          <main className="relative z-10 p-4 lg:p-6 transition-[margin] duration-300 lg:ml-64">
+          {/* MAIN */}
+          <main className="relative z-10 p-4 lg:p-6 transition-all duration-300 lg:ml-64">
             {children}
           </main>
         </div>
