@@ -3,12 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
-import {
-  collection,
-  getDocs,
-  orderBy,
-  query,
-} from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import {
   Card,
   CardContent,
@@ -35,7 +30,6 @@ export default function StoresPage() {
       try {
         setLoading(true);
 
-        // Load all stores sorted by store number
         const qy = query(collection(db, "stores"), orderBy("number", "asc"));
         const snap = await getDocs(qy);
 
@@ -44,7 +38,6 @@ export default function StoresPage() {
 
         if (!alive) return;
         setStores(list);
-
       } finally {
         if (alive) setLoading(false);
       }
@@ -73,7 +66,8 @@ export default function StoresPage() {
             </CardHeader>
 
             <CardContent className="pt-3">
-              <div className="text-sm line-clamp-2">{s.address}</div>
+              {/* FIXED — always show address, no clamp */}
+              <div className="text-sm">{s.address}</div>
             </CardContent>
           </Card>
         </Link>
