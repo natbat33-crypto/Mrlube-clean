@@ -14,21 +14,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
 
-  // Open sidebar on desktop
+  // Auto-open on desktop
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
-      setOpen(true);
-    }
+    if (window.innerWidth >= 1024) setOpen(true);
   }, []);
 
-  // Close sidebar on route change (mobile)
+  // Auto-close on route change (mobile)
   React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 1024) {
-      setOpen(false);
-    }
+    if (window.innerWidth < 1024) setOpen(false);
   }, [pathname]);
 
-  // If not logged in → redirect
+  // Redirect if not logged in
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) router.replace("/auth/login");
@@ -42,12 +38,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const idle = "hover:bg-white/10 text-white/90";
 
   return (
-    // ✅ FIXED — correct prop for RoleGate
     <RoleGate allow={["admin"]}>
       <div className="min-h-screen bg-background">
-        {/* Top Brand Bar */}
+        {/* Top Navigation Bar */}
         <div className="w-full bg-[#0b53a6] sticky top-0 z-40">
           <div className="px-4 sm:px-6 py-3 flex items-center justify-between">
+            {/* Brand */}
             <Link href="/admin" className="flex items-center gap-3">
               <span className="text-white font-extrabold text-lg">Mr. Lube</span>
               <span className="inline-flex items-center rounded-full bg-[#f2b705] text-[#1b1b1b] font-bold px-3 py-1">
@@ -55,6 +51,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </span>
             </Link>
 
+            {/* Mobile toggle */}
             <button
               className="p-2 rounded text-white hover:bg-white/10 lg:hidden"
               onClick={() => setOpen((v) => !v)}
@@ -73,29 +70,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                         ${open ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}
           >
             <div className="h-full flex flex-col">
+              {/* Section Label */}
               <div className="px-4 py-3 text-xs uppercase tracking-wide opacity-80">
                 Navigation
               </div>
 
+              {/* Navigation links */}
               <nav className="px-2 space-y-1">
                 <Link
                   href="/admin/stores"
-                  className={`${item} ${pathname.startsWith("/admin/stores") ? active : idle}`}
-                  aria-current={pathname.startsWith("/admin/stores") ? "page" : undefined}
+                  className={`${item} ${
+                    pathname.startsWith("/admin/stores") ? active : idle
+                  }`}
                   onClick={() => setOpen(false)}
                 >
                   <Building className="h-5 w-5" />
                   <span>Stores</span>
                 </Link>
 
-                <Link
-                  href="/admin/notes"
-                  className={`${item} ${pathname.startsWith("/admin/notes") ? active : idle}`}
-                  onClick={() => setOpen(false)}
-                >
-                 
-                  <span>Notes</span>
-                </Link>
+                {/* ❌ Notes Removed */}
               </nav>
 
               {/* Sign out */}
@@ -111,7 +104,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
           </aside>
 
-          {/* Overlay on mobile */}
+          {/* Mobile overlay */}
           {open && (
             <button
               className="fixed inset-0 bg-black/50 z-20 lg:hidden"
@@ -119,7 +112,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             />
           )}
 
-          {/* Content */}
+          {/* Main Content */}
           <main className="relative z-10 p-4 lg:p-6 transition-[margin] duration-300 lg:ml-64">
             {children}
           </main>
