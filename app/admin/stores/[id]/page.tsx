@@ -1,4 +1,3 @@
-// app/admin/stores/[id]/page.tsx
 import Link from "next/link";
 import { adminDb } from "@/lib/firebase-admin";
 
@@ -6,7 +5,6 @@ interface StorePageProps {
   params: { id: string };
 }
 
-// Server page (no cache) so Firestore changes show immediately
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,7 +14,6 @@ type StoreDoc = {
   number: number;
   name: string;
   address: string;
-  managerUid?: string | null;
 };
 
 type AnyDoc = Record<string, any>;
@@ -32,32 +29,21 @@ async function resolveUserLabel(uid?: string | null) {
   return u?.displayName || u?.name || u?.email || null;
 }
 
-/**
- * Count total "template" tasks in the program:
- *  - modules collection: document (week) -> subcollection "tasks"
- *  - days collection (for Day 1 etc.): document (day) -> subcollection "tasks"
- * We treat each task document as one required task.
- */
 async function getProgramTotalTasks(): Promise<number> {
   let total = 0;
 
-  // Modules (Week 1–4, etc.)
   try {
     const modulesSnap = await adminDb.collection("modules").get();
     for (const modDoc of modulesSnap.docs) {
       const tasksSnap = await modDoc.ref.collection("tasks").get();
       tasksSnap.forEach((t) => {
         const td = t.data() as AnyDoc;
-        // if "active" is explicitly false, skip it
         if (td.active === false) return;
         total += 1;
       });
     }
-  } catch {
-    // ignore; leave total as-is if modules not found
-  }
+  } catch {}
 
-  // Days (Day 1 orientation, etc.)
   try {
     const daysSnap = await adminDb.collection("days").get();
     for (const dayDoc of daysSnap.docs) {
@@ -68,22 +54,11 @@ async function getProgramTotalTasks(): Promise<number> {
         total += 1;
       });
     }
-  } catch {
-    // ignore; some installs may not have "days"
-  }
+  } catch {}
 
   return total;
 }
 
-/**
- * Count how many tasks a trainee has COMPLETED based on:
- *   users/{uid}/progress/*
- *
- * Each progress doc is treated as ONE task; it's "done" if:
- *   - done === true
- *   - approved === true
- *   - completed === true
- */
 async function getTraineeCompletedTasks(uid: string): Promise<number> {
   try {
     const snaps = await adminDb
@@ -95,7 +70,6 @@ async function getTraineeCompletedTasks(uid: string): Promise<number> {
     if (snaps.empty) return 0;
 
     let completed = 0;
-
     snaps.forEach((doc) => {
       const d = doc.data() as AnyDoc;
       if (d.done === true || d.approved === true || d.completed === true) {
@@ -109,9 +83,6 @@ async function getTraineeCompletedTasks(uid: string): Promise<number> {
   }
 }
 
-/**
- * Overall trainee percent across the whole program.
- */
 async function getTraineePercent(uid: string, programTotalTasks: number) {
   if (programTotalTasks <= 0) return 0;
   const completed = await getTraineeCompletedTasks(uid);
@@ -122,21 +93,35 @@ export default async function StorePage({ params }: StorePageProps) {
   const storeId = String(params.id);
   const storeRef = adminDb.collection("stores").doc(storeId);
 
-  // Store
   const storeSnap = await storeRef.get();
   const store = storeSnap.exists ? (storeSnap.data() as StoreDoc) : undefined;
   if (!store) return <main className="p-6">Store not found</main>;
 
+  // ---------------------------
+  // 🔥 FIXED MANAGER LOOKUP 🔥
+  // ---------------------------
+  let managerLabel: string | null = null;
+
+  const employeesSnap = await storeRef
+    .collection("employees")
+    .where("role", "==", "manager")
+    .get();
+
+  if (!employeesSnap.empty) {
+    const mgr = employeesSnap.docs[0].data() as AnyDoc;
+    managerLabel =
+      mgr.displayName ||
+      mgr.name ||
+      mgr.email ||
+      null;
+  }
+  // ---------------------------
+
   // Trainees
   const traineesSnap = await storeRef.collection("trainees").get();
 
-  // Manager badge
-  const managerLabel = await resolveUserLabel(store.managerUid);
-
-  // Compute the total tasks in the program ONCE for this page load
   const programTotalTasks = await getProgramTotalTasks();
 
-  // Build trainee rows
   const trainees = await Promise.all(
     traineesSnap.docs.map(async (row, i) => {
       const data = row.data() as AnyDoc;
@@ -165,6 +150,7 @@ export default async function StorePage({ params }: StorePageProps) {
         <p className="text-sm text-muted-foreground">{store.name}</p>
         <p className="mt-1 text-sm">{store.address}</p>
 
+        {/* Manager */}
         <section className="mt-5">
           <h2 className="text-sm font-semibold">Manager</h2>
           {managerLabel ? (
@@ -178,6 +164,7 @@ export default async function StorePage({ params }: StorePageProps) {
           )}
         </section>
 
+        {/* Trainees */}
         <section className="mt-6">
           <h2 className="text-sm font-semibold">Trainees</h2>
           {!trainees.length ? (
@@ -210,6 +197,7 @@ export default async function StorePage({ params }: StorePageProps) {
         </section>
       </div>
 
+      {/* Notes */}
       <div className="rounded-xl border border-[var(--line,#eaecef)] bg-white p-5">
         <h2 className="text-sm font-semibold">Notes</h2>
         <p className="mt-1 text-sm text-muted-foreground">
