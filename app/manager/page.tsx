@@ -21,7 +21,6 @@ type Emp = {
   name?: string;
   email?: string;
   active?: boolean;
-  storeId?: string | number;
 };
 
 type Store = {
@@ -30,9 +29,30 @@ type Store = {
   address: string;
 };
 
+/* -----------------------------------------------------------
+   REAL TASK PATHS USED FOR PROGRESS CALCULATION
+----------------------------------------------------------- */
+async function loadAllRealTasks(): Promise<string[]> {
+  const result: string[] = [];
+
+  // Helper to push IDs
+  async function addTasks(path: string[]) {
+    const snap = await getDocs(collection(db, ...path));
+    snap.forEach((d) => result.push(d.id));
+  }
+
+  await addTasks(["days", "day-1", "tasks"]);
+  await addTasks(["modules", "week1", "tasks"]);
+  await addTasks(["modules", "week2", "tasks"]);
+  await addTasks(["modules", "week3", "tasks"]);
+  await addTasks(["modules", "week4", "tasks"]);
+
+  return result;
+}
+
 /* ===========================================================
-   MANAGER DASHBOARD — FINAL WORKING VERSION
-   =========================================================== */
+   MANAGER DASHBOARD
+=========================================================== */
 export default function ManagerDashboard() {
   const [uid, setUid] = useState<string | null>(null);
   const [storeId, setStoreId] = useState<string | null>(null);
@@ -46,9 +66,10 @@ export default function ManagerDashboard() {
   const [selTrainee, setSelTrainee] = useState("");
   const [selSupervisor, setSelSupervisor] = useState("");
   const [status, setStatus] = useState("");
+
   const [loading, setLoading] = useState(true);
 
-  /* TRAINEE PROGRESS */
+  /* NEW — PROGRESS MAP (uid → percent) */
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
   /* ---------- auth ---------- */
@@ -58,26 +79,26 @@ export default function ManagerDashboard() {
       if (!u) {
         setUid(null);
         setStoreId(null);
-        setStore(null);
         return setLoading(false);
       }
 
       setUid(u.uid);
 
+      // get storeId from users/{uid}
       let sid: string | null = null;
-      try {
-        const userSnap = await getDoc(doc(db, "users", u.uid));
-        if (userSnap.exists()) {
-          const d: any = userSnap.data();
-          if (d?.storeId) sid = String(d.storeId);
-        }
-      } catch {}
+      const userSnap = await getDoc(doc(db, "users", u.uid));
+      if (userSnap.exists()) {
+        const d: any = userSnap.data();
+        if (d.storeId) sid = String(d.storeId);
+      }
 
       setStoreId(sid);
 
       if (sid) {
-        const snap = await getDoc(doc(db, "stores", sid));
-        setStore(snap.exists() ? (snap.data() as Store) : null);
+        const storeSnap = await getDoc(doc(db, "stores", sid));
+        if (storeSnap.exists()) {
+          setStore(storeSnap.data() as Store);
+        }
       }
 
       setLoading(false);
@@ -86,55 +107,36 @@ export default function ManagerDashboard() {
     return () => unsub();
   }, []);
 
-  /* ---------- load role groups ---------- */
+  /* ---------- load staff ---------- */
   async function loadRole(role: string): Promise<Emp[]> {
     const coll = collection(db, "stores", storeId!, "employees");
 
     try {
-      const q1 = query(
-        coll,
-        where("active", "==", true),
-        where("role", "==", role)
+      const s = await getDocs(
+        query(coll, where("active", "==", true), where("role", "==", role))
       );
-      const s1 = await getDocs(q1);
-      let rows = s1.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
-
-      if (rows.length === 0) {
-        const all = await getDocs(coll);
-        rows = all.docs
-          .map((d) => ({ uid: d.id, ...(d.data() as any) }))
-          .filter(
-            (e) =>
-              e.active === true &&
-              String((e.role || "")).toLowerCase() === role
-          );
-      }
-      return rows;
+      return s.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
     } catch {
-      const all = await getDocs(coll);
-      return all.docs
-        .map((d) => ({ uid: d.id, ...(d.data() as any) }))
-        .filter(
-          (e) =>
-            e.active === true &&
-            String((e.role || "")).toLowerCase() === role
-        );
+      return [];
     }
   }
 
-  /* ---------- load staff ---------- */
   useEffect(() => {
     if (!uid || !storeId) return;
 
     let alive = true;
     (async () => {
       try {
-        const [supList, trnList, allList] = await Promise.all([
+        const [supList, trnList, all] = await Promise.all([
           loadRole("supervisor"),
           loadRole("trainee"),
           (async () => {
-            const coll = collection(db, "stores", storeId, "employees");
-            const s = await getDocs(query(coll, where("active", "==", true)));
+            const s = await getDocs(
+              query(
+                collection(db, "stores", storeId, "employees"),
+                where("active", "==", true)
+              )
+            );
             return s.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
           })(),
         ]);
@@ -143,7 +145,7 @@ export default function ManagerDashboard() {
 
         setSupervisors(supList);
         setTrainees(trnList);
-        setEveryone(allList);
+        setEveryone(all);
       } catch {}
     })();
 
@@ -152,46 +154,42 @@ export default function ManagerDashboard() {
     };
   }, [uid, storeId]);
 
-  /* ---------- trainee progress (real %) ---------- */
+  /* -----------------------------------------------------------
+     MAIN FIX — REAL PROGRESS CALCULATION
+  ----------------------------------------------------------- */
   useEffect(() => {
     if (!trainees.length) return;
 
     let alive = true;
 
     (async () => {
+      const realTasks = await loadAllRealTasks();
+      const total = realTasks.length;
+
       const map: Record<string, number> = {};
 
       for (const t of trainees) {
-        const progSnap = await getDocs(collection(db, "users", t.uid, "progress"));
+        const snap = await getDocs(collection(db, "users", t.uid, "progress"));
 
         let done = 0;
-        let totalTasks = 0;
 
-        progSnap.forEach((d) => {
+        snap.forEach((d) => {
           const v: any = d.data();
 
-          // Only count real tasks
-          const real =
-            v.title ||
-            v.path ||
-            v.week ||
-            v.taskId ||
-            v.taskID;
-
-          if (!real) return;
-
-          totalTasks++;
+          const taskId = d.id;
+          if (!realTasks.includes(taskId)) return;
 
           const isDone =
             v.done === true ||
-            v.completed === true ||
             v.status === "done" ||
-            v.approved === true;
+            v.approved === true ||
+            !!v.approvedBy;
 
           if (isDone) done++;
         });
 
-        map[t.uid] = totalTasks > 0 ? Math.round((done / totalTasks) * 100) : 0;
+        const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+        map[t.uid] = percent;
       }
 
       if (alive) setProgressMap(map);
@@ -210,13 +208,13 @@ export default function ManagerDashboard() {
       setStatus("Assigning…");
       await assignTrainee(storeId, selTrainee, selSupervisor);
       setStatus("Assigned ✓");
-      setTimeout(() => setStatus(""), 1500);
+      setTimeout(() => setStatus(""), 1200);
     } catch {
       setStatus("Failed");
     }
   }
 
-  /* ---------- RENDER ---------- */
+  /* ---------- render ---------- */
   if (!uid) return <main className="p-8">Please sign in.</main>;
   if (loading) return <main className="p-8">Loading…</main>;
   if (!storeId) return <main className="p-8">No store assigned.</main>;
@@ -224,36 +222,29 @@ export default function ManagerDashboard() {
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
 
-      {/* STORE CARD */}
+      {/* STORE */}
       {store && (
         <section className="rounded-2xl border bg-white p-5">
-          <div className="text-[15px] font-semibold">
+          <div className="text-lg font-semibold">
             Store #{store.number}
           </div>
-          <div className="text-sm text-gray-700">{store.name}</div>
-          <div className="text-sm text-gray-700">{store.address}</div>
+          <div className="text-sm">{store.name}</div>
+          <div className="text-sm">{store.address}</div>
         </section>
       )}
 
       {/* NOTES */}
       <section className="rounded-2xl border bg-white p-5">
-        <Link
-          href={`/manager/notes?store=${storeId}`}
-          className="flex items-center gap-3"
-        >
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl border bg-white">
-            💬
-          </div>
+        <Link href={`/manager/notes?store=${storeId}`} className="flex items-center gap-3">
+          <div className="h-10 w-10 flex items-center justify-center rounded-xl border bg-white">💬</div>
           <div>
-            <div className="font-semibold text-gray-900">Notes & Messages</div>
-            <div className="text-sm text-gray-600">
-              Tap to view and send messages
-            </div>
+            <div className="font-semibold">Notes & Messages</div>
+            <div className="text-sm text-gray-600">Tap to view and send messages</div>
           </div>
         </Link>
       </section>
 
-      {/* STAFF SECTION */}
+      {/* STAFF */}
       <section className="rounded-2xl border bg-white p-5">
         <button
           className="w-full flex justify-between items-center"
@@ -266,43 +257,41 @@ export default function ManagerDashboard() {
         {openStaff && (
           <div className="mt-5 space-y-6">
 
-            {/* supervisors */}
+            {/* Supervisors */}
             <Block title="Supervisors">
               {supervisors.length === 0
                 ? "No supervisors yet."
-                : supervisors.map((p) => (
-                    <div key={p.uid}>{p.name || p.email}</div>
-                  ))}
+                : supervisors.map((s) => <div key={s.uid}>{s.name || s.email}</div>)}
             </Block>
 
-            {/* trainees with progress bars */}
+            {/* Trainees + progress */}
             <Block title="Trainees">
               {trainees.length === 0 ? (
                 "No trainees yet."
               ) : (
-                trainees.map((p) => (
-                  <div key={p.uid} className="mb-5">
-                    <div className="font-medium">{p.name || p.email}</div>
+                trainees.map((t) => (
+                  <div key={t.uid} className="mb-4">
+                    <div>{t.name || t.email}</div>
 
                     <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
                       <div
                         className="h-3 rounded-full"
                         style={{
-                          width: `${progressMap[p.uid] ?? 0}%`,
+                          width: `${progressMap[t.uid] ?? 0}%`,
                           backgroundColor: "#f2b705",
                         }}
                       />
                     </div>
 
                     <div className="text-xs text-gray-600 mt-1">
-                      {progressMap[p.uid] ?? 0}% complete
+                      {progressMap[t.uid] ?? 0}% complete
                     </div>
                   </div>
                 ))
               )}
             </Block>
 
-            {/* employees */}
+            {/* Employees */}
             <Block title="Employees">
               {everyone.length === 0
                 ? "Loading…"
@@ -310,23 +299,22 @@ export default function ManagerDashboard() {
                     .filter((e) => e.active)
                     .map((e) => (
                       <div key={e.uid}>
-                        {e.name || e.email} —{" "}
-                        {String(e.role || "").toLowerCase()}
+                        {e.name || e.email} — {String(e.role || "").toLowerCase()}
                       </div>
                     ))}
             </Block>
 
-            {/* assign */}
+            {/* Assign */}
             <section className="border rounded-2xl bg-white p-5">
               <h3 className="font-semibold mb-3">Assign Trainee → Supervisor</h3>
 
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid md:grid-cols-2 gap-3">
                 <label className="text-sm">
                   Trainee
                   <select
                     value={selTrainee}
                     onChange={(e) => setSelTrainee(e.target.value)}
-                    className="mt-1 block w-full border rounded-md p-2 text-sm"
+                    className="mt-1 w-full border rounded-md p-2 text-sm"
                   >
                     <option value="">Select trainee…</option>
                     {trainees.map((t) => (
@@ -342,7 +330,7 @@ export default function ManagerDashboard() {
                   <select
                     value={selSupervisor}
                     onChange={(e) => setSelSupervisor(e.target.value)}
-                    className="mt-1 block w-full border rounded-md p-2 text-sm"
+                    className="mt-1 w-full border rounded-md p-2 text-sm"
                   >
                     <option value="">Select supervisor…</option>
                     {supervisors.map((s) => (
@@ -362,10 +350,10 @@ export default function ManagerDashboard() {
                 >
                   Assign
                 </button>
+
                 {status && <span className="text-sm text-gray-600">{status}</span>}
               </div>
             </section>
-
           </div>
         )}
       </section>
@@ -373,7 +361,7 @@ export default function ManagerDashboard() {
   );
 }
 
-/* ---------- UI BLOCK ---------- */
+/* ----------------------------------------------------------- */
 function Block({ title, children }: { title: string; children: any }) {
   return (
     <div className="border rounded-2xl bg-white p-5">
