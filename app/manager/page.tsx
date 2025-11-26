@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -31,7 +31,7 @@ type Store = {
 };
 
 /* ===========================================================
-   CLEAN RESTORED MANAGER DASHBOARD
+   MANAGER DASHBOARD (WITH TRAINEE PROGRESS BARS)
    =========================================================== */
 export default function ManagerDashboard() {
   const [uid, setUid] = useState<string | null>(null);
@@ -48,6 +48,9 @@ export default function ManagerDashboard() {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
 
+  /* NEW — trainee progress map */
+  const [progressMap, setProgressMap] = useState<Record<string, number>>({});
+
   /* ---------- auth ---------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
@@ -62,7 +65,6 @@ export default function ManagerDashboard() {
       setUid(u.uid);
 
       let sid: string | null = null;
-
       try {
         const userSnap = await getDoc(doc(db, "users", u.uid));
         if (userSnap.exists()) {
@@ -72,12 +74,10 @@ export default function ManagerDashboard() {
       } catch {}
 
       setStoreId(sid);
-
       if (sid) {
         const snap = await getDoc(doc(db, "stores", sid));
         setStore(snap.exists() ? (snap.data() as Store) : null);
       }
-
       setLoading(false);
     });
 
@@ -107,7 +107,6 @@ export default function ManagerDashboard() {
               String((e.role || "")).toLowerCase() === role
           );
       }
-
       return rows;
     } catch {
       const all = await getDocs(coll);
@@ -126,7 +125,6 @@ export default function ManagerDashboard() {
     if (!uid || !storeId) return;
 
     let alive = true;
-
     (async () => {
       try {
         const [supList, trnList, allList] = await Promise.all([
@@ -152,6 +150,38 @@ export default function ManagerDashboard() {
     };
   }, [uid, storeId]);
 
+  /* ---------- NEW: Load trainee progress ---------- */
+  useEffect(() => {
+    if (!trainees.length) return;
+
+    let alive = true;
+
+    (async () => {
+      const map: Record<string, number> = {};
+
+      for (const t of trainees) {
+        const progSnap = await getDocs(collection(db, "users", t.uid, "progress"));
+
+        let done = 0;
+        const total = progSnap.size;
+
+        progSnap.forEach((d) => {
+          const v: any = d.data();
+          if (v.done === true || v.status === "done") done++;
+        });
+
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        map[t.uid] = pct;
+      }
+
+      if (alive) setProgressMap(map);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [trainees]);
+
   /* ---------- assign trainee ---------- */
   async function doAssign() {
     if (!uid || !storeId || !selTrainee || !selSupervisor) return;
@@ -167,14 +197,9 @@ export default function ManagerDashboard() {
   }
 
   /* ---------- RENDER ---------- */
-  if (!uid)
-    return <main className="p-8">Please sign in.</main>;
-
-  if (loading)
-    return <main className="p-8">Loading…</main>;
-
-  if (!storeId)
-    return <main className="p-8">No store assigned.</main>;
+  if (!uid) return <main className="p-8">Please sign in.</main>;
+  if (loading) return <main className="p-8">Loading…</main>;
+  if (!storeId) return <main className="p-8">No store assigned.</main>;
 
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
@@ -182,19 +207,11 @@ export default function ManagerDashboard() {
       {/* STORE CARD */}
       {store && (
         <section className="rounded-2xl border bg-white p-5">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="text-[15px] font-semibold">
-                Store #{store.number}
-              </div>
-              <div className="text-sm text-gray-700">{store.name}</div>
-              <div className="text-sm text-gray-700">{store.address}</div>
-            </div>
-
-            <div className="inline-flex h-9 items-center rounded-full border px-3 text-sm text-gray-400 cursor-default">
-              Store Loaded
-            </div>
+          <div className="text-[15px] font-semibold">
+            Store #{store.number}
           </div>
+          <div className="text-sm text-gray-700">{store.name}</div>
+          <div className="text-sm text-gray-700">{store.address}</div>
         </section>
       )}
 
@@ -222,15 +239,14 @@ export default function ManagerDashboard() {
           className="w-full flex justify-between items-center"
           onClick={() => setOpenStaff(!openStaff)}
         >
-          <div className="font-semibold text-gray-900">
-            Store Staff
-          </div>
+          <div className="font-semibold text-gray-900">Store Staff</div>
           <span className="text-gray-500">{openStaff ? "▲" : "▼"}</span>
         </button>
 
         {openStaff && (
           <div className="mt-5 space-y-6">
 
+            {/* supervisors */}
             <Block title="Supervisors">
               {supervisors.length === 0
                 ? "No supervisors yet."
@@ -239,14 +255,35 @@ export default function ManagerDashboard() {
                   ))}
             </Block>
 
+            {/* trainees + progress bars */}
             <Block title="Trainees">
-              {trainees.length === 0
-                ? "No trainees yet."
-                : trainees.map((p) => (
-                    <div key={p.uid}>{p.name || p.email}</div>
-                  ))}
+              {trainees.length === 0 ? (
+                "No trainees yet."
+              ) : (
+                trainees.map((p) => (
+                  <div key={p.uid} className="mb-5">
+                    <div>{p.name || p.email}</div>
+
+                    {/* yellow progress bar */}
+                    <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
+                      <div
+                        className="h-3 rounded-full"
+                        style={{
+                          width: `${progressMap[p.uid] ?? 0}%`,
+                          backgroundColor: "#f2b705",
+                        }}
+                      />
+                    </div>
+
+                    <div className="text-xs text-gray-600 mt-1">
+                      {progressMap[p.uid] ?? 0}% complete
+                    </div>
+                  </div>
+                ))
+              )}
             </Block>
 
+            {/* employees */}
             <Block title="Employees">
               {everyone.length === 0
                 ? "Loading…"
@@ -254,12 +291,13 @@ export default function ManagerDashboard() {
                     .filter((e) => e.active)
                     .map((e) => (
                       <div key={e.uid}>
-                        {e.name || e.email} — {String(e.role || "").toLowerCase()}
+                        {e.name || e.email} —{" "}
+                        {String(e.role || "").toLowerCase()}
                       </div>
                     ))}
             </Block>
 
-            {/* ASSIGN */}
+            {/* assign */}
             <section className="border rounded-2xl bg-white p-5">
               <h3 className="font-semibold mb-3">Assign Trainee → Supervisor</h3>
 
@@ -308,6 +346,7 @@ export default function ManagerDashboard() {
                 {status && <span className="text-sm text-gray-600">{status}</span>}
               </div>
             </section>
+
           </div>
         )}
       </section>
