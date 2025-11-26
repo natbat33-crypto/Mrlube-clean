@@ -1,4 +1,3 @@
-// app/manager/trainees/[id]/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -14,7 +13,7 @@ import {
   where,
 } from "firebase/firestore";
 
-/** ---------------- existing types & helpers (unchanged) ---------------- **/
+/* ---------------- types ---------------- */
 type TaskRow = { id: string; title: string; order: number };
 type Block = {
   key: string;
@@ -42,15 +41,19 @@ const orderOf = (v: any, id: string) =>
 
 const blockSynonyms = (k: string) =>
   k === "day-1"
-    ? ["day-1", "day1", "day 1", "orientation", "day-one"]
+    ? ["day-1", "day1", "day 1", "orientation"]
     : (() => {
         const n = k.replace("week-", "");
-        return [`week-${n}`, `week${n}`, `week ${n}`, `wk-${n}`, `wk${n}`];
+        return [`week-${n}`, `week${n}`, `week ${n}`];
       })();
 
-/** ---------------- component ---------------- **/
-export default function ManagerTraineePage({ params }: { params: { id: string } }) {
-  // Treat route param as auth UID used under users/{uid}/progress/*
+/* -------------------------------------------------------- */
+
+export default function ManagerTraineePage({
+  params,
+}: {
+  params: { id: string };
+}) {
   const progressUid = params.id;
 
   const [traineeName, setTraineeName] = useState("Trainee");
@@ -61,7 +64,7 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
   const [loading, setLoading] = useState(true);
   const [openKey, setOpenKey] = useState<string | null>("week-1");
 
-  /** ---------- display name (unchanged) ---------- **/
+  /* ---------------- trainee name ---------------- */
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -71,53 +74,64 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
         if (alive) setTraineeName(u.displayName || u.email || "Trainee");
         return;
       }
-      const qs = await getDocs(query(collection(db, "users"), where("uid", "==", progressUid)));
-      if (!alive) return;
-      if (!qs.empty) {
-        const u: any = qs.docs[0].data();
-        setTraineeName(u.displayName || u.email || "Trainee");
-      }
     })();
     return () => {
       alive = false;
     };
   }, [progressUid]);
 
-  /** ---------- live progress listener (unchanged) ---------- **/
+  /* ---------------- live progress listener ---------------- */
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "users", progressUid, "progress"), (snap) => {
-      const idx: Record<string, { done: boolean; approved: boolean }> = {};
-      snap.forEach((d) => {
-        const p: any = d.data();
-        const done = p.done === true || p.status === "done" || p.completed === true;
-        const approved = p.approved === true || !!p.approvedBy || p.status === "approved";
-        const tid = p.taskId || p.taskID || d.id;
-        const ttl = slug(p.title || "");
-        const blk = slug(p.block || p.section || p.moduleId || p.week || p.day || p.dayId || "");
-        idx[d.id] = { done, approved };
-        if (tid) idx[tid] = { done, approved };
-        if (ttl) idx[ttl] = { done, approved };
-        if (blk && tid) idx[`${blk}:${tid}`] = { done, approved };
-        if (blk && ttl) idx[`${blk}:${ttl}`] = { done, approved };
-      });
-      setProgressIndex(idx);
-    });
+    const unsub = onSnapshot(
+      collection(db, "users", progressUid, "progress"),
+      (snap) => {
+        const idx: Record<
+          string,
+          { done: boolean; approved: boolean }
+        > = {};
+
+        snap.forEach((d) => {
+          const p: any = d.data();
+          const done =
+            p.done === true ||
+            p.status === "done" ||
+            p.completed === true;
+          const approved =
+            p.approved === true ||
+            !!p.approvedBy ||
+            p.status === "approved";
+
+          const tid = p.taskId || d.id;
+          idx[tid] = { done, approved };
+        });
+
+        setProgressIndex(idx);
+      }
+    );
+
     return () => unsub();
   }, [progressUid]);
 
-  /** ---------- catalog fetchers (unchanged except tiny TS fix) ---------- **/
+  /* ---------------- load task catalogs ---------------- */
+
   async function getFirstNonEmpty(paths: string[][]): Promise<TaskRow[]> {
     for (const path of paths) {
       try {
-        if (path.length === 0) continue; // TS-safe guard
+        if (path.length === 0) continue;
         const [p0, ...rest] = path;
         const snap = await getDocs(collection(db, p0, ...rest));
         if (!snap.empty) {
-          const rows = snap.docs.map((d) => {
-            const v: any = d.data();
-            return { id: d.id, title: v?.title || d.id, order: orderOf(v, d.id) };
-          });
-          return rows.sort((a, b) => a.order - b.order);
+          const rows = snap.docs
+            .map((d) => {
+              const v: any = d.data();
+              return {
+                id: d.id,
+                title: v?.title || d.id,
+                order: orderOf(v, d.id),
+              };
+            })
+            .sort((a, b) => a.order - b.order);
+          return rows;
         }
       } catch {}
     }
@@ -127,173 +141,163 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
   async function fetchDay1Rows(): Promise<TaskRow[]> {
     return getFirstNonEmpty([
       ["days", "day-1", "tasks"],
-      ["days", "day1", "tasks"],
       ["modules", "day-1", "tasks"],
-      ["modules", "orientation", "tasks"],
-      ["tasks", "day-1", "tasks"],
     ]);
   }
 
   async function fetchWeekRows(n: 1 | 2 | 3 | 4): Promise<TaskRow[]> {
-    try {
-      const mods = await getDocs(query(collection(db, "modules"), where("week", "==", n)));
-      if (!mods.empty) {
-        let chosen =
-          mods.docs.find((d) => d.id === `week-${n}`) ||
-          mods.docs.find((d) => d.id === `week${n}`) ||
-          mods.docs.find((d) => (d.data() as any)?.active === true) ||
-          mods.docs[0];
-
-        const ts = await getDocs(collection(db, "modules", chosen.id, "tasks"));
-        const rows = ts.docs
-          .map((d) => {
-            const v: any = d.data();
-            return { id: d.id, title: v?.title || d.id, order: orderOf(v, d.id) };
-          })
-          .sort((a, b) => a.order - b.order);
-        return rows;
-      }
-    } catch {}
     return getFirstNonEmpty([
       ["modules", `week-${n}`, "tasks"],
       ["modules", `week${n}`, "tasks"],
-      ["weeks", `week-${n}`, "tasks"],
-      ["weeks", `week${n}`, "tasks"],
     ]);
   }
 
   function markBlock(blockKey: string, rows: TaskRow[]) {
-    const syns = blockSynonyms(blockKey).map(slug);
     const tasks = rows.map(({ id, title }) => {
-      const tSlug = slug(title);
-      const keys = new Set<string>([
+      const hit = progressIndex[id];
+      return {
         id,
-        tSlug,
-        ...syns.map((bk) => `${bk}:${id}`),
-        ...syns.map((bk) => `${bk}:${tSlug}`),
-      ]);
-      let done = false;
-      let approved = false;
-      for (const k of keys) {
-        const hit = progressIndex[k];
-        if (hit) {
-          done = !!hit.done;
-          approved = !!hit.approved;
-          break;
-        }
-      }
-      return { id, title, done, approved };
+        title,
+        done: hit?.done || false,
+        approved: hit?.approved || false,
+      };
     });
-    const total = tasks.length;
-    const doneCount = tasks.filter((t) => t.done).length;
-    return { total, done: doneCount, tasks };
+
+    return {
+      total: tasks.length,
+      done: tasks.filter((t) => t.done).length,
+      tasks,
+    };
   }
 
+  /* ---------------- load blocks ---------------- */
   useEffect(() => {
     let alive = true;
+
     (async () => {
       setLoading(true);
-      try {
-        // If you’re hiding Day 1 for now, comment out these two lines:
-        const d1Rows = await fetchDay1Rows();
-        const d1Marked = markBlock("day-1", d1Rows);
-        const day1: Block = {
-          key: "day-1",
-          label: "Day 1",
-          total: d1Marked.total,
-          done: d1Marked.done,
-          tasks: d1Marked.tasks,
-        };
 
-        const [w1r, w2r, w3r, w4r] = await Promise.all([
-          fetchWeekRows(1),
-          fetchWeekRows(2),
-          fetchWeekRows(3),
-          fetchWeekRows(4),
-        ]);
-        const w1 = markBlock("week-1", w1r);
-        const w2 = markBlock("week-2", w2r);
-        const w3 = markBlock("week-3", w3r);
-        const w4 = markBlock("week-4", w4r);
+      const d1Rows = await fetchDay1Rows();
+      const d1 = markBlock("day-1", d1Rows);
 
-        if (!alive) return;
-        setBlocks([
-          { key: "week-1", label: "Week 1", ...w1 },
-          { key: "week-2", label: "Week 2", ...w2 },
-          { key: "week-3", label: "Week 3", ...w3 },
-          { key: "week-4", label: "Week 4", ...w4 },
-        ]);
-      } finally {
-        if (alive) setLoading(false);
-      }
+      const [w1Rows, w2Rows, w3Rows, w4Rows] = await Promise.all([
+        fetchWeekRows(1),
+        fetchWeekRows(2),
+        fetchWeekRows(3),
+        fetchWeekRows(4),
+      ]);
+
+      const blocksData: Block[] = [
+        { key: "day-1", label: "Day 1", ...d1 },
+        { key: "week-1", label: "Week 1", ...markBlock("week-1", w1Rows) },
+        { key: "week-2", label: "Week 2", ...markBlock("week-2", w2Rows) },
+        { key: "week-3", label: "Week 3", ...markBlock("week-3", w3Rows) },
+        { key: "week-4", label: "Week 4", ...markBlock("week-4", w4Rows) },
+      ];
+
+      if (!alive) return;
+      setBlocks(blocksData);
+      setLoading(false);
     })();
+
     return () => {
       alive = false;
     };
   }, [progressIndex]);
 
-  /** ---------------- view-only helpers (styling only) ---------------- **/
-  const Pill = ({ on, children }: { on: boolean; children: React.ReactNode }) => (
-    <span
-      className={[
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs",
-        on ? "bg-green-100 text-green-700 border-green-200" : "bg-gray-100 text-gray-600 border-gray-200",
-      ].join(" ")}
-    >
-      {children}
-    </span>
-  );
+  /* ---------------- overall progress ---------------- */
+  const overallPct = useMemo(() => {
+    const totals = blocks.reduce(
+      (acc, b) => {
+        acc.total += b.total;
+        acc.done += b.done;
+        return acc;
+      },
+      { total: 0, done: 0 }
+    );
 
-  const StatusDot = ({ done }: { done: boolean }) => (
-    <span
-      className={[
-        "inline-flex h-4 w-4 items-center justify-center rounded-full border",
-        done ? "bg-green-600 border-green-600 text-white" : "border-gray-300 bg-white text-transparent",
-      ].join(" ")}
-      aria-hidden="true"
-    >
-      ✓
-    </span>
-  );
+    if (totals.total === 0) return 0;
+    return Math.round((totals.done / totals.total) * 100);
+  }, [blocks]);
 
-  /** ---------------- render (styling updated only) ---------------- **/
+  /* ---------------- render ---------------- */
   return (
     <main className="p-6 space-y-6">
+      {/* header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{traineeName}</h1>
+
         <Link
-          href={`/manager/stores/${encodeURIComponent((new URLSearchParams(typeof window !== "undefined" ? window.location.search : "")).get("store") ?? "")}`}
+          href={`/manager/stores/${encodeURIComponent(
+            new URLSearchParams(
+              typeof window !== "undefined" ? window.location.search : ""
+            ).get("store") ?? ""
+          )}`}
           className="inline-flex items-center text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
         >
           ← Back to Store
         </Link>
       </div>
 
+      {/* OVERALL PROGRESS BAR */}
+      <section className="rounded-xl border bg-white p-5">
+        <div className="font-semibold mb-2">Overall Progress</div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${overallPct}%`,
+                backgroundColor: YELLOW,
+              }}
+            />
+          </div>
+          <div className="text-sm font-semibold text-gray-700 shrink-0">
+            {overallPct}%
+          </div>
+        </div>
+      </section>
+
+      {/* WEEK BLOCKS */}
       {loading ? (
         <div className="rounded-xl border bg-white/50 p-6">Loading…</div>
       ) : (
         <section className="space-y-4">
           {blocks.map((b) => {
-            const pct = b.total > 0 ? Math.round((b.done / b.total) * 100) : 0;
+            const pct =
+              b.total > 0 ? Math.round((b.done / b.total) * 100) : 0;
             const open = openKey === b.key;
 
             return (
-              <div key={b.key} className="rounded-xl border bg-white/50 overflow-hidden">
-                {/* header matches trainee look/feel */}
+              <div
+                key={b.key}
+                className="rounded-xl border bg-white/50 overflow-hidden"
+              >
                 <div className="p-4 flex items-center justify-between">
                   <div className="w-full">
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-semibold">{b.label}</div>
                       <button
-                        onClick={() => setOpenKey(open ? null : b.key)}
+                        onClick={() =>
+                          setOpenKey(open ? null : b.key)
+                        }
                         className="text-sm text-gray-600 hover:text-gray-800"
                       >
                         {open ? "Hide tasks" : "Show tasks"}
                       </button>
                     </div>
+
+                    {/* week progress */}
                     <div className="flex items-center gap-3">
                       <div className="flex-1 h-2 bg-gray-200 rounded overflow-hidden">
-                        <div className="h-full" style={{ width: `${pct}%`, backgroundColor: YELLOW }} />
+                        <div
+                          className="h-full"
+                          style={{
+                            width: `${pct}%`,
+                            backgroundColor: YELLOW,
+                          }}
+                        />
                       </div>
                       <div className="text-xs text-gray-600 shrink-0">
                         {b.done}/{b.total}
@@ -305,7 +309,9 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
                 {open && (
                   <div className="px-4 pb-4">
                     {b.tasks.length === 0 ? (
-                      <div className="text-sm text-gray-600">No tasks defined.</div>
+                      <div className="text-sm text-gray-600">
+                        No tasks defined.
+                      </div>
                     ) : (
                       <ul className="space-y-2">
                         {b.tasks.map((t, i) => (
@@ -314,16 +320,40 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
                             className="flex items-center justify-between rounded border bg-white px-3 py-2"
                           >
                             <div className="flex items-center gap-3 min-w-0">
-                              <StatusDot done={t.done} />
+                              <span
+                                className={`inline-block h-4 w-4 rounded-full border ${
+                                  t.done
+                                    ? "bg-green-600 border-green-600"
+                                    : "border-gray-300 bg-white"
+                                }`}
+                              />
                               <span className="text-gray-700 truncate">
-                                {/* optional numbering to match trainee rows */}
-                                <span className="text-gray-500">{i + 1}. </span>
+                                <span className="text-gray-500">
+                                  {i + 1}.{" "}
+                                </span>
                                 {t.title}
                               </span>
                             </div>
+
                             <div className="flex items-center gap-2 shrink-0">
-                              <Pill on={t.done}>{t.done ? "Done" : "Pending"}</Pill>
-                              <Pill on={t.approved}>{t.approved ? "Approved" : "Not approved"}</Pill>
+                              <span
+                                className={`px-2 py-0.5 border rounded-full text-xs ${
+                                  t.done
+                                    ? "bg-green-100 border-green-200 text-green-700"
+                                    : "bg-gray-100 border-gray-200 text-gray-600"
+                                }`}
+                              >
+                                {t.done ? "Done" : "Pending"}
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 border rounded-full text-xs ${
+                                  t.approved
+                                    ? "bg-green-100 border-green-200 text-green-700"
+                                    : "bg-gray-100 border-gray-200 text-gray-600"
+                                }`}
+                              >
+                                {t.approved ? "Approved" : "Not approved"}
+                              </span>
                             </div>
                           </li>
                         ))}
