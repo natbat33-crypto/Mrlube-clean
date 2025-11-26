@@ -40,7 +40,7 @@ async function isActiveManagerForStore(
   storeId: string,
   uid: string
 ): Promise<ManagerGate> {
-  // employees collection
+  // employees
   const empRef = doc(db, "stores", storeId, "employees", uid);
   const empSnap = await getDoc(empRef);
   if (empSnap.exists()) {
@@ -66,7 +66,7 @@ async function isActiveManagerForStore(
 }
 
 /* ===========================================================
-   MANAGER DASHBOARD (FINAL MERGED)
+   MANAGER DASHBOARD — FINAL
    =========================================================== */
 export default function ManagerDashboard() {
   const [uid, setUid] = useState<string | null>(null);
@@ -106,8 +106,8 @@ export default function ManagerDashboard() {
 
       setUid(u.uid);
 
-      // load storeId via users collection (your existing logic)
       let sid: string | null = null;
+
       try {
         const userSnap = await getDoc(doc(db, "users", u.uid));
         if (userSnap.exists()) {
@@ -115,7 +115,7 @@ export default function ManagerDashboard() {
           if (d?.storeId) sid = String(d.storeId);
         }
 
-        // fallback autoConnect
+        // fallback
         if (!sid) {
           const { autoConnect } = await import("@/lib/autoConnect");
           const res = await autoConnect();
@@ -172,11 +172,12 @@ export default function ManagerDashboard() {
     }
   }
 
-  /* ---------- load everything ---------- */
+  /* ---------- load staff ---------- */
   useEffect(() => {
     if (!uid || !storeId) return;
 
     let alive = true;
+
     (async () => {
       setEmpCheck("check");
 
@@ -219,10 +220,9 @@ export default function ManagerDashboard() {
     };
   }, [uid, storeId]);
 
-  /* ---------- assign trainee ---------- */
+  /* ---------- assignment ---------- */
   async function doAssign() {
     if (!uid || !storeId || !selTrainee || !selSupervisor) return;
-
     try {
       setStatus("Assigning…");
       await assignTrainee(storeId, selTrainee, selSupervisor);
@@ -234,9 +234,66 @@ export default function ManagerDashboard() {
     }
   }
 
-  /* ---------- counts ---------- */
-  const supCount = useMemo(() => supervisors.length, [supervisors]);
-  const trnCount = useMemo(() => trainees.length, [trainees]);
+  const supCount = supervisors.length;
+  const trnCount = trainees.length;
+
+  /* ===========================================================
+       MANAGER — TRAINEE PROGRESS (NEW)
+     =========================================================== */
+
+  const [mgrTraineeProgress, setMgrTraineeProgress] = useState<
+    Record<
+      string,
+      { week: number; waiting: number; reviewed: number; approved: number }[]
+    >
+  >({});
+  const [mgrLoadingProgress, setMgrLoadingProgress] = useState(true);
+
+  useEffect(() => {
+    if (!storeId || trainees.length === 0) return;
+
+    let alive = true;
+
+    (async () => {
+      setMgrLoadingProgress(true);
+
+      const result: Record<string, any[]> = {};
+
+      for (const t of trainees) {
+        const weeks: any[] = [];
+
+        for (let w = 1; w <= 4; w++) {
+          const snap = await getDocs(
+            collection(db, "users", t.uid, "progress", `week${w}`)
+          );
+
+          let waiting = 0;
+          let reviewed = 0;
+          let approved = 0;
+
+          snap.forEach((d) => {
+            const status = (d.data() as any)?.status;
+            if (status === "waiting") waiting++;
+            else if (status === "reviewed") reviewed++;
+            else if (status === "approved") approved++;
+          });
+
+          weeks.push({ week: w, waiting, reviewed, approved });
+        }
+
+        result[t.uid] = weeks;
+      }
+
+      if (alive) {
+        setMgrTraineeProgress(result);
+        setMgrLoadingProgress(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [storeId, trainees]);
 
   /* ===========================================================
      RENDER
@@ -269,11 +326,52 @@ export default function ManagerDashboard() {
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
 
-      {/* HEADER */}
-      <div>
-        <h1 className="text-[22px] font-extrabold">Manager Dashboard</h1>
-        <p className="text-gray-600">What you manage.</p>
-      </div>
+      {/* -------------------- TRAINEE WEEK OVERVIEW -------------------- */}
+      <section className="rounded-2xl border bg-white p-5">
+        <h2 className="text-lg font-semibold mb-3">Trainee Weekly Progress</h2>
+
+        {mgrLoadingProgress ? (
+          <p className="text-sm text-gray-600">Loading trainee progress…</p>
+        ) : trainees.length === 0 ? (
+          <p className="text-sm text-gray-600">No trainees assigned yet.</p>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {trainees.map((t) => (
+              <div key={t.uid} className="border rounded-xl p-4 bg-white shadow-sm">
+                <div className="font-semibold text-gray-900 mb-2">
+                  {t.name || t.email || t.uid}
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  {mgrTraineeProgress[t.uid]?.map((wk) => (
+                    <div key={wk.week}>
+                      <div className="font-medium text-gray-800">Week {wk.week}</div>
+                      <div className="flex gap-2 mt-1">
+                        <span className="text-gray-600">
+                          Waiting: {wk.waiting}
+                        </span>
+                        <span className="text-blue-600">
+                          Reviewed: {wk.reviewed}
+                        </span>
+                        <span className="text-green-600">
+                          Approved: {wk.approved}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <Link
+                  href={`/manager/trainee/${t.uid}`}
+                  className="text-blue-600 text-xs mt-3 inline-block hover:underline"
+                >
+                  View Details →
+                </Link>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* STORE CARD */}
       {store && (
@@ -464,7 +562,7 @@ export default function ManagerDashboard() {
   );
 }
 
-/* ---------- simple block UI ---------- */
+/* ---------- simple block ---------- */
 function Block({
   title,
   children,
