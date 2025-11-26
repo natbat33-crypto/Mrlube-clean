@@ -245,12 +245,7 @@ export default function SupervisorWeek2Page() {
         >
           <span aria-hidden>←</span> Back to Dashboard
         </Link>
-        {debugInfo && (
-          <div className="text-xs text-muted-foreground">
-            Debug: store <b>{storeId || "—"}</b> • docs <b>{debugInfo.total}</b> • query{" "}
-            <b>{debugInfo.level}</b>
-          </div>
-        )}
+  
       </div>
 
       <Card className="border-primary/20">

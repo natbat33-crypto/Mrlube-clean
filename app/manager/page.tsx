@@ -31,7 +31,7 @@ type Store = {
 };
 
 /* ===========================================================
-   MANAGER DASHBOARD (WITH TRAINEE PROGRESS BARS)
+   MANAGER DASHBOARD — FINAL WORKING VERSION
    =========================================================== */
 export default function ManagerDashboard() {
   const [uid, setUid] = useState<string | null>(null);
@@ -48,7 +48,7 @@ export default function ManagerDashboard() {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
 
-  /* NEW — trainee progress map */
+  /* TRAINEE PROGRESS */
   const [progressMap, setProgressMap] = useState<Record<string, number>>({});
 
   /* ---------- auth ---------- */
@@ -74,10 +74,12 @@ export default function ManagerDashboard() {
       } catch {}
 
       setStoreId(sid);
+
       if (sid) {
         const snap = await getDoc(doc(db, "stores", sid));
         setStore(snap.exists() ? (snap.data() as Store) : null);
       }
+
       setLoading(false);
     });
 
@@ -150,7 +152,7 @@ export default function ManagerDashboard() {
     };
   }, [uid, storeId]);
 
-  /* ---------- NEW: Load trainee progress ---------- */
+  /* ---------- trainee progress (real %) ---------- */
   useEffect(() => {
     if (!trainees.length) return;
 
@@ -163,15 +165,33 @@ export default function ManagerDashboard() {
         const progSnap = await getDocs(collection(db, "users", t.uid, "progress"));
 
         let done = 0;
-        const total = progSnap.size;
+        let totalTasks = 0;
 
         progSnap.forEach((d) => {
           const v: any = d.data();
-          if (v.done === true || v.status === "done") done++;
+
+          // Only count real tasks
+          const real =
+            v.title ||
+            v.path ||
+            v.week ||
+            v.taskId ||
+            v.taskID;
+
+          if (!real) return;
+
+          totalTasks++;
+
+          const isDone =
+            v.done === true ||
+            v.completed === true ||
+            v.status === "done" ||
+            v.approved === true;
+
+          if (isDone) done++;
         });
 
-        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-        map[t.uid] = pct;
+        map[t.uid] = totalTasks > 0 ? Math.round((done / totalTasks) * 100) : 0;
       }
 
       if (alive) setProgressMap(map);
@@ -255,16 +275,15 @@ export default function ManagerDashboard() {
                   ))}
             </Block>
 
-            {/* trainees + progress bars */}
+            {/* trainees with progress bars */}
             <Block title="Trainees">
               {trainees.length === 0 ? (
                 "No trainees yet."
               ) : (
                 trainees.map((p) => (
                   <div key={p.uid} className="mb-5">
-                    <div>{p.name || p.email}</div>
+                    <div className="font-medium">{p.name || p.email}</div>
 
-                    {/* yellow progress bar */}
                     <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
                       <div
                         className="h-3 rounded-full"
@@ -354,6 +373,7 @@ export default function ManagerDashboard() {
   );
 }
 
+/* ---------- UI BLOCK ---------- */
 function Block({ title, children }: { title: string; children: any }) {
   return (
     <div className="border rounded-2xl bg-white p-5">
