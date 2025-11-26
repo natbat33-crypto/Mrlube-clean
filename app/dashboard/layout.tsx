@@ -3,17 +3,17 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
-import RoleGate from "@/components/RoleGate";
 import { Menu, X, ChevronDown, LogOut } from "lucide-react";
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import RoleGate from "@/components/RoleGate";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // ❗ SINGLE RoleGate – allow both employee & trainee
+  // Allow both employee + trainee
   return (
     <RoleGate allow={["employee", "trainee"]}>
       <DashboardShell>{children}</DashboardShell>
@@ -21,18 +21,16 @@ export default function DashboardLayout({
   );
 }
 
+/* ------------------------------------------------------ */
+/*                     SHELL LAYOUT                       */
+/* ------------------------------------------------------ */
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [modulesOpen, setModulesOpen] = React.useState(false);
 
-  React.useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
-      setOpen(true);
-    }
-  }, []);
-
+  // redirect if no auth
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) router.replace("/auth/login");
@@ -40,64 +38,90 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return () => unsub();
   }, [router]);
 
-  const NavLink = ({ href, label }: { href: string; label: string }) => (
-    <Link
-      href={href}
-      className={`block px-3 py-2 rounded-md text-sm font-medium ${
-        pathname === href
-          ? "bg-[#f2b705] text-black font-semibold"
-          : "text-gray-100 hover:bg-[#0e64c9]"
-      }`}
-    >
-      {label}
-    </Link>
-  );
+  const NavLink = ({ href, label }: { href: string; label: string }) => {
+    const active = pathname === href;
+    return (
+      <Link
+        href={href}
+        onClick={() => setOpen(false)}
+        className={`block px-3 py-2 rounded-lg text-sm transition-colors
+          ${
+            active
+              ? "bg-white/20 text-white font-semibold"
+              : "text-white/80 hover:text-white hover:bg-white/10"
+          }`}
+      >
+        {label}
+      </Link>
+    );
+  };
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      {/* Sidebar */}
-      <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 bg-[#0b53a6] text-white transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[#09448a]">
-          <h1 className="text-lg font-bold tracking-wide">Mr. Lube Training</h1>
-          <button onClick={() => setOpen(false)} className="lg:hidden">
-            <X className="w-5 h-5 text-white" />
+    <div className="min-h-screen bg-[#f7f7f7]">
+      {/* ----------------- TOP BAR ----------------- */}
+      <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">
+        <div className="h-full px-4 flex items-center justify-between">
+
+          {/* Branding */}
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 rounded-full bg-[#0b53a6] text-white font-extrabold">
+              Mr. Lube
+            </span>
+            <span className="px-3 py-1 rounded-full bg-[#f2b705] text-black font-semibold">
+              Training
+            </span>
+          </div>
+
+          {/* Burger */}
+          <button
+            onClick={() => setOpen((prev) => !prev)}
+            className="p-2 rounded hover:bg-white/10"
+          >
+            {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
           </button>
         </div>
+      </div>
 
-        <nav className="px-3 py-4 space-y-1 text-sm">
+      {/* ----------------- SIDEBAR ----------------- */}
+      <aside
+        className={`fixed top-14 bottom-0 left-0 w-72 bg-[#0b53a6] text-white shadow-xl
+          transition-transform duration-300 z-40
+          ${open ? "translate-x-0" : "-translate-x-full"}
+          lg:w-64`}
+      >
+        <div className="h-full flex flex-col p-4 lg:p-6">
+          {/* Dashboard Home */}
           <NavLink href="/dashboard" label="Dashboard Home" />
 
-          <div>
+          {/* Training Modules */}
+          <div className="mt-4">
             <button
               onClick={() => setModulesOpen((v) => !v)}
-              className="w-full flex justify-between items-center px-3 py-2 rounded-md hover:bg-[#0e64c9]"
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/10"
             >
-              <span>Training Modules</span>
+              <span className="text-white/80">Training Modules</span>
               <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
+                className={`h-4 w-4 transition-transform ${
                   modulesOpen ? "rotate-180" : ""
                 }`}
               />
             </button>
 
             {modulesOpen && (
-              <div className="ml-4 mt-1 space-y-1">
+              <ul className="pl-6 mt-1 space-y-1">
                 <NavLink href="/modules/week1" label="Week 1 – Orientation" />
                 <NavLink href="/modules/week2" label="Week 2 – Vehicle Basics" />
                 <NavLink href="/modules/week3" label="Week 3 – Customer Flow" />
-                <NavLink href="/modules/week4" label="Week 4 – Quality & Safety" />
-              </div>
+                <NavLink
+                  href="/modules/week4"
+                  label="Week 4 – Quality & Safety"
+                />
+              </ul>
             )}
           </div>
-        </nav>
 
-        <div className="absolute bottom-0 left-0 w-full px-3 py-4 border-t border-[#09448a]">
+          {/* Sign Out */}
           <button
-            type="button"
             onClick={async () => {
               try {
                 await signOut(auth);
@@ -105,25 +129,29 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 window.location.assign("/auth/login");
               }
             }}
-            className="flex items-center gap-2 text-red-200 hover:text-red-400"
+            className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-red-200 hover:bg-red-500/20"
           >
-            <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
+            <LogOut className="h-5 w-5" /> Sign Out
           </button>
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col">
-        <header className="w-full bg-[#0b53a6] text-white sticky top-0 z-30 flex items-center justify-between px-4 py-3 shadow">
-          <button onClick={() => setOpen((v) => !v)} className="lg:hidden">
-            <Menu className="w-6 h-6" />
-          </button>
-          <span className="font-bold text-lg">Trainee Dashboard</span>
-          <span className="hidden lg:block font-semibold text-sm">Employee</span>
-        </header>
+      {/* Overlay (mobile) */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/40 z-30 lg:hidden"
+          onClick={() => setOpen(false)}
+        />
+      )}
 
-        <main className="flex-1 p-6 bg-gray-50">{children}</main>
-      </div>
+      {/* ----------------- MAIN CONTENT ----------------- */}
+      <main className={`transition-all duration-300 p-4 lg:p-6`}>
+        {children}
+
+        <footer className="mt-6 pt-4 text-center text-xs text-gray-500 border-t">
+          © {new Date().getFullYear()} Mr. Lube. All rights reserved.
+        </footer>
+      </main>
     </div>
   );
 }
