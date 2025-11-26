@@ -1,4 +1,3 @@
-// app/dashboard/layout.tsx
 "use client";
 
 import * as React from "react";
@@ -14,17 +13,11 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // ❗ SINGLE RoleGate – allow both employee & trainee
   return (
-    <>
-      {/* FIXED: NEW RoleGate syntax */}
-      <RoleGate allow={["employee"]}>
-        <DashboardShell>{children}</DashboardShell>
-      </RoleGate>
-
-      <RoleGate allow={["trainee"]}>
-        <DashboardShell>{children}</DashboardShell>
-      </RoleGate>
-    </>
+    <RoleGate allow={["employee", "trainee"]}>
+      <DashboardShell>{children}</DashboardShell>
+    </RoleGate>
   );
 }
 
