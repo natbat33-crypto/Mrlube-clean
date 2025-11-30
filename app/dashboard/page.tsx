@@ -29,6 +29,7 @@ import {
 } from "firebase/firestore";
 import { onIdTokenChanged } from "firebase/auth";
 
+/* ------------------ types ------------------ */
 type WeekCard = {
   week: number;
   title: string;
@@ -38,11 +39,7 @@ type WeekCard = {
   comingSoon?: boolean;
 };
 
-/* ---------- helpers ---------- */
-
-async function findStoreForTraineeWithoutIndex(
-  uid: string
-): Promise<string | null> {
+async function findStoreForTraineeWithoutIndex(uid: string): Promise<string | null> {
   const storesSnap = await getDocs(collection(db, "stores"));
   for (const s of storesSnap.docs) {
     const traineesSnap = await getDocs(
@@ -63,7 +60,6 @@ function defaultComingSoon(): WeekCard[] {
   }));
 }
 
-/** Ensure a per-user Day 1 progress doc exists so the UI doesn't look "locked". */
 async function ensureDay1ProgressDoc(storeId: string, uid: string) {
   const ref = doc(
     db,
@@ -77,8 +73,6 @@ async function ensureDay1ProgressDoc(storeId: string, uid: string) {
   await setDoc(ref, { doneIds: [], updatedAt: Date.now() }, { merge: true });
 }
 
-/* ---------- small typed wrapper for TraineeNotesCard ---------- */
-
 interface TraineeNotesCardWrapperProps {
   storeId: string;
   traineeUid: string;
@@ -88,14 +82,10 @@ const TraineeNotesCardWrapper: FC<TraineeNotesCardWrapperProps> = ({
   storeId,
   traineeUid,
 }) => {
-  return (
-    <TraineeNotesCard
-      {...({ storeId, traineeUid } as any)}
-    />
-  );
+  return <TraineeNotesCard {...({ storeId, traineeUid } as any)} />;
 };
 
-/* ---------- main trainee dashboard page ---------- */
+/* ------------------ main page ------------------ */
 
 export default function DashboardPage() {
   const [loadingWeeks, setLoadingWeeks] = useState(true);
@@ -106,10 +96,9 @@ export default function DashboardPage() {
   const [resolvingStore, setResolvingStore] = useState(false);
   const [storeError, setStoreError] = useState<string | null>(null);
 
-  // per-week done counts for this trainee
   const [weekDone, setWeekDone] = useState<Record<number, number>>({});
 
-  /* ---------- FIXED TRAINEE STORE RESOLVER ---------- */
+  /* ---------- resolve trainee + store ---------- */
   useEffect(() => {
     const stop = onIdTokenChanged(auth, async (u) => {
       setStoreError(null);
@@ -127,17 +116,12 @@ export default function DashboardPage() {
       try {
         let sid: string | null = null;
 
-        // 1. users/<uid> is the REAL source of truth
         const userSnap = await getDoc(doc(db, "users", u.uid));
         if (userSnap.exists()) {
           const v: any = userSnap.data();
           if (v?.storeId) sid = String(v.storeId);
         }
 
-        // 2. REMOVE BROKEN: /trainees/<uid> lookup
-        // PROD does NOT use that collection.
-
-        // 3. fallback: scan stores/*/trainees/*
         if (!sid) {
           sid = await findStoreForTraineeWithoutIndex(u.uid);
         }
@@ -158,7 +142,12 @@ export default function DashboardPage() {
     return () => stop();
   }, []);
 
-  /* ---------- ENSURE DAY 1 PROGRESS DOC ---------- */
+  /* ---------- FIX: reset progress immediately when trainee changes ---------- */
+  useEffect(() => {
+    setWeekDone({});
+  }, [traineeUid]);
+
+  /* ---------- ensure Day1 doc ---------- */
   useEffect(() => {
     if (storeId && traineeUid) {
       ensureDay1ProgressDoc(storeId, traineeUid).catch((err) =>
@@ -167,33 +156,28 @@ export default function DashboardPage() {
     }
   }, [storeId, traineeUid]);
 
-  /* ---------- LOAD WEEK CARDS ---------- */
+  /* ---------- load week cards ---------- */
   useEffect(() => {
     let cancelled = false;
 
-    const loadWeek = async (
-      weekId: string,
-      weekNum: number
-    ): Promise<WeekCard> => {
+    const loadWeek = async (weekId: string, weekNum: number): Promise<WeekCard> => {
       const modRef = doc(db, "modules", weekId);
       const modSnap = await getDoc(modRef);
-      const mod = modSnap.exists()
-        ? (modSnap.data() as Record<string, unknown>)
-        : null;
+      const mod = modSnap.exists() ? (modSnap.data() as any) : null;
+
       const title =
-        (mod && (mod["name"] as string)) ||
-        (mod && (mod["title"] as string)) ||
+        mod?.name ||
+        mod?.title ||
         `Week ${weekNum}`;
 
       const tasksCol = collection(db, "modules", weekId, "tasks");
       const total = (await getCountFromServer(tasksCol)).data().count || 0;
-      const done = 0;
 
       return {
         week: weekNum,
         title,
         total,
-        done,
+        done: 0,
         href: `/dashboard/${weekId}`,
         comingSoon: total === 0,
       };
@@ -210,19 +194,16 @@ export default function DashboardPage() {
         ]);
         if (!cancelled) setCards(next);
       } catch (e) {
-        console.error("Error loading weeks:", e);
         if (!cancelled) setCards(defaultComingSoon());
       } finally {
         if (!cancelled) setLoadingWeeks(false);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
-  /* ---------- LOAD PER-WEEK DONE COUNTS ---------- */
+  /* ---------- load progress from users/<uid>/progress ---------- */
   useEffect(() => {
     if (!traineeUid) return;
 
@@ -233,10 +214,11 @@ export default function DashboardPage() {
         const progSnap = await getDocs(
           collection(db, "users", traineeUid, "progress")
         );
+
         const counts: Record<number, number> = {};
 
         progSnap.forEach((d) => {
-          const data = d.data() as any;
+          const data: any = d.data();
           if (!data?.done) return;
 
           let wkNum: number | null = null;
@@ -258,14 +240,11 @@ export default function DashboardPage() {
 
         if (!cancelled) setWeekDone(counts);
       } catch (e) {
-        if (!cancelled)
-          console.error("Error loading trainee week progress:", e);
+        if (!cancelled) console.error("Error loading trainee week progress:", e);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [traineeUid]);
 
   const list = loadingWeeks ? defaultComingSoon() : cards;
@@ -276,9 +255,7 @@ export default function DashboardPage() {
   if (isResolving && !storeId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-slate-600 text-sm">
-          Loading your trainee dashboard…
-        </p>
+        <p className="text-slate-600 text-sm">Loading your trainee dashboard…</p>
       </div>
     );
   }
@@ -299,8 +276,9 @@ export default function DashboardPage() {
     );
   }
 
+  /* ========= FIX APPLIED HERE: key={traineeUid} ========= */
   return (
-    <div className="max-w-6xl mx-auto px-4 lg:px-6 py-6">
+    <div key={traineeUid} className="max-w-6xl mx-auto px-4 lg:px-6 py-6">
       <div className="space-y-4 lg:space-y-6">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-primary">
@@ -357,11 +335,7 @@ export default function DashboardPage() {
             );
 
             return c.href ? (
-              <Link
-                key={`link-${c.week}`}
-                href={c.href}
-                className="block focus:outline-none"
-              >
+              <Link key={`link-${c.week}`} href={c.href} className="block">
                 {body}
               </Link>
             ) : (
@@ -381,14 +355,11 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 lg:gap-4">
-            <Link
-              href="/dashboard/progress"
-              className="block focus:outline-none"
-            >
+            <Link href="/dashboard/progress" className="block">
               <Card className="bg-primary/10 border-primary/20 hover:shadow-md transition">
                 <CardContent className="p-3 lg:p-4">
                   <div className="flex items-center gap-3 mb-3">
-                    <Clock className="h-6 w-6 lg:h-8 lg:w-8 text-primary flex-shrink-0" />
+                    <Clock className="h-6 w-6 lg:h-8 lg:w-8 text-primary" />
                     <div className="min-w-0">
                       <p className="font-semibold text-sm lg:text-base">
                         Track Progress
@@ -402,15 +373,14 @@ export default function DashboardPage() {
               </Card>
             </Link>
 
-            {typeof storeId === "string" &&
-              typeof traineeUid === "string" && (
-                <div className="mt-2">
-                  <TraineeNotesCardWrapper
-                    storeId={storeId}
-                    traineeUid={traineeUid}
-                  />
-                </div>
-              )}
+            {typeof storeId === "string" && typeof traineeUid === "string" && (
+              <div className="mt-2">
+                <TraineeNotesCardWrapper
+                  storeId={storeId}
+                  traineeUid={traineeUid}
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -418,7 +388,7 @@ export default function DashboardPage() {
   );
 }
 
-/* ---------- DAY 1 CARD ---------- */
+/* ------------------ Day 1 Card ------------------ */
 
 interface Day1CardProps {
   storeId?: string;
@@ -435,6 +405,12 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
     [done, total]
   );
 
+  /* ---------- FIX: reset local card state when trainee changes ---------- */
+  useEffect(() => {
+    setDone(0);
+    setTotal(0);
+  }, [traineeUid]);
+
   useEffect(() => {
     let alive = true;
 
@@ -442,18 +418,19 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
       try {
         const dayDoc = await getDoc(doc(db, "days", "day-1"));
         if (alive && dayDoc.exists()) {
-          const data = dayDoc.data() as Record<string, unknown>;
-          const t =
-            (data["title"] as string) || (data["name"] as string);
+          const d = dayDoc.data() as any;
+          const t = d?.title || d?.name;
           if (t) setTitle(t);
         }
 
         const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
         if (!alive) return;
+
         const taskIds = snap.docs.map((d) => d.id);
         setTotal(taskIds.length);
 
         let userDone = 0;
+
         if (storeId && traineeUid) {
           const progRef = doc(
             db,
@@ -470,9 +447,7 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
             const doneIds: string[] = Array.isArray(p?.doneIds)
               ? p.doneIds
               : [];
-            userDone = doneIds.filter((id) =>
-              taskIds.includes(id)
-            ).length;
+            userDone = doneIds.filter((id) => taskIds.includes(id)).length;
           }
         }
 
@@ -482,13 +457,11 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [storeId, traineeUid]);
 
   return (
-    <Link href="/dashboard/day-1" className="block focus:outline-none">
+    <Link href="/dashboard/day-1" className="block">
       <Card className="border-primary/20">
         <CardHeader className="pb-2 lg:pb-3">
           <CardTitle className="text-base lg:text-lg">{title}</CardTitle>
