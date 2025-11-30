@@ -31,6 +31,16 @@ function LoginContent() {
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  /* ----------------------------------------------------------
+     🔥 NEW: Redirect invite links to signup first
+  ---------------------------------------------------------- */
+  useEffect(() => {
+    const invite = qs?.get("invite");
+    if (invite) {
+      router.replace(`/signup?invite=${invite}`);
+    }
+  }, [qs, router]);
+
   useEffect(() => {
     if (qs?.get("verify") === "1") {
       setMsg("Check your email to verify your account, then sign in.");
@@ -75,10 +85,9 @@ function LoginContent() {
     }
 
     if (role === "manager") {
-  router.replace("/manager");
-  return;
-}
-
+      router.replace("/manager");
+      return;
+    }
 
     if (role === "supervisor") {
       router.replace("/supervisor");
@@ -185,4 +194,3 @@ function LoginContent() {
     </main>
   );
 }
-
