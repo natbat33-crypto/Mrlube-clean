@@ -14,7 +14,7 @@ import {
 } from "firebase/firestore";
 import { assignTrainee } from "@/lib/assignments";
 
-/* ---------- types ---------- */
+/* ---------------- types ---------------- */
 type Emp = {
   uid: string;
   role?: string;
@@ -30,23 +30,25 @@ type Store = {
 };
 
 /* -----------------------------------------------------------
-   REAL TASK PATHS USED FOR PROGRESS CALCULATION  (FIXED)
+   REAL TASK IDS – MATCH FIRESTORE EXACTLY
+   Progress docs use IDs like: modules__week2__tasks__t03
 ----------------------------------------------------------- */
 async function loadAllRealTasks(): Promise<string[]> {
   const result: string[] = [];
 
-  // FIXED — NO SPREAD OPERATOR
-  async function addTasks(path: string[]) {
-    const [a, b, c] = path;
-    const snap = await getDocs(collection(db, a, b, c));
-    snap.forEach((d) => result.push(d.id));
+  async function addTasks(parent: string, week: string, sub: string) {
+    const snap = await getDocs(collection(db, parent, week, sub));
+    snap.forEach((d) => {
+      const progId = `${parent}__${week}__${sub}__${d.id}`;
+      result.push(progId);
+    });
   }
 
-  await addTasks(["days", "day-1", "tasks"]);
-  await addTasks(["modules", "week1", "tasks"]);
-  await addTasks(["modules", "week2", "tasks"]);
-  await addTasks(["modules", "week3", "tasks"]);
-  await addTasks(["modules", "week4", "tasks"]);
+  await addTasks("days", "day-1", "tasks");
+  await addTasks("modules", "week1", "tasks");
+  await addTasks("modules", "week2", "tasks");
+  await addTasks("modules", "week3", "tasks");
+  await addTasks("modules", "week4", "tasks");
 
   return result;
 }
@@ -70,8 +72,9 @@ export default function ManagerDashboard() {
 
   const [loading, setLoading] = useState(true);
 
-  /* NEW — PROGRESS MAP (uid → percent) */
-  const [progressMap, setProgressMap] = useState<Record<string, number>>({});
+  /* NEW — PROGRESS MAP */
+  const [progressMap, setProgressMap] =
+    useState<Record<string, number>>({});
 
   /* ---------- auth ---------- */
   useEffect(() => {
@@ -85,7 +88,6 @@ export default function ManagerDashboard() {
 
       setUid(u.uid);
 
-      // get storeId from users/{uid}
       let sid: string | null = null;
       const userSnap = await getDoc(doc(db, "users", u.uid));
       if (userSnap.exists()) {
@@ -156,7 +158,7 @@ export default function ManagerDashboard() {
   }, [uid, storeId]);
 
   /* -----------------------------------------------------------
-     MAIN FIX — REAL PROGRESS CALCULATION
+     MAIN FIX — MATCH PROGRESS DOC ID FORMAT EXACTLY
   ----------------------------------------------------------- */
   useEffect(() => {
     if (!trainees.length) return;
@@ -175,13 +177,15 @@ export default function ManagerDashboard() {
         let done = 0;
 
         snap.forEach((d) => {
-          const v: any = d.data();
+          const taskId = d.id; // EXACT MATCHING
 
-          const taskId = d.id;
           if (!realTasks.includes(taskId)) return;
+
+          const v: any = d.data();
 
           const isDone =
             v.done === true ||
+            v.completed === true ||
             v.status === "done" ||
             v.approved === true ||
             !!v.approvedBy;
@@ -222,8 +226,6 @@ export default function ManagerDashboard() {
 
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
-
-      {/* STORE */}
       {store && (
         <section className="rounded-2xl border bg-white p-5">
           <div className="text-lg font-semibold">
@@ -236,11 +238,18 @@ export default function ManagerDashboard() {
 
       {/* NOTES */}
       <section className="rounded-2xl border bg-white p-5">
-        <Link href={`/manager/notes?store=${storeId}`} className="flex items-center gap-3">
-          <div className="h-10 w-10 flex items-center justify-center rounded-xl border bg-white">💬</div>
+        <Link
+          href={`/manager/notes?store=${storeId}`}
+          className="flex items-center gap-3"
+        >
+          <div className="h-10 w-10 flex items-center justify-center rounded-xl border bg-white">
+            💬
+          </div>
           <div>
             <div className="font-semibold">Notes & Messages</div>
-            <div className="text-sm text-gray-600">Tap to view and send messages</div>
+            <div className="text-sm text-gray-600">
+              Tap to view and send messages
+            </div>
           </div>
         </Link>
       </section>
@@ -251,45 +260,48 @@ export default function ManagerDashboard() {
           className="w-full flex justify-between items-center"
           onClick={() => setOpenStaff(!openStaff)}
         >
-          <div className="font-semibold text-gray-900">Store Staff</div>
-          <span className="text-gray-500">{openStaff ? "▲" : "▼"}</span>
+          <div className="font-semibold text-gray-900">
+            Store Staff
+          </div>
+          <span className="text-gray-500">
+            {openStaff ? "▲" : "▼"}
+          </span>
         </button>
 
         {openStaff && (
           <div className="mt-5 space-y-6">
-
             {/* Supervisors */}
             <Block title="Supervisors">
               {supervisors.length === 0
                 ? "No supervisors yet."
-                : supervisors.map((s) => <div key={s.uid}>{s.name || s.email}</div>)}
+                : supervisors.map((s) => (
+                    <div key={s.uid}>{s.name || s.email}</div>
+                  ))}
             </Block>
 
-            {/* Trainees + progress */}
+            {/* Trainees */}
             <Block title="Trainees">
-              {trainees.length === 0 ? (
-                "No trainees yet."
-              ) : (
-                trainees.map((t) => (
-                  <div key={t.uid} className="mb-4">
-                    <div>{t.name || t.email}</div>
+              {trainees.length === 0
+                ? "No trainees yet."
+                : trainees.map((t) => (
+                    <div key={t.uid} className="mb-4">
+                      <div>{t.name || t.email}</div>
 
-                    <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
-                      <div
-                        className="h-3 rounded-full"
-                        style={{
-                          width: `${progressMap[t.uid] ?? 0}%`,
-                          backgroundColor: "#f2b705",
-                        }}
-                      />
-                    </div>
+                      <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
+                        <div
+                          className="h-3 rounded-full"
+                          style={{
+                            width: `${progressMap[t.uid] ?? 0}%`,
+                            backgroundColor: "#f2b705",
+                          }}
+                        />
+                      </div>
 
-                    <div className="text-xs text-gray-600 mt-1">
-                      {progressMap[t.uid] ?? 0}% complete
+                      <div className="text-xs text-gray-600 mt-1">
+                        {progressMap[t.uid] ?? 0}% complete
+                      </div>
                     </div>
-                  </div>
-                ))
-              )}
+                  ))}
             </Block>
 
             {/* Employees */}
@@ -300,14 +312,17 @@ export default function ManagerDashboard() {
                     .filter((e) => e.active)
                     .map((e) => (
                       <div key={e.uid}>
-                        {e.name || e.email} — {String(e.role || "").toLowerCase()}
+                        {e.name || e.email} —{" "}
+                        {String(e.role || "").toLowerCase()}
                       </div>
                     ))}
             </Block>
 
             {/* Assign */}
             <section className="border rounded-2xl bg-white p-5">
-              <h3 className="font-semibold mb-3">Assign Trainee → Supervisor</h3>
+              <h3 className="font-semibold mb-3">
+                Assign Trainee → Supervisor
+              </h3>
 
               <div className="grid md:grid-cols-2 gap-3">
                 <label className="text-sm">
@@ -352,7 +367,9 @@ export default function ManagerDashboard() {
                   Assign
                 </button>
 
-                {status && <span className="text-sm text-gray-600">{status}</span>}
+                {status && (
+                  <span className="text-sm text-gray-600">{status}</span>
+                )}
               </div>
             </section>
           </div>
@@ -362,8 +379,14 @@ export default function ManagerDashboard() {
   );
 }
 
-/* ----------------------------------------------------------- */
-function Block({ title, children }: { title: string; children: any }) {
+/* ---------------- Block Component ---------------- */
+function Block({
+  title,
+  children,
+}: {
+  title: string;
+  children: any;
+}) {
   return (
     <div className="border rounded-2xl bg-white p-5">
       <div className="font-semibold mb-2">{title}</div>
