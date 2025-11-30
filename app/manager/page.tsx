@@ -30,14 +30,15 @@ type Store = {
 };
 
 /* -----------------------------------------------------------
-   REAL TASK PATHS USED FOR PROGRESS CALCULATION
+   REAL TASK PATHS USED FOR PROGRESS CALCULATION  (FIXED)
 ----------------------------------------------------------- */
 async function loadAllRealTasks(): Promise<string[]> {
   const result: string[] = [];
 
-  // Helper to push IDs
+  // FIXED — NO SPREAD OPERATOR
   async function addTasks(path: string[]) {
-    const snap = await getDocs(collection(db, ...path));
+    const [a, b, c] = path;
+    const snap = await getDocs(collection(db, a, b, c));
     snap.forEach((d) => result.push(d.id));
   }
 
