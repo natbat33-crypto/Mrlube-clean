@@ -397,17 +397,6 @@ function ProgressPageInner({ uid }: { uid: string }) {
                   </div>
                 </div>
               </div>
-
-              <div className="ml-auto min-w-[220px]">
-                <div className="flex justify-between text-xs mb-1">
-                  <span>Time Progress</span>
-                  <span>{timePct}%</span>
-                </div>
-                <Progress
-                  value={timePct}
-                  className="h-2 [&>div]:bg-blue-500"
-                />
-              </div>
             </CardContent>
           </Card>
 
