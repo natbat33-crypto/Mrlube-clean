@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Menu, X, ChevronDown, LogOut } from "lucide-react";
+import { Menu, X, LogOut } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import RoleGate from "@/components/RoleGate";
@@ -13,7 +13,6 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Allow both employee + trainee
   return (
     <RoleGate allow={["employee", "trainee"]}>
       <DashboardShell>{children}</DashboardShell>
@@ -28,7 +27,6 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
-  const [modulesOpen, setModulesOpen] = React.useState(false);
 
   // redirect if no auth
   React.useEffect(() => {
@@ -61,10 +59,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       {/* ----------------- TOP BAR ----------------- */}
       <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">
         <div className="h-full px-4 flex items-center justify-between">
-
           {/* Branding */}
           <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-full bg-[#0b53a6] text-white font-extrabold">
+            <span className="px-3 py-1 rounded-full bg-[#0b3d91] text-white font-extrabold">
               Mr. Lube
             </span>
             <span className="px-3 py-1 rounded-full bg-[#f2b705] text-black font-semibold">
@@ -93,32 +90,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           {/* Dashboard Home */}
           <NavLink href="/dashboard" label="Dashboard Home" />
 
-          {/* Training Modules */}
-          <div className="mt-4">
-            <button
-              onClick={() => setModulesOpen((v) => !v)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/10"
-            >
-              <span className="text-white/80">Training Modules</span>
-              <ChevronDown
-                className={`h-4 w-4 transition-transform ${
-                  modulesOpen ? "rotate-180" : ""
-                }`}
-              />
-            </button>
-
-            {modulesOpen && (
-              <ul className="pl-6 mt-1 space-y-1">
-                <NavLink href="/modules/week1" label="Week 1 – Orientation" />
-                <NavLink href="/modules/week2" label="Week 2 – Vehicle Basics" />
-                <NavLink href="/modules/week3" label="Week 3 – Customer Flow" />
-                <NavLink
-                  href="/modules/week4"
-                  label="Week 4 – Quality & Safety"
-                />
-              </ul>
-            )}
-          </div>
+          {/* --------- REMOVED MODULES SECTION --------- */}
+          {/* NOTHING ELSE REMOVED */}
 
           {/* Sign Out */}
           <button
@@ -155,6 +128,4 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-
 
