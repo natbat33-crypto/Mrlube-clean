@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
+import { onIdTokenChanged } from "firebase/auth";
 import {
   doc,
   getDoc,
@@ -16,15 +17,6 @@ import {
 } from "firebase/firestore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-
-/* ---------------- uid util ---------------- */
-function getUid(): string {
-  if (typeof window !== "undefined") {
-    const uid = localStorage.getItem("uid");
-    if (uid) return uid;
-  }
-  return ""; // IMPORTANT: never use demo-user in prod
-}
 
 /* ---------------- shared utils ---------------- */
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
@@ -90,25 +82,42 @@ async function ensureTraineeDoc(uid: string, defaultDays = 30) {
   if (Object.keys(updates).length) await setDoc(ref, updates, { merge: true });
 }
 
-/* ---------------- WRAPPER ---------------- */
-export default function ProgressPage() {
-  const uid = getUid();
+/* ---------------- WRAPPER: gets real UID from Firebase ---------------- */
 
-  // wait for auth to set uid in localStorage
-  if (!uid) {
+const NAVY = "#0b3d91";
+const GRAY = "#e9e9ee";
+
+export default function ProgressPage() {
+  const [uid, setUid] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const unsub = onIdTokenChanged(auth, (user) => {
+      setUid(user ? user.uid : null);
+      setAuthChecked(true);
+    });
+    return () => unsub();
+  }, []);
+
+  if (!authChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-sm text-slate-500">
+      <div className="min-h-screen flex items-center justify-center text-sm text-gray-600">
         Loading your account…
       </div>
     );
   }
 
+  if (!uid) {
+    if (typeof window !== "undefined") {
+      window.location.assign("/auth/login");
+    }
+    return null;
+  }
+
   return <ProgressPageInner key={uid} uid={uid} />;
 }
 
-/* ---------------- MAIN PAGE ---------------- */
-const NAVY = "#0b3d91";
-const GRAY = "#e9e9ee";
+/* ---------------- MAIN PAGE (same layout as before) ---------------- */
 
 function ProgressPageInner({ uid }: { uid: string }) {
   const today = startOfDay(new Date());
@@ -190,7 +199,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
             setWhmisProvider(data.whmisProvider);
         }
 
-        // Task totals
+        // Task totals (same as before)
         const cols = [
           collection(db, "days", "day-1", "tasks"),
           collection(db, "modules", "week1", "tasks"),
@@ -298,7 +307,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
     showMonth.getMonth()
   );
 
-  /* ---------------- UI ---------------- */
+  /* ---------------- UI (unchanged layout) ---------------- */
   return (
     <div className="max-w-4xl mx-auto px-4 lg:px-6 py-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -326,7 +335,6 @@ function ProgressPageInner({ uid }: { uid: string }) {
         </Link>
       </div>
 
-      {/* FIRST TIME SETUP */}
       {!loading && !startDate && (
         <Card className="border-primary/20">
           <CardHeader>
@@ -380,12 +388,10 @@ function ProgressPageInner({ uid }: { uid: string }) {
         </Card>
       )}
 
-      {/* AFTER SETUP */}
       {startDate && (
         <>
           <Card>
             <CardContent className="p-4 lg:p-6 space-y-4">
-              {/* TOP INFO ROW */}
               <div className="flex flex-wrap gap-6 items-end">
                 <div>
                   <div className="text-sm text-muted-foreground">Start</div>
@@ -425,7 +431,6 @@ function ProgressPageInner({ uid }: { uid: string }) {
                 </div>
               </div>
 
-              {/* TIME PROGRESS */}
               <div className="ml-auto min-w-[220px]">
                 <div className="flex justify-between text-xs mb-1">
                   <span>Time Progress</span>
@@ -439,7 +444,6 @@ function ProgressPageInner({ uid }: { uid: string }) {
             </CardContent>
           </Card>
 
-          {/* CALENDAR */}
           <Card>
             <CardHeader>
               <CardTitle>
@@ -461,7 +465,6 @@ function ProgressPageInner({ uid }: { uid: string }) {
               <div className="grid grid-cols-7 gap-1">
                 {matrix.flat().map((d, i) => {
                   if (!d) return <div key={i} className="h-8" />;
-
                   const shaded =
                     startDate && endDate && inRange(d, startDate, endDate);
                   const isToday = sameDay(d, today);
@@ -472,9 +475,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
                       key={i}
                       className={[
                         "h-8 rounded-md border text-sm flex items-center justify-center",
-                        shaded
-                          ? "bg-blue-100 border-blue-200"
-                          : "",
+                        shaded ? "bg-blue-100 border-blue-200" : "",
                         isToday ? "ring-1 ring-primary" : "",
                         isDue
                           ? "bg-yellow-100 border-yellow-300 font-semibold"
@@ -489,7 +490,6 @@ function ProgressPageInner({ uid }: { uid: string }) {
             </CardContent>
           </Card>
 
-          {/* WHMIS SECTION */}
           <Card className="border-primary/20">
             <CardHeader>
               <CardTitle className="text-base">WHMIS Status</CardTitle>
@@ -565,4 +565,3 @@ function ProgressPageInner({ uid }: { uid: string }) {
     </div>
   );
 }
-
