@@ -11,14 +11,12 @@ import {
   Timestamp,
   serverTimestamp,
   collection,
-  query,
-  where,
   getCountFromServer,
 } from "firebase/firestore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
-/* ---------------- shared utils ---------------- */
+/* ---------------- utils ---------------- */
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (d: Date, n: number) => {
   const x = new Date(d);
@@ -30,7 +28,6 @@ const startOfDay = (d: Date) =>
 const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, n));
 
-/* ---------------- calendar helpers ---------------- */
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
@@ -51,16 +48,7 @@ function monthMatrix(year: number, month: number) {
   return rows;
 }
 
-/* ---------------- types ---------------- */
-type TraineeDoc = {
-  startDate: Timestamp;
-  durationDays: number;
-  whmisCompletedDate?: Timestamp | null;
-  whmisExpiryDate?: Timestamp | null;
-  whmisProvider?: string;
-};
-
-/* ---------------- ensure trainee doc ---------------- */
+/* ---------------- trainee doc ---------------- */
 async function ensureTraineeDoc(uid: string, defaultDays = 30) {
   const ref = doc(db, "trainees", uid);
   const snap = await getDoc(ref);
@@ -73,8 +61,9 @@ async function ensureTraineeDoc(uid: string, defaultDays = 30) {
     return;
   }
 
-  const data = snap.data() as Partial<TraineeDoc>;
-  const updates: Record<string, any> = {};
+  const data = snap.data() as any;
+  const updates: any = {};
+
   if (!data.startDate) updates.startDate = serverTimestamp();
   if (typeof data.durationDays !== "number")
     updates.durationDays = defaultDays;
@@ -82,10 +71,7 @@ async function ensureTraineeDoc(uid: string, defaultDays = 30) {
   if (Object.keys(updates).length) await setDoc(ref, updates, { merge: true });
 }
 
-/* ---------------- WRAPPER: gets real UID from Firebase ---------------- */
-
-const NAVY = "#0b3d91";
-const GRAY = "#e9e9ee";
+/* ---------------- wrapper (real firebase uid) ---------------- */
 
 export default function ProgressPage() {
   const [uid, setUid] = useState<string | null>(null);
@@ -117,7 +103,10 @@ export default function ProgressPage() {
   return <ProgressPageInner key={uid} uid={uid} />;
 }
 
-/* ---------------- MAIN PAGE (same layout as before) ---------------- */
+/* ---------------- MAIN PAGE ---------------- */
+
+const NAVY = "#0b3d91";
+const GRAY = "#e9e9ee";
 
 function ProgressPageInner({ uid }: { uid: string }) {
   const today = startOfDay(new Date());
@@ -130,18 +119,16 @@ function ProgressPageInner({ uid }: { uid: string }) {
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [durationDays, setDurationDays] = useState<number>(30);
 
-  // Progress
+  // progress
   const [tasksDone, setTasksDone] = useState<number>(0);
-  const [tasksTotal, setTasksTotal] = useState<number>(0);
+  const [tasksTotal, setTasksTotal] = useState<number>(46); // <– total tasks
 
   // WHMIS
-  const [whmisCompletedDate, setWhmisCompletedDate] = useState<Date | null>(
-    null
-  );
+  const [whmisCompletedDate, setWhmisCompletedDate] = useState<Date | null>(null);
   const [whmisExpiryDate, setWhmisExpiryDate] = useState<Date | null>(null);
   const [whmisProvider, setWhmisProvider] = useState<string>("");
 
-  /* ---------------- derived ---------------- */
+  /* derived */
   const endDate = useMemo(
     () => (startDate ? addDays(startDate, durationDays - 1) : null),
     [startDate, durationDays]
@@ -169,7 +156,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
 
   const tasksPct = tasksTotal ? Math.round((tasksDone / tasksTotal) * 100) : 0;
 
-  /* ---------------- load data ---------------- */
+  /* ---------------- load ---------------- */
   useEffect(() => {
     let alive = true;
 
@@ -183,47 +170,31 @@ function ProgressPageInner({ uid }: { uid: string }) {
         const tSnap = await getDoc(tRef);
 
         if (tSnap.exists()) {
-          const data = tSnap.data() as Partial<TraineeDoc>;
+          const data = tSnap.data() as any;
 
           if (data.startDate) setStartDate(data.startDate.toDate());
           if (typeof data.durationDays === "number")
             setDurationDays(data.durationDays);
-
           if (data.whmisCompletedDate instanceof Timestamp)
             setWhmisCompletedDate(data.whmisCompletedDate.toDate());
-
           if (data.whmisExpiryDate instanceof Timestamp)
             setWhmisExpiryDate(data.whmisExpiryDate.toDate());
-
           if (typeof data.whmisProvider === "string")
             setWhmisProvider(data.whmisProvider);
         }
 
-        // Task totals (same as before)
-        const cols = [
-          collection(db, "days", "day-1", "tasks"),
-          collection(db, "modules", "week1", "tasks"),
-          collection(db, "modules", "week2", "tasks"),
-          collection(db, "modules", "week3", "tasks"),
-          collection(db, "modules", "week4", "tasks"),
-        ];
+        // ---------------- REAL PROGRESS FROM users/{uid}/progress ----------------
+        try {
+          const progressCol = collection(db, "users", uid, "progress");
+          const doneSnap = await getCountFromServer(progressCol);
+          const done = doneSnap.data().count || 0;
 
-        let total = 0;
-        let done = 0;
-
-        for (const col of cols) {
-          const totalSnap = await getCountFromServer(col);
-          const doneSnap = await getCountFromServer(
-            query(col, where("done", "==", true))
-          );
-
-          total += totalSnap.data().count || 0;
-          done += doneSnap.data().count || 0;
-        }
-
-        if (alive) {
-          setTasksTotal(total);
-          setTasksDone(done);
+          if (alive) {
+            setTasksDone(done);
+            setTasksTotal(46); // adjust total if needed
+          }
+        } catch (err) {
+          console.error("progress load failed:", err);
         }
 
         setError(null);
@@ -297,17 +268,13 @@ function ProgressPageInner({ uid }: { uid: string }) {
     }
   }
 
-  const whmisCompletedStr =
-    whmisCompletedDate ? ymd(whmisCompletedDate) : "";
+  const whmisCompletedStr = whmisCompletedDate ? ymd(whmisCompletedDate) : "";
   const whmisExpiryStr = whmisExpiryDate ? ymd(whmisExpiryDate) : "";
 
   const showMonth = startDate ?? today;
-  const matrix = monthMatrix(
-    showMonth.getFullYear(),
-    showMonth.getMonth()
-  );
+  const matrix = monthMatrix(showMonth.getFullYear(), showMonth.getMonth());
 
-  /* ---------------- UI (unchanged layout) ---------------- */
+  /* ---------------- UI ---------------- */
   return (
     <div className="max-w-4xl mx-auto px-4 lg:px-6 py-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -328,7 +295,6 @@ function ProgressPageInner({ uid }: { uid: string }) {
             fontWeight: 600,
             color: NAVY,
             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-            whiteSpace: "nowrap",
           }}
         >
           ← Back to Dashboard
@@ -390,6 +356,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
 
       {startDate && (
         <>
+          {/* TOP CARD */}
           <Card>
             <CardContent className="p-4 lg:p-6 space-y-4">
               <div className="flex flex-wrap gap-6 items-end">
@@ -444,6 +411,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
             </CardContent>
           </Card>
 
+          {/* CALENDAR */}
           <Card>
             <CardHeader>
               <CardTitle>
@@ -455,11 +423,9 @@ function ProgressPageInner({ uid }: { uid: string }) {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-7 text-center text-xs font-medium text-muted-foreground mb-2">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
-                  (d) => (
-                    <div key={d}>{d}</div>
-                  )
-                )}
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                  <div key={d}>{d}</div>
+                ))}
               </div>
 
               <div className="grid grid-cols-7 gap-1">
@@ -490,6 +456,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
             </CardContent>
           </Card>
 
+          {/* WHMIS */}
           <Card className="border-primary/20">
             <CardHeader>
               <CardTitle className="text-base">WHMIS Status</CardTitle>
