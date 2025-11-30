@@ -17,12 +17,14 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
-/* ---------------- uid / date utils ---------------- */
+/* ---------------- uid util ---------------- */
 function getUid(): string {
   if (typeof window !== "undefined")
     return localStorage.getItem("uid") || "demo-user";
   return "demo-user";
 }
+
+/* ---------------- shared utils ---------------- */
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (d: Date, n: number) => {
   const x = new Date(d);
@@ -39,7 +41,9 @@ const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
+
 const inRange = (d: Date, s: Date, e: Date) => d >= s && d <= e;
+
 function monthMatrix(year: number, month: number) {
   const first = new Date(year, month, 1);
   const start = first.getDay();
@@ -74,20 +78,27 @@ async function ensureTraineeDoc(uid: string, defaultDays = 30) {
     );
     return;
   }
+
   const data = snap.data() as Partial<TraineeDoc>;
   const updates: Record<string, any> = {};
   if (!data.startDate) updates.startDate = serverTimestamp();
   if (typeof data.durationDays !== "number")
     updates.durationDays = defaultDays;
+
   if (Object.keys(updates).length) await setDoc(ref, updates, { merge: true });
 }
 
-/* ---------------- page ---------------- */
+/* ---------------- WRAPPER (forces reset per user) ---------------- */
+export default function ProgressPage() {
+  const uid = getUid();
+  return <ProgressPageInner key={uid} uid={uid} />;
+}
+
+/* ---------------- MAIN PAGE ---------------- */
 const NAVY = "#0b3d91";
 const GRAY = "#e9e9ee";
 
-export default function ProgressPage() {
-  const uid = getUid();
+function ProgressPageInner({ uid }: { uid: string }) {
   const today = startOfDay(new Date());
 
   const [loading, setLoading] = useState(true);
@@ -98,18 +109,18 @@ export default function ProgressPage() {
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [durationDays, setDurationDays] = useState<number>(30);
 
-  // task-progress state
+  // Progress
   const [tasksDone, setTasksDone] = useState<number>(0);
   const [tasksTotal, setTasksTotal] = useState<number>(0);
 
-  // WHMIS state
+  // WHMIS
   const [whmisCompletedDate, setWhmisCompletedDate] = useState<Date | null>(
     null
   );
   const [whmisExpiryDate, setWhmisExpiryDate] = useState<Date | null>(null);
   const [whmisProvider, setWhmisProvider] = useState<string>("");
 
-  // derived time stuff
+  /* ---------------- derived ---------------- */
   const endDate = useMemo(
     () => (startDate ? addDays(startDate, durationDays - 1) : null),
     [startDate, durationDays]
@@ -119,8 +130,7 @@ export default function ProgressPage() {
     if (!startDate) return 0;
     const ms =
       startOfDay(new Date()).getTime() - startOfDay(startDate).getTime();
-    const days = Math.floor(ms / 86400000) + 1;
-    return clamp(days, 0, durationDays);
+    return clamp(Math.floor(ms / 86400000) + 1, 0, durationDays);
   }, [startDate, durationDays]);
 
   const daysRemaining = useMemo(
@@ -131,20 +141,17 @@ export default function ProgressPage() {
   const timePct = useMemo(
     () =>
       startDate
-        ? Math.round(
-            ((durationDays - daysRemaining) / durationDays) * 100
-          )
+        ? Math.round(((durationDays - daysRemaining) / durationDays) * 100)
         : 0,
     [startDate, durationDays, daysRemaining]
   );
 
-  const tasksPct = tasksTotal
-    ? Math.round((tasksDone / tasksTotal) * 100)
-    : 0;
+  const tasksPct = tasksTotal ? Math.round((tasksDone / tasksTotal) * 100) : 0;
 
   /* ---------------- load data ---------------- */
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
         setLoading(true);
@@ -163,12 +170,15 @@ export default function ProgressPage() {
 
           if (data.whmisCompletedDate instanceof Timestamp)
             setWhmisCompletedDate(data.whmisCompletedDate.toDate());
+
           if (data.whmisExpiryDate instanceof Timestamp)
             setWhmisExpiryDate(data.whmisExpiryDate.toDate());
+
           if (typeof data.whmisProvider === "string")
             setWhmisProvider(data.whmisProvider);
         }
 
+        // Task totals
         const cols = [
           collection(db, "days", "day-1", "tasks"),
           collection(db, "modules", "week1", "tasks"),
@@ -185,6 +195,7 @@ export default function ProgressPage() {
           const doneSnap = await getCountFromServer(
             query(col, where("done", "==", true))
           );
+
           total += totalSnap.data().count || 0;
           done += doneSnap.data().count || 0;
         }
@@ -207,7 +218,7 @@ export default function ProgressPage() {
     };
   }, [uid]);
 
-  /* ---------------- save start date ---------------- */
+  /* ---------------- save start ---------------- */
   async function saveStart(dateStr: string, days: number) {
     try {
       setSaving(true);
@@ -222,16 +233,14 @@ export default function ProgressPage() {
       );
       setStartDate(d);
       setDurationDays(days);
-      setError(null);
     } catch (e: any) {
-      console.error(e);
       setError(e.message ?? String(e));
     } finally {
       setSaving(false);
     }
   }
 
-  /* ---------------- save WHMIS ---------------- */
+  /* ---------------- save whmis ---------------- */
   async function saveWhmis(
     completedStr: string,
     expiryStr: string,
@@ -240,14 +249,10 @@ export default function ProgressPage() {
     try {
       setSavingWhmis(true);
 
-      const completed =
-        completedStr.trim() !== ""
-          ? new Date(completedStr + "T00:00:00")
-          : null;
-      const expiry =
-        expiryStr.trim() !== ""
-          ? new Date(expiryStr + "T00:00:00")
-          : null;
+      const completed = completedStr
+        ? new Date(completedStr + "T00:00:00")
+        : null;
+      const expiry = expiryStr ? new Date(expiryStr + "T00:00:00") : null;
 
       await setDoc(
         doc(db, "trainees", uid),
@@ -264,7 +269,6 @@ export default function ProgressPage() {
       setWhmisCompletedDate(completed);
       setWhmisExpiryDate(expiry);
       setWhmisProvider(provider);
-      setError(null);
     } catch (e: any) {
       setError(e.message ?? String(e));
     } finally {
@@ -310,7 +314,6 @@ export default function ProgressPage() {
         </Link>
       </div>
 
-      {/* Start date setup */}
       {!loading && !startDate && (
         <Card className="border-primary/20">
           <CardHeader>
@@ -364,7 +367,6 @@ export default function ProgressPage() {
         </Card>
       )}
 
-      {/* Progress Summary */}
       {startDate && (
         <>
           <Card>
@@ -421,7 +423,6 @@ export default function ProgressPage() {
             </CardContent>
           </Card>
 
-          {/* Calendar */}
           <Card>
             <CardHeader>
               <CardTitle>
@@ -453,8 +454,7 @@ export default function ProgressPage() {
                       key={i}
                       className={[
                         "h-8 rounded-md border text-sm flex items-center justify-center",
-                        shaded
-                          ? "bg-blue-100 border-blue-200" : "",                     
+                        shaded ? "bg-blue-100 border-blue-200" : "",
                         isToday ? "ring-1 ring-primary" : "",
                         isDue
                           ? "bg-yellow-100 border-yellow-300 font-semibold"
@@ -469,7 +469,6 @@ export default function ProgressPage() {
             </CardContent>
           </Card>
 
-          {/* WHMIS — compact at bottom */}
           <Card className="border-primary/20">
             <CardHeader>
               <CardTitle className="text-base">WHMIS Status</CardTitle>
@@ -545,5 +544,3 @@ export default function ProgressPage() {
     </div>
   );
 }
-
-
