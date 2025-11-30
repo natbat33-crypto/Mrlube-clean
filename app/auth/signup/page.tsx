@@ -37,8 +37,10 @@ export default function SignupPage() {
 
 function SignupContent() {
   const search = useSearchParams();
-  const raw = search.get("code") || "";
-  const code = raw.trim().toUpperCase();
+
+  // 🔥 NEW — supports BOTH ?invite=XYZ and ?code=XYZ
+  const inviteParam = search.get("invite") || search.get("code") || "";
+  const code = inviteParam.trim().toUpperCase();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,23 +48,29 @@ function SignupContent() {
   const [loading, setLoading] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
+  // ------------------ VALIDATE INVITE ------------------
   useEffect(() => {
     let cancel = false;
 
     (async () => {
       if (!code) return;
+
       try {
         const snap = await getDoc(doc(db, "invites", code));
         if (!snap.exists())
           return !cancel && setInviteError("Invalid invite code.");
+
         const inv = snap.data() as Invite;
 
         if (inv.disabled)
           return !cancel && setInviteError("Invite disabled.");
+
         if (inv.expiresAt?.toMillis && inv.expiresAt.toMillis() < Date.now())
           return !cancel && setInviteError("Invite expired.");
+
         if (typeof inv.maxUses === "number" && (inv.uses || 0) >= inv.maxUses)
           return !cancel && setInviteError("Invite quota reached.");
+
         if (!inv.maxUses && inv.used)
           return !cancel && setInviteError("Invite already used.");
 
@@ -77,6 +85,7 @@ function SignupContent() {
     };
   }, [code]);
 
+  // ------------------ SUBMIT ------------------
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus(null);
@@ -95,6 +104,7 @@ function SignupContent() {
     }
 
     setLoading(true);
+
     try {
       const cred = await createUserWithEmailAndPassword(
         auth,
@@ -103,12 +113,14 @@ function SignupContent() {
       );
       const uid = cred.user.uid;
 
+      // Defaults
       let role: Invite["role"] = "employee";
       let storeId: string | null = null;
       let managerId: string | null = null;
 
       const batch = writeBatch(db);
 
+      // ---------- APPLY INVITE CLAIM ----------
       if (code) {
         const inviteRef = doc(db, "invites", code);
         const invSnap = await getDoc(inviteRef);
@@ -126,6 +138,7 @@ function SignupContent() {
         storeId = role === "admin" ? null : inv.storeId ?? null;
         managerId = inv.managerId ?? null;
 
+        // Update invite usage
         batch.set(
           inviteRef,
           typeof inv.maxUses === "number"
@@ -143,6 +156,7 @@ function SignupContent() {
         );
       }
 
+      // If no manager specified, fetch store's manager
       if (!managerId && storeId && (role === "trainee" || role === "supervisor")) {
         const sid = String(storeId);
         const storeRef = doc(db, "stores", sid);
@@ -160,6 +174,7 @@ function SignupContent() {
       const shouldBeActive =
         role === "manager" || role === "supervisor" || role === "trainee";
 
+      // ---------- CREATE USER DOC ----------
       batch.set(
         doc(db, "users", uid),
         {
@@ -174,9 +189,11 @@ function SignupContent() {
         { merge: true }
       );
 
+      // ---------- STORE EMPLOYEE RECORDS ----------
       if (storeId) {
         const sid = String(storeId);
 
+        // employees subcollection
         if (role === "manager" || role === "supervisor" || role === "trainee") {
           batch.set(
             doc(db, `stores/${sid}/employees/${uid}`),
@@ -192,6 +209,7 @@ function SignupContent() {
           );
         }
 
+        // trainees subcollection
         if (role === "trainee") {
           batch.set(
             doc(db, `stores/${sid}/trainees/${uid}`),
@@ -207,9 +225,11 @@ function SignupContent() {
         }
       }
 
+      // ---------- SAVE ----------
       await batch.commit();
       await sendEmailVerification(cred.user);
       await signOut(auth);
+
       window.location.assign("/auth/login?verify=1");
     } catch (err: any) {
       const c = String(err?.code || "");
@@ -226,6 +246,7 @@ function SignupContent() {
     }
   }
 
+  // ------------------ UI ------------------
   const blue = "#0b53a6";
   const blueHover = "#094a92";
   const border = "#e5e7eb";
@@ -400,4 +421,3 @@ function SignupContent() {
     </main>
   );
 }
-
