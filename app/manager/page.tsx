@@ -30,7 +30,7 @@ type Store = {
 };
 
 /* -----------------------------------------------------------
-   REAL TASK IDS – MATCH FIRESTORE EXACTLY
+   REAL TASK IDS
 ----------------------------------------------------------- */
 async function loadAllRealTasks(): Promise<string[]> {
   const result: string[] = [];
@@ -71,7 +71,6 @@ export default function ManagerDashboard() {
 
   const [loading, setLoading] = useState(true);
 
-  /* NEW — PROGRESS MAP */
   const [progressMap, setProgressMap] =
     useState<Record<string, number>>({});
 
@@ -112,7 +111,6 @@ export default function ManagerDashboard() {
   /* ---------- load staff ---------- */
   async function loadRole(role: string): Promise<Emp[]> {
     const coll = collection(db, "stores", storeId!, "employees");
-
     try {
       const s = await getDocs(
         query(coll, where("active", "==", true), where("role", "==", role))
@@ -156,9 +154,7 @@ export default function ManagerDashboard() {
     };
   }, [uid, storeId]);
 
-  /* -----------------------------------------------------------
-     PROGRESS CALCULATION
-  ----------------------------------------------------------- */
+  /* ---------- progress calculation ---------- */
   useEffect(() => {
     if (!trainees.length) return;
 
@@ -176,8 +172,7 @@ export default function ManagerDashboard() {
         let done = 0;
 
         snap.forEach((d) => {
-          const taskId = d.id; // EXACT MATCHING
-
+          const taskId = d.id;
           if (!realTasks.includes(taskId)) return;
 
           const v: any = d.data();
@@ -259,9 +254,7 @@ export default function ManagerDashboard() {
           className="w-full flex justify-between items-center"
           onClick={() => setOpenStaff(!openStaff)}
         >
-          <div className="font-semibold text-gray-900">
-            Store Staff
-          </div>
+          <div className="font-semibold text-gray-900">Store Staff</div>
           <span className="text-gray-500">
             {openStaff ? "▲" : "▼"}
           </span>
@@ -269,12 +262,13 @@ export default function ManagerDashboard() {
 
         {openStaff && (
           <div className="mt-5 space-y-6">
+
             {/* Supervisors */}
             <Block title="Supervisors">
               {supervisors.length === 0
                 ? "No supervisors yet."
                 : supervisors.map((s) => (
-                    <div key={s.uid} className="break-words">
+                    <div key={s.uid} className="break-words whitespace-normal">
                       {s.name || s.email}
                     </div>
                   ))}
@@ -285,8 +279,13 @@ export default function ManagerDashboard() {
               {trainees.length === 0
                 ? "No trainees yet."
                 : trainees.map((t) => (
-                    <div key={t.uid} className="mb-4 break-words">
-                      <div className="break-words">{t.name || t.email}</div>
+                    <div
+                      key={t.uid}
+                      className="mb-4 break-words whitespace-normal"
+                    >
+                      <div className="break-words whitespace-normal">
+                        {t.name || t.email}
+                      </div>
 
                       <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
                         <div
@@ -312,7 +311,10 @@ export default function ManagerDashboard() {
                 : everyone
                     .filter((e) => e.active)
                     .map((e) => (
-                      <div key={e.uid} className="break-words">
+                      <div
+                        key={e.uid}
+                        className="break-words whitespace-normal"
+                      >
                         {e.name || e.email} —{" "}
                         {String(e.role || "").toLowerCase()}
                       </div>
@@ -391,7 +393,11 @@ function Block({
   return (
     <div className="border rounded-2xl bg-white p-5">
       <div className="font-semibold mb-2">{title}</div>
-      <div className="text-sm">{children}</div>
+
+      {/* FIXED — enforce wrapping inside Block */}
+      <div className="text-sm break-words whitespace-normal">
+        {children}
+      </div>
     </div>
   );
 }
