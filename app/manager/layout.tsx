@@ -124,7 +124,7 @@ function ManagerShell({ children }: { children: ReactNode }) {
       )}
 
       {/* ---------------- MAIN CONTENT ---------------- */}
-      <main className="transition-all duration-300 p-4 lg:p-6">
+      <main className="transition-all duration-300 p-4 lg:p-6 break-words">
         {children}
 
         <footer className="mt-6 pt-4 text-center text-xs text-gray-500 border-t">
@@ -134,3 +134,4 @@ function ManagerShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
