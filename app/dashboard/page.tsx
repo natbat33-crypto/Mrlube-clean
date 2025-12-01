@@ -20,8 +20,6 @@ import { db, auth } from "@/lib/firebase";
 import {
   collection,
   getDocs,
-  query,
-  where,
   doc,
   getDoc,
   getCountFromServer,
@@ -73,18 +71,6 @@ async function ensureDay1ProgressDoc(storeId: string, uid: string) {
   await setDoc(ref, { doneIds: [], updatedAt: Date.now() }, { merge: true });
 }
 
-interface TraineeNotesCardWrapperProps {
-  storeId: string;
-  traineeUid: string;
-}
-
-const TraineeNotesCardWrapper: FC<TraineeNotesCardWrapperProps> = ({
-  storeId,
-  traineeUid,
-}) => {
-  return <TraineeNotesCard {...({ storeId, traineeUid } as any)} />;
-};
-
 /* ------------------ main page ------------------ */
 
 export default function DashboardPage() {
@@ -122,17 +108,12 @@ export default function DashboardPage() {
           if (v?.storeId) sid = String(v.storeId);
         }
 
-        if (!sid) {
-          sid = await findStoreForTraineeWithoutIndex(u.uid);
-        }
+        if (!sid) sid = await findStoreForTraineeWithoutIndex(u.uid);
 
-        if (!sid) {
-          setStoreError("No store assigned to this trainee yet.");
-        }
+        if (!sid) setStoreError("No store assigned to this trainee yet.");
 
         setStoreId(sid);
-      } catch (err) {
-        console.error("Error resolving store for trainee:", err);
+      } catch {
         setStoreError("Unable to resolve store. Please contact your manager.");
       } finally {
         setResolvingStore(false);
@@ -142,17 +123,15 @@ export default function DashboardPage() {
     return () => stop();
   }, []);
 
-  /* ---------- FIX: reset progress immediately when trainee changes ---------- */
+  /* ---------- reset when trainee changes ---------- */
   useEffect(() => {
     setWeekDone({});
   }, [traineeUid]);
 
-  /* ---------- ensure Day1 doc ---------- */
+  /* ---------- ensure Day-1 doc exists ---------- */
   useEffect(() => {
     if (storeId && traineeUid) {
-      ensureDay1ProgressDoc(storeId, traineeUid).catch((err) =>
-        console.error("ensureDay1ProgressDoc error:", err)
-      );
+      ensureDay1ProgressDoc(storeId, traineeUid).catch(() => {});
     }
   }, [storeId, traineeUid]);
 
@@ -165,11 +144,7 @@ export default function DashboardPage() {
       const modSnap = await getDoc(modRef);
       const mod = modSnap.exists() ? (modSnap.data() as any) : null;
 
-      const title =
-        mod?.name ||
-        mod?.title ||
-        `Week ${weekNum}`;
-
+      const title = mod?.name || mod?.title || `Week ${weekNum}`;
       const tasksCol = collection(db, "modules", weekId, "tasks");
       const total = (await getCountFromServer(tasksCol)).data().count || 0;
 
@@ -193,7 +168,7 @@ export default function DashboardPage() {
           loadWeek("week4", 4),
         ]);
         if (!cancelled) setCards(next);
-      } catch (e) {
+      } catch {
         if (!cancelled) setCards(defaultComingSoon());
       } finally {
         if (!cancelled) setLoadingWeeks(false);
@@ -203,7 +178,7 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, []);
 
-  /* ---------- load progress from users/<uid>/progress ---------- */
+  /* ---------- load user progress (INCLUDING DAY 1 FIX) ---------- */
   useEffect(() => {
     if (!traineeUid) return;
 
@@ -211,11 +186,12 @@ export default function DashboardPage() {
 
     (async () => {
       try {
+        const counts: Record<number, number> = {};
+
+        // load week 1–4 from users/<uid>/progress
         const progSnap = await getDocs(
           collection(db, "users", traineeUid, "progress")
         );
-
-        const counts: Record<number, number> = {};
 
         progSnap.forEach((d) => {
           const data: any = d.data();
@@ -233,19 +209,37 @@ export default function DashboardPage() {
             if (m2) wkNum = Number(m2[1]);
           }
 
-          if (!wkNum || wkNum < 1 || wkNum > 4) return;
-
-          counts[wkNum] = (counts[wkNum] || 0) + 1;
+          if (wkNum) counts[wkNum] = (counts[wkNum] || 0) + 1;
         });
+
+        /* ----------- FIX: READ DAY 1 PROGRESS FROM store/trainees/... ---------- */
+        if (storeId && traineeUid) {
+          const day1Ref = doc(
+            db,
+            "stores",
+            String(storeId),
+            "trainees",
+            String(traineeUid),
+            "progress",
+            "day-1"
+          );
+
+          const day1Snap = await getDoc(day1Ref);
+          if (day1Snap.exists()) {
+            const p = day1Snap.data() as any;
+            const doneIds = Array.isArray(p?.doneIds) ? p.doneIds : [];
+            counts[1] = doneIds.length;
+          }
+        }
 
         if (!cancelled) setWeekDone(counts);
       } catch (e) {
-        if (!cancelled) console.error("Error loading trainee week progress:", e);
+        if (!cancelled) console.error("Error loading progress:", e);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [traineeUid]);
+  }, [traineeUid, storeId]);  // <----- FIXED DEPENDENCIES
 
   const list = loadingWeeks ? defaultComingSoon() : cards;
   const isResolving = resolvingStore;
@@ -276,7 +270,6 @@ export default function DashboardPage() {
     );
   }
 
-  /* ========= FIX APPLIED HERE: key={traineeUid} ========= */
   return (
     <div key={traineeUid} className="max-w-6xl mx-auto px-4 lg:px-6 py-6">
       <div className="space-y-4 lg:space-y-6">
@@ -405,7 +398,6 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
     [done, total]
   );
 
-  /* ---------- FIX: reset local card state when trainee changes ---------- */
   useEffect(() => {
     setDone(0);
     setTotal(0);
@@ -442,6 +434,7 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
             "day-1"
           );
           const progSnap = await getDoc(progRef);
+
           if (progSnap.exists()) {
             const p = progSnap.data() as any;
             const doneIds: string[] = Array.isArray(p?.doneIds)
