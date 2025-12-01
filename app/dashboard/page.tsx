@@ -86,7 +86,7 @@ const TraineeNotesCardWrapper: FC<TraineeNotesCardWrapperProps> = ({
   return <TraineeNotesCard {...({ storeId, traineeUid } as any)} />;
 };
 
-/* ------------------ main page ------------------ */
+/* ------------------ MAIN PAGE ------------------ */
 
 export default function DashboardPage() {
   const [loadingWeeks, setLoadingWeeks] = useState(true);
@@ -284,7 +284,7 @@ export default function DashboardPage() {
     );
   }
 
-  /* ========= key={traineeUid} ========= */
+  /* -------- PAGE -------- */
   return (
     <div key={traineeUid} className="max-w-6xl mx-auto px-4 lg:px-6 py-6">
       <div className="space-y-4 lg:space-y-6">
@@ -297,6 +297,7 @@ export default function DashboardPage() {
           </p>
         </div>
 
+        {/* ---------------- CARDS ---------------- */}
         <div className="grid gap-3 lg:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
           {storeId && traineeUid ? (
             <Day1Card storeId={storeId} traineeUid={traineeUid} />
@@ -352,6 +353,7 @@ export default function DashboardPage() {
           })}
         </div>
 
+        {/* ---------------- PROGRESS SECTION ---------------- */}
         <Card className="border-primary/20">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg lg:text-xl">
@@ -397,7 +399,7 @@ export default function DashboardPage() {
   );
 }
 
-/* ------------------ Day 1 Card ------------------ */
+/* ------------------ DAY 1 CARD (NO PROGRESS) ------------------ */
 
 interface Day1CardProps {
   storeId?: string;
@@ -405,83 +407,25 @@ interface Day1CardProps {
 }
 
 const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
-  const [done, setDone] = useState(0);
-  const [total, setTotal] = useState(0);
   const [title, setTitle] = useState<string>("Orientation");
 
-  const pct = useMemo(
-    () => (total ? Math.round((done / total) * 100) : 0),
-    [done, total]
-  );
-
-  // reset when switching user
+  // Load title only — no progress tracking
   useEffect(() => {
-    setDone(0);
-    setTotal(0);
-  }, [traineeUid]);
-
-  // LIVE Day-1 progress from Firestore
-  useEffect(() => {
-    if (!storeId || !traineeUid) return;
-
     let alive = true;
 
-    // Set title once
     getDoc(doc(db, "days", "day-1"))
-      .then((dayDoc) => {
-        if (!alive || !dayDoc.exists()) return;
-        const d = dayDoc.data() as any;
+      .then((snap) => {
+        if (!alive || !snap.exists()) return;
+        const d = snap.data() as any;
         const t = d?.title || d?.name;
         if (t) setTitle(t);
       })
       .catch((e) => console.error("Day1 title error:", e));
 
-    // Listen to Day-1 tasks for total
-    const tasksCol = collection(db, "days", "day-1", "tasks");
-    const unsubTasks = onSnapshot(
-      tasksCol,
-      (snap) => {
-        if (!alive) return;
-        const ids = snap.docs.map((d) => d.id);
-        setTotal(ids.length);
-      },
-      (e) => console.error("Day1 tasks snapshot error:", e)
-    );
-
-    // Listen to trainee progress for doneIds
-    const progRef = doc(
-      db,
-      "stores",
-      String(storeId),
-      "trainees",
-      String(traineeUid),
-      "progress",
-      "day-1"
-    );
-
-    const unsubProg = onSnapshot(
-      progRef,
-      (snap) => {
-        if (!alive) return;
-        if (!snap.exists()) {
-          setDone(0);
-          return;
-        }
-        const p = snap.data() as any;
-        const doneIds: string[] = Array.isArray(p?.doneIds)
-          ? p.doneIds
-          : [];
-        setDone(doneIds.length);
-      },
-      (e) => console.error("Day1 progress snapshot error:", e)
-    );
-
     return () => {
       alive = false;
-      unsubTasks();
-      unsubProg();
     };
-  }, [storeId, traineeUid]);
+  }, []);
 
   return (
     <Link href="/dashboard/day-1" className="block">
@@ -492,17 +436,11 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
             Day 1
           </CardDescription>
         </CardHeader>
+
         <CardContent>
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs lg:text-sm">
-              <span>Progress</span>
-              <span className="text-black">{pct}%</span>
-            </div>
-            <Progress value={pct} className="h-2 [&>div]:bg-yellow-400" />
-            <p className="text-xs text-muted-foreground">
-              {done}/{total} tasks completed
-            </p>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Tap to begin Day-1 orientation.
+          </p>
         </CardContent>
       </Card>
     </Link>
