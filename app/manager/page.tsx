@@ -31,7 +31,6 @@ type Store = {
 
 /* -----------------------------------------------------------
    REAL TASK IDS – MATCH FIRESTORE EXACTLY
-   Progress docs use IDs like: modules__week2__tasks__t03
 ----------------------------------------------------------- */
 async function loadAllRealTasks(): Promise<string[]> {
   const result: string[] = [];
@@ -158,7 +157,7 @@ export default function ManagerDashboard() {
   }, [uid, storeId]);
 
   /* -----------------------------------------------------------
-     MAIN FIX — MATCH PROGRESS DOC ID FORMAT EXACTLY
+     PROGRESS CALCULATION
   ----------------------------------------------------------- */
   useEffect(() => {
     if (!trainees.length) return;
@@ -275,7 +274,9 @@ export default function ManagerDashboard() {
               {supervisors.length === 0
                 ? "No supervisors yet."
                 : supervisors.map((s) => (
-                    <div key={s.uid}>{s.name || s.email}</div>
+                    <div key={s.uid} className="break-words">
+                      {s.name || s.email}
+                    </div>
                   ))}
             </Block>
 
@@ -284,8 +285,8 @@ export default function ManagerDashboard() {
               {trainees.length === 0
                 ? "No trainees yet."
                 : trainees.map((t) => (
-                    <div key={t.uid} className="mb-4">
-                      <div>{t.name || t.email}</div>
+                    <div key={t.uid} className="mb-4 break-words">
+                      <div className="break-words">{t.name || t.email}</div>
 
                       <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
                         <div
@@ -311,7 +312,7 @@ export default function ManagerDashboard() {
                 : everyone
                     .filter((e) => e.active)
                     .map((e) => (
-                      <div key={e.uid}>
+                      <div key={e.uid} className="break-words">
                         {e.name || e.email} —{" "}
                         {String(e.role || "").toLowerCase()}
                       </div>
