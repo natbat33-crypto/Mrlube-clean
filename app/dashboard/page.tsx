@@ -20,10 +20,13 @@ import { db, auth } from "@/lib/firebase";
 import {
   collection,
   getDocs,
+  query,
+  where,
   doc,
   getDoc,
   getCountFromServer,
   setDoc,
+  onSnapshot,
 } from "firebase/firestore";
 import { onIdTokenChanged } from "firebase/auth";
 
@@ -71,6 +74,18 @@ async function ensureDay1ProgressDoc(storeId: string, uid: string) {
   await setDoc(ref, { doneIds: [], updatedAt: Date.now() }, { merge: true });
 }
 
+interface TraineeNotesCardWrapperProps {
+  storeId: string;
+  traineeUid: string;
+}
+
+const TraineeNotesCardWrapper: FC<TraineeNotesCardWrapperProps> = ({
+  storeId,
+  traineeUid,
+}) => {
+  return <TraineeNotesCard {...({ storeId, traineeUid } as any)} />;
+};
+
 /* ------------------ main page ------------------ */
 
 export default function DashboardPage() {
@@ -108,12 +123,17 @@ export default function DashboardPage() {
           if (v?.storeId) sid = String(v.storeId);
         }
 
-        if (!sid) sid = await findStoreForTraineeWithoutIndex(u.uid);
+        if (!sid) {
+          sid = await findStoreForTraineeWithoutIndex(u.uid);
+        }
 
-        if (!sid) setStoreError("No store assigned to this trainee yet.");
+        if (!sid) {
+          setStoreError("No store assigned to this trainee yet.");
+        }
 
         setStoreId(sid);
-      } catch {
+      } catch (err) {
+        console.error("Error resolving store for trainee:", err);
         setStoreError("Unable to resolve store. Please contact your manager.");
       } finally {
         setResolvingStore(false);
@@ -123,15 +143,17 @@ export default function DashboardPage() {
     return () => stop();
   }, []);
 
-  /* ---------- reset when trainee changes ---------- */
+  /* ---------- FIX: reset progress immediately when trainee changes ---------- */
   useEffect(() => {
     setWeekDone({});
   }, [traineeUid]);
 
-  /* ---------- ensure Day-1 doc exists ---------- */
+  /* ---------- ensure Day1 doc ---------- */
   useEffect(() => {
     if (storeId && traineeUid) {
-      ensureDay1ProgressDoc(storeId, traineeUid).catch(() => {});
+      ensureDay1ProgressDoc(storeId, traineeUid).catch((err) =>
+        console.error("ensureDay1ProgressDoc error:", err)
+      );
     }
   }, [storeId, traineeUid]);
 
@@ -144,7 +166,11 @@ export default function DashboardPage() {
       const modSnap = await getDoc(modRef);
       const mod = modSnap.exists() ? (modSnap.data() as any) : null;
 
-      const title = mod?.name || mod?.title || `Week ${weekNum}`;
+      const title =
+        mod?.name ||
+        mod?.title ||
+        `Week ${weekNum}`;
+
       const tasksCol = collection(db, "modules", weekId, "tasks");
       const total = (await getCountFromServer(tasksCol)).data().count || 0;
 
@@ -168,7 +194,7 @@ export default function DashboardPage() {
           loadWeek("week4", 4),
         ]);
         if (!cancelled) setCards(next);
-      } catch {
+      } catch (e) {
         if (!cancelled) setCards(defaultComingSoon());
       } finally {
         if (!cancelled) setLoadingWeeks(false);
@@ -178,7 +204,7 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, []);
 
-  /* ---------- load user progress (INCLUDING DAY 1 FIX) ---------- */
+  /* ---------- load progress from users/<uid>/progress ---------- */
   useEffect(() => {
     if (!traineeUid) return;
 
@@ -186,12 +212,11 @@ export default function DashboardPage() {
 
     (async () => {
       try {
-        const counts: Record<number, number> = {};
-
-        // load week 1–4 from users/<uid>/progress
         const progSnap = await getDocs(
           collection(db, "users", traineeUid, "progress")
         );
+
+        const counts: Record<number, number> = {};
 
         progSnap.forEach((d) => {
           const data: any = d.data();
@@ -209,37 +234,19 @@ export default function DashboardPage() {
             if (m2) wkNum = Number(m2[1]);
           }
 
-          if (wkNum) counts[wkNum] = (counts[wkNum] || 0) + 1;
+          if (!wkNum || wkNum < 1 || wkNum > 4) return;
+
+          counts[wkNum] = (counts[wkNum] || 0) + 1;
         });
-
-        /* ----------- FIX: READ DAY 1 PROGRESS FROM store/trainees/... ---------- */
-        if (storeId && traineeUid) {
-          const day1Ref = doc(
-            db,
-            "stores",
-            String(storeId),
-            "trainees",
-            String(traineeUid),
-            "progress",
-            "day-1"
-          );
-
-          const day1Snap = await getDoc(day1Ref);
-          if (day1Snap.exists()) {
-            const p = day1Snap.data() as any;
-            const doneIds = Array.isArray(p?.doneIds) ? p.doneIds : [];
-            counts[1] = doneIds.length;
-          }
-        }
 
         if (!cancelled) setWeekDone(counts);
       } catch (e) {
-        if (!cancelled) console.error("Error loading progress:", e);
+        if (!cancelled) console.error("Error loading trainee week progress:", e);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [traineeUid, storeId]);  // <----- FIXED DEPENDENCIES
+  }, [traineeUid]);
 
   const list = loadingWeeks ? defaultComingSoon() : cards;
   const isResolving = resolvingStore;
@@ -270,6 +277,7 @@ export default function DashboardPage() {
     );
   }
 
+  /* ========= key={traineeUid} ========= */
   return (
     <div key={traineeUid} className="max-w-6xl mx-auto px-4 lg:px-6 py-6">
       <div className="space-y-4 lg:space-y-6">
@@ -398,59 +406,63 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
     [done, total]
   );
 
+  // reset when switching user
   useEffect(() => {
     setDone(0);
     setTotal(0);
   }, [traineeUid]);
 
+  // LIVE updating version (only change in whole file)
   useEffect(() => {
+    if (!storeId || !traineeUid) return;
+
     let alive = true;
 
-    (async () => {
-      try {
-        const dayDoc = await getDoc(doc(db, "days", "day-1"));
-        if (alive && dayDoc.exists()) {
-          const d = dayDoc.data() as any;
-          const t = d?.title || d?.name;
-          if (t) setTitle(t);
-        }
+    // Set title
+    getDoc(doc(db, "days", "day-1")).then((dayDoc) => {
+      if (!alive || !dayDoc.exists()) return;
+      const d = dayDoc.data() as any;
+      const t = d?.title || d?.name;
+      if (t) setTitle(t);
+    });
 
-        const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
-        if (!alive) return;
+    // Listen to tasks
+    const tasksCol = collection(db, "days", "day-1", "tasks");
+    const unsubTasks = onSnapshot(tasksCol, (snap) => {
+      if (!alive) return;
+      const ids = snap.docs.map((d) => d.id);
+      setTotal(ids.length);
+    });
 
-        const taskIds = snap.docs.map((d) => d.id);
-        setTotal(taskIds.length);
+    // Listen to doneIds
+    const progRef = doc(
+      db,
+      "stores",
+      String(storeId),
+      "trainees",
+      String(traineeUid),
+      "progress",
+      "day-1"
+    );
 
-        let userDone = 0;
-
-        if (storeId && traineeUid) {
-          const progRef = doc(
-            db,
-            "stores",
-            String(storeId),
-            "trainees",
-            String(traineeUid),
-            "progress",
-            "day-1"
-          );
-          const progSnap = await getDoc(progRef);
-
-          if (progSnap.exists()) {
-            const p = progSnap.data() as any;
-            const doneIds: string[] = Array.isArray(p?.doneIds)
-              ? p.doneIds
-              : [];
-            userDone = doneIds.filter((id) => taskIds.includes(id)).length;
-          }
-        }
-
-        if (alive) setDone(userDone);
-      } catch (e) {
-        console.error("Day1Card load error:", e);
+    const unsubProg = onSnapshot(progRef, (snap) => {
+      if (!alive) return;
+      if (!snap.exists()) {
+        setDone(0);
+        return;
       }
-    })();
+      const p = snap.data() as any;
+      const doneIds: string[] = Array.isArray(p?.doneIds)
+        ? p.doneIds
+        : [];
+      setDone(doneIds.length);
+    });
 
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      unsubTasks();
+      unsubProg();
+    };
   }, [storeId, traineeUid]);
 
   return (
