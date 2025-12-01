@@ -391,7 +391,7 @@ function Block({
   children: any;
 }) {
   return (
-    <div className="border rounded-2xl bg-white p-5">
+    <div className="rounded-2xl bg-white p-5">
       <div className="font-semibold mb-2">{title}</div>
 
       {/* FIXED — enforce wrapping inside Block */}
