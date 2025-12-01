@@ -20,8 +20,6 @@ import { db, auth } from "@/lib/firebase";
 import {
   collection,
   getDocs,
-  query,
-  where,
   doc,
   getDoc,
   getCountFromServer,
@@ -40,7 +38,9 @@ type WeekCard = {
   comingSoon?: boolean;
 };
 
-async function findStoreForTraineeWithoutIndex(uid: string): Promise<string | null> {
+async function findStoreForTraineeWithoutIndex(
+  uid: string
+): Promise<string | null> {
   const storesSnap = await getDocs(collection(db, "stores"));
   for (const s of storesSnap.docs) {
     const traineesSnap = await getDocs(
@@ -143,7 +143,7 @@ export default function DashboardPage() {
     return () => stop();
   }, []);
 
-  /* ---------- FIX: reset progress immediately when trainee changes ---------- */
+  /* ---------- reset progress when trainee changes ---------- */
   useEffect(() => {
     setWeekDone({});
   }, [traineeUid]);
@@ -161,15 +161,15 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadWeek = async (weekId: string, weekNum: number): Promise<WeekCard> => {
+    const loadWeek = async (
+      weekId: string,
+      weekNum: number
+    ): Promise<WeekCard> => {
       const modRef = doc(db, "modules", weekId);
       const modSnap = await getDoc(modRef);
       const mod = modSnap.exists() ? (modSnap.data() as any) : null;
 
-      const title =
-        mod?.name ||
-        mod?.title ||
-        `Week ${weekNum}`;
+      const title = mod?.name || mod?.title || `Week ${weekNum}`;
 
       const tasksCol = collection(db, "modules", weekId, "tasks");
       const total = (await getCountFromServer(tasksCol)).data().count || 0;
@@ -201,10 +201,12 @@ export default function DashboardPage() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  /* ---------- load progress from users/<uid>/progress ---------- */
+  /* ---------- load progress from users/<uid>/progress (weeks 1–4) ---------- */
   useEffect(() => {
     if (!traineeUid) return;
 
@@ -241,11 +243,14 @@ export default function DashboardPage() {
 
         if (!cancelled) setWeekDone(counts);
       } catch (e) {
-        if (!cancelled) console.error("Error loading trainee week progress:", e);
+        if (!cancelled)
+          console.error("Error loading trainee week progress:", e);
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [traineeUid]);
 
   const list = loadingWeeks ? defaultComingSoon() : cards;
@@ -256,7 +261,9 @@ export default function DashboardPage() {
   if (isResolving && !storeId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-slate-600 text-sm">Loading your trainee dashboard…</p>
+        <p className="text-slate-600 text-sm">
+          Loading your trainee dashboard…
+        </p>
       </div>
     );
   }
@@ -374,14 +381,15 @@ export default function DashboardPage() {
               </Card>
             </Link>
 
-            {typeof storeId === "string" && typeof traineeUid === "string" && (
-              <div className="mt-2">
-                <TraineeNotesCardWrapper
-                  storeId={storeId}
-                  traineeUid={traineeUid}
-                />
-              </div>
-            )}
+            {typeof storeId === "string" &&
+              typeof traineeUid === "string" && (
+                <div className="mt-2">
+                  <TraineeNotesCardWrapper
+                    storeId={storeId}
+                    traineeUid={traineeUid}
+                  />
+                </div>
+              )}
           </CardContent>
         </Card>
       </div>
@@ -412,29 +420,35 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
     setTotal(0);
   }, [traineeUid]);
 
-  // LIVE updating version (only change in whole file)
+  // LIVE Day-1 progress from Firestore
   useEffect(() => {
     if (!storeId || !traineeUid) return;
 
     let alive = true;
 
-    // Set title
-    getDoc(doc(db, "days", "day-1")).then((dayDoc) => {
-      if (!alive || !dayDoc.exists()) return;
-      const d = dayDoc.data() as any;
-      const t = d?.title || d?.name;
-      if (t) setTitle(t);
-    });
+    // Set title once
+    getDoc(doc(db, "days", "day-1"))
+      .then((dayDoc) => {
+        if (!alive || !dayDoc.exists()) return;
+        const d = dayDoc.data() as any;
+        const t = d?.title || d?.name;
+        if (t) setTitle(t);
+      })
+      .catch((e) => console.error("Day1 title error:", e));
 
-    // Listen to tasks
+    // Listen to Day-1 tasks for total
     const tasksCol = collection(db, "days", "day-1", "tasks");
-    const unsubTasks = onSnapshot(tasksCol, (snap) => {
-      if (!alive) return;
-      const ids = snap.docs.map((d) => d.id);
-      setTotal(ids.length);
-    });
+    const unsubTasks = onSnapshot(
+      tasksCol,
+      (snap) => {
+        if (!alive) return;
+        const ids = snap.docs.map((d) => d.id);
+        setTotal(ids.length);
+      },
+      (e) => console.error("Day1 tasks snapshot error:", e)
+    );
 
-    // Listen to doneIds
+    // Listen to trainee progress for doneIds
     const progRef = doc(
       db,
       "stores",
@@ -445,18 +459,22 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
       "day-1"
     );
 
-    const unsubProg = onSnapshot(progRef, (snap) => {
-      if (!alive) return;
-      if (!snap.exists()) {
-        setDone(0);
-        return;
-      }
-      const p = snap.data() as any;
-      const doneIds: string[] = Array.isArray(p?.doneIds)
-        ? p.doneIds
-        : [];
-      setDone(doneIds.length);
-    });
+    const unsubProg = onSnapshot(
+      progRef,
+      (snap) => {
+        if (!alive) return;
+        if (!snap.exists()) {
+          setDone(0);
+          return;
+        }
+        const p = snap.data() as any;
+        const doneIds: string[] = Array.isArray(p?.doneIds)
+          ? p.doneIds
+          : [];
+        setDone(doneIds.length);
+      },
+      (e) => console.error("Day1 progress snapshot error:", e)
+    );
 
     return () => {
       alive = false;
@@ -482,7 +500,7 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
             </div>
             <Progress value={pct} className="h-2 [&>div]:bg-yellow-400" />
             <p className="text-xs text-muted-foreground">
-              {done}/{total || 6} tasks completed
+              {done}/{total} tasks completed
             </p>
           </div>
         </CardContent>
