@@ -11,7 +11,8 @@ export function middleware(req: NextRequest) {
   // everyone else sees maintenance
   return NextResponse.rewrite(new URL("/maintenance.html", req.url));
 }
-
 export const config = {
-  matcher: "/:path*",
+  matcher: [
+    "/((?!_next|static|favicon.ico|logo.png|.*\\.svg|.*\\.png).*)",
+  ],
 };
