@@ -39,6 +39,7 @@ export default function Week1Page() {
   const [authLoading, setAuthLoading] = useState(true);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [approvedById, setApprovedById] = useState<Record<string, boolean>>({});
+  const [weekApproved, setWeekApproved] = useState<boolean>(false); // ⭐ NEW
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -51,7 +52,7 @@ export default function Week1Page() {
     return unsub;
   }, []);
 
-  // 2. Load Week 1 tasks (template) – force done:false so template isn't shared
+  // 2. Load Week 1 tasks
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -59,16 +60,18 @@ export default function Week1Page() {
         const col = collection(db, "modules", "week1", "tasks");
         const q = query(col, orderBy("order", "asc"));
         const snap = await getDocs(q);
+
         const list: Task[] = snap.docs
           .map((d) => {
             const data = d.data() as Partial<Task>;
             return {
               id: d.id,
               ...data,
-              done: false, // <— ignore any shared done value in template
+              done: false,
             };
           })
           .sort((a, b) => num(a.order ?? a.sort_order) - num(b.order ?? b.sort_order));
+
         if (alive) {
           setTasks(list);
           setErr(null);
@@ -86,7 +89,20 @@ export default function Week1Page() {
     return () => { alive = false; };
   }, []);
 
-  // 3. Realtime approvals (same as before)
+  // ⭐ 3. Listen for whole-week approval
+  useEffect(() => {
+    if (!uid) return;
+
+    const sectionRef = doc(db, "users", uid, "sections", "week1");
+    const unsub = onSnapshot(sectionRef, (snap) => {
+      const approved = snap.data()?.approved || false;
+      setWeekApproved(approved);
+    });
+
+    return unsub;
+  }, [uid]);
+
+  // 4. Listen for per-task approvals
   useEffect(() => {
     if (!uid || !tasks.length) return;
     const unsubs = tasks.map((t) => {
@@ -101,7 +117,7 @@ export default function Week1Page() {
     return () => unsubs.forEach((u) => u && u());
   }, [uid, tasks]);
 
-  // 4. Load this trainee's done flags once (so each trainee has their own checks)
+  // 5. Load this trainee's done flags
   useEffect(() => {
     if (!uid || !tasks.length) return;
 
@@ -114,12 +130,10 @@ export default function Week1Page() {
         const snap = await getDocs(q);
 
         const doneByTaskId: Record<string, boolean> = {};
-
         snap.forEach((d) => {
           const data = d.data() as any;
           if (!data?.done) return;
 
-          // doc id format: modules__week1__tasks__TASKID
           const key = d.id as string;
           const parts = key.split("__");
           const taskId = parts[parts.length - 1];
@@ -150,14 +164,13 @@ export default function Week1Page() {
     [doneCount, tasks.length]
   );
 
-  // 5. Toggle task done (per-user only; same pattern)
+  // 6. Toggle task done
   async function toggleTask(id: string, next: boolean) {
     if (!uid) {
       alert("Please log in to save your progress.");
       return;
     }
 
-    // optimistic update
     setTasks((prev) => prev.map(t => t.id === id ? { ...t, done: next } : t));
 
     try {
@@ -180,7 +193,6 @@ export default function Week1Page() {
         { merge: true }
       );
     } catch (e) {
-      // rollback on failure
       setTasks((prev) => prev.map(t => t.id === id ? { ...t, done: !next } : t));
       alert("Failed to save. Check Firestore rules and try again.");
     }
@@ -211,10 +223,28 @@ export default function Week1Page() {
         </Link>
       </div>
 
+      {/* ⭐ Banner: Week1 awaiting approval */}
+      {!weekApproved && (
+        <div
+          style={{
+            background: "#fff3cd",
+            border: "1px solid #ffeeba",
+            padding: "12px 16px",
+            borderRadius: 8,
+            marginBottom: 16,
+            color: "#856404",
+            fontWeight: 600,
+          }}
+        >
+          A trainer or manager must review and approve Week 1 before you can move on.
+        </div>
+      )}
+
       <h2 style={{ margin: "0 0 6px 0" }}>Week 1 — Steps to a Perfect Service</h2>
       <div style={{ fontSize: 14, marginBottom: 6, color: "#000" }}>
         {doneCount}/{tasks.length} completed ({pct}%)
       </div>
+
       <div
         role="progressbar"
         aria-valuenow={pct}
@@ -246,6 +276,7 @@ export default function Week1Page() {
           const order = t.order ?? t.sort_order ?? idx + 1;
           const done = !!t.done;
           const approved = !!approvedById[t.id];
+
           return (
             <li
               key={t.id}
@@ -257,7 +288,9 @@ export default function Week1Page() {
                 borderRadius: 12,
                 background: "#fff",
                 border: `1px solid ${done ? "#d6ead8" : GRAY}`,
-                boxShadow: done ? "0 1px 2px rgba(0,0,0,0.04)" : "0 1px 2px rgba(0,0,0,0.03)",
+                boxShadow: done
+                  ? "0 1px 2px rgba(0,0,0,0.04)"
+                  : "0 1px 2px rgba(0,0,0,0.03)",
                 position: "relative",
               }}
             >
@@ -274,6 +307,7 @@ export default function Week1Page() {
                   borderBottomLeftRadius: 12,
                 }}
               />
+
               <button
                 aria-label={done ? "Mark incomplete" : "Mark complete"}
                 onClick={() => toggleTask(t.id, !done)}
@@ -304,10 +338,19 @@ export default function Week1Page() {
                 </svg>
               </button>
 
-              <div style={{ opacity: done ? 0.9 : 1, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div
+                style={{
+                  opacity: done ? 0.9 : 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
                 <div style={{ fontWeight: 600, color: "#111" }}>
                   {order}. {t.title ?? t.id}
                 </div>
+
                 {approved && (
                   <span
                     style={{
@@ -324,6 +367,7 @@ export default function Week1Page() {
                   </span>
                 )}
               </div>
+
             </li>
           );
         })}

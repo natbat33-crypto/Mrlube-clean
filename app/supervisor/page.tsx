@@ -269,7 +269,7 @@ export default function SupervisorPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold text-primary">Supervisor Dashboard</h1>
+        <h1 className="text-2xl font-bold text-primary">Trainer Dashboard</h1>
         <p className="text-muted-foreground mt-1">
           Review trainee tasks and approve what’s done.
         </p>
