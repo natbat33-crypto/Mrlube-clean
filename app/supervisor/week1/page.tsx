@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -19,26 +19,29 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
-/* ============================
-   types
-============================ */
-type TaskMeta = { id: string; title?: string; order?: number; sort_order?: number };
+/* ============================================
+   Types
+============================================ */
+type TaskMeta = {
+  id: string;
+  title?: string;
+  order?: number;
+  sort_order?: number;
+};
 
 type ProgDoc = {
   id: string;
   path?: string;
   done?: boolean;
   approved?: boolean;
-  completedAt?: any;
-  approvedAt?: any;
   traineeId?: string;
   storeId?: string;
   week?: string;
 };
 
-/* ============================
-   resolve store
-============================ */
+/* ============================================
+   Resolve store for supervisor
+============================================ */
 async function resolveStoreId(): Promise<string> {
   const u = auth.currentUser;
 
@@ -49,7 +52,7 @@ async function resolveStoreId(): Promise<string> {
 
   if (typeof window !== "undefined") {
     const ls = localStorage.getItem("storeId");
-    if (ls) return String(ls);
+    if (ls) return ls;
   }
 
   if (u) {
@@ -63,53 +66,51 @@ async function resolveStoreId(): Promise<string> {
   return "";
 }
 
-/* ============================
-   Extract task key
-============================ */
+/* ============================================
+   Get clean task key from progress doc
+============================================ */
 function getTaskKey(p: ProgDoc): string {
   if (p.path) {
     const last = p.path.split("/").pop() || "";
     if (last) return last;
   }
+
   if (p.id) {
     const parts = p.id.split("__");
-    const tail = parts[parts.length - 1];
-    return tail || p.id;
+    return parts[parts.length - 1] || p.id;
   }
+
   return "";
 }
 
-/* ============================
-   Fetch progress docs
-============================ */
+/* ============================================
+   Fetch all progress for Week 1
+============================================ */
 async function fetchProgressForWeek1(storeId: string) {
   const traineesSnap = await getDocs(collection(db, "stores", storeId, "trainees"));
-  const allowed: string[] = [];
+  const traineeIds: string[] = [];
 
   traineesSnap.forEach((d) => {
-    const data = d.data() as any;
-    // 🚨 PILOT FIX — allow ALL active trainees in store
-    if (data.active) {
-      allowed.push(d.id);
-    }
+    const t = d.data() as any;
+    if (t.active === true) traineeIds.push(d.id);
   });
 
-  if (allowed.length === 0) {
-    return { level: "no-trainees", docs: [] };
+  if (traineeIds.length === 0) {
+    return { docs: [] };
   }
 
   const docs: ProgDoc[] = [];
 
-  for (const traineeId of allowed) {
-    const progCol = collection(db, "users", traineeId, "progress");
+  for (const traineeId of traineeIds) {
     const q = query(
-      progCol,
+      collection(db, "users", traineeId, "progress"),
       where("week", "==", "week1"),
       where("done", "==", true),
       where("storeId", "==", storeId)
     );
 
     const snap = await getDocs(q);
+
     snap.forEach((d) => {
       docs.push({
         id: d.id,
@@ -119,18 +120,19 @@ async function fetchProgressForWeek1(storeId: string) {
     });
   }
 
-  return { level: "found", docs };
+  return { docs };
 }
 
-/* ============================
-   Page
-============================ */
+/* ============================================
+   MAIN COMPONENT
+============================================ */
 export default function SupervisorWeek1Page() {
   const [storeId, setStoreId] = useState("");
   const [tasksById, setTasksById] = useState<Record<string, TaskMeta>>({});
   const [items, setItems] = useState<ProgDoc[]>([]);
   const [loading, setLoading] = useState(true);
 
+  /* Load store, tasks, and progress */
   useEffect(() => {
     let alive = true;
 
@@ -138,7 +140,6 @@ export default function SupervisorWeek1Page() {
       try {
         setLoading(true);
 
-        // 📌 resolve store first
         const sid = await resolveStoreId();
         if (!alive) return;
         setStoreId(sid);
@@ -148,42 +149,30 @@ export default function SupervisorWeek1Page() {
           return;
         }
 
-        // 📌 load task metadata
         const taskSnap = await getDocs(collection(db, "modules", "week1", "tasks"));
         const byId: Record<string, TaskMeta> = {};
-
         taskSnap.docs.forEach((d) => {
           byId[d.id] = { id: d.id, ...(d.data() as any) };
         });
-
-        if (!alive) return;
         setTasksById(byId);
 
-        // 📌 load trainee progress
         const { docs } = await fetchProgressForWeek1(sid);
+        let data = docs.filter((d) => d.week === "week1" && d.done);
 
-        let data = docs.filter((d) => d.week === "week1" && d.storeId === sid && d.done);
-
-        // 📌 sort properly
         data.sort((a, b) => {
           const keyA = getTaskKey(a);
           const keyB = getTaskKey(b);
-
           const ta = byId[keyA];
           const tb = byId[keyB];
-
           const oa = ta?.order ?? ta?.sort_order ?? 9999;
           const ob = tb?.order ?? tb?.sort_order ?? 9999;
-
           return oa !== ob ? oa - ob : keyA.localeCompare(keyB);
         });
 
         if (!alive) return;
         setItems(data);
       } catch (err) {
-        console.error("[Week1] error:", err);
-        if (!alive) return;
-        setItems([]);
+        console.error("[Week1] load error:", err);
       } finally {
         if (alive) setLoading(false);
       }
@@ -194,14 +183,11 @@ export default function SupervisorWeek1Page() {
     };
   }, []);
 
-  /* ---------- computed ---------- */
-  const reviewed = items.length;
-  const approved = items.filter((i) => i.approved).length;
-  const waiting = items.filter((i) => i.done && !i.approved).length;
-  const pct = reviewed ? Math.round((approved / reviewed) * 100) : 0;
-
-  /* ---------- approve toggle ---------- */
+  /* ============================================
+     APPROVAL TOGGLE (includes section approval)
+  ============================================ */
   async function setApproved(p: ProgDoc, next: boolean) {
+    // Optimistic UI update
     setItems((prev) =>
       prev.map((x) => (x.id === p.id ? { ...x, approved: next } : x))
     );
@@ -221,15 +207,61 @@ export default function SupervisorWeek1Page() {
         },
         { merge: true }
       );
+
+      // -----------------------------
+      // Check if ALL Week-1 tasks are approved
+      // -----------------------------
+      const allSnap = await getDocs(
+        query(
+          collection(db, "users", p.traineeId, "progress"),
+          where("week", "==", "week1"),
+          where("done", "==", true)
+        )
+      );
+
+      const all = allSnap.docs.map((d) => d.data());
+      const allApproved = all.every((t: any) => t.approved === true);
+
+      const sectionRef = doc(db, "users", p.traineeId, "sections", "week1");
+
+      if (allApproved) {
+        await setDoc(
+          sectionRef,
+          {
+            approved: true,
+            approvedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } else {
+        await setDoc(
+          sectionRef,
+          { approved: false },
+          { merge: true }
+        );
+      }
     } catch (e) {
-      console.error("approve error:", e);
+      console.error("Approval error:", e);
+
       setItems((prev) =>
         prev.map((x) => (x.id === p.id ? { ...x, approved: !next } : x))
       );
-      alert("Approval failed — check rules or assignment.");
+
+      alert("Approval failed — check Firestore permissions.");
     }
   }
 
+  /* ============================================
+     UI COMPUTED VALUES
+  ============================================ */
+  const reviewed = items.length;
+  const approved = items.filter((i) => i.approved).length;
+  const waiting = items.filter((i) => i.done && !i.approved).length;
+  const pct = reviewed ? Math.round((approved / reviewed) * 100) : 0;
+
+  /* ============================================
+     RENDER
+  ============================================ */
   return (
     <div className="space-y-6">
       <Link
@@ -244,7 +276,7 @@ export default function SupervisorWeek1Page() {
           <CardTitle>Review — Week 1</CardTitle>
         </CardHeader>
 
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-6">
             <div className="text-sm text-muted-foreground">
               <span className="font-medium">{waiting}</span> waiting •{" "}
@@ -255,7 +287,7 @@ export default function SupervisorWeek1Page() {
             <div className="ml-auto min-w-[220px]">
               <div className="flex justify-between text-xs mb-1">
                 <span>Approved</span>
-                <span>{pct}%</span>
+                <span className="text-black">{pct}%</span>
               </div>
               <Progress value={pct} className="h-2 [&>div]:bg-yellow-400" />
             </div>
@@ -278,7 +310,7 @@ export default function SupervisorWeek1Page() {
                 return (
                   <li
                     key={p.id + "_" + p.traineeId}
-                    className="flex items-center justify-between border rounded-md p-3 bg-white"
+                    className="flex items-center justify-between gap-3 border rounded-md p-3 bg-white"
                   >
                     <div className="font-semibold text-sm break-words">
                       {order ? `${order}. ` : ""}
