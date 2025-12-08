@@ -5,19 +5,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-import { useSupervisorTrainees } from "@/lib/useSupervisorTrainees";
 import { db, auth } from "@/lib/firebase";
-import { onIdTokenChanged } from "firebase/auth";
-
 import {
   collection,
   getDocs,
-  doc,
   getDoc,
-  limit,
-  onSnapshot,
-  query,
-  where,
+  doc,
 } from "firebase/firestore";
 
 import {
@@ -28,8 +21,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+import { useSupervisorTrainees } from "@/lib/useSupervisorTrainees";
 import { useStoreCtx } from "@/app/providers/StoreProvider";
 
+/* ---------------- Types ---------------- */
 type WeekSummary = {
   week: 1 | 2 | 3 | 4;
   waiting: number;
@@ -37,7 +32,6 @@ type WeekSummary = {
   approved: number;
 };
 
-/* ------------------ UID helper ------------------ */
 function pickReviewUid(): string {
   if (typeof window === "undefined") return "demo-user";
   return (
@@ -47,7 +41,11 @@ function pickReviewUid(): string {
   );
 }
 
+/* ---------------- Component ---------------- */
 export default function SupervisorPage() {
+  const searchParams = useSearchParams();
+  const asUid = searchParams.get("as");
+
   const [uid, setUid] = useState<string>(() => pickReviewUid());
   const [weeks, setWeeks] = useState<WeekSummary[]>([
     { week: 1, waiting: 0, reviewed: 0, approved: 0 },
@@ -57,73 +55,89 @@ export default function SupervisorPage() {
   ]);
   const [loading, setLoading] = useState(true);
 
-  const [storeId, setStoreId] = useState<string | null>(null);
+  // Store ID from provider
   const { storeId: ctxStore, loading: ctxLoading } = useStoreCtx();
+  const [storeId, setStoreId] = useState<string | null>(null);
 
+  // List of trainees assigned to this store
   const trainees = useSupervisorTrainees(storeId);
-  const searchParams = useSearchParams();
-  const asUid = searchParams.get("as");
 
-  /* use ?as override */
+  /* ---------------- Handle ?as override ---------------- */
   useEffect(() => {
-    if (asUid && asUid !== uid) setUid(asUid);
+    if (asUid && asUid !== uid) {
+      setUid(asUid);
+      localStorage.setItem("reviewUid", asUid);
+    }
   }, [asUid, uid]);
 
-  /* remember reviewer */
+  /* ---------------- Determine store ID ---------------- */
   useEffect(() => {
-    if (uid && typeof window !== "undefined") {
-      localStorage.setItem("reviewUid", uid);
+    if (!ctxLoading && ctxStore) {
+      setStoreId(String(ctxStore));
     }
-  }, [uid]);
-
-  /* get storeId from provider */
-  useEffect(() => {
-    if (!ctxLoading && ctxStore) setStoreId(ctxStore);
   }, [ctxStore, ctxLoading]);
 
-  /* weekly tallies */
+  /* ---------------- Load progress for the trainee (uid) ---------------- */
   useEffect(() => {
+    if (!uid || !storeId) return;
+
     let alive = true;
+
     (async () => {
-      try {
-        setLoading(true);
-        const snap = await getDocs(collection(db, "users", uid, "progress"));
+      setLoading(true);
 
-        const tallies: Record<number, WeekSummary> = {
-          1: { week: 1, waiting: 0, reviewed: 0, approved: 0 },
-          2: { week: 2, waiting: 0, reviewed: 0, approved: 0 },
-          3: { week: 3, waiting: 0, reviewed: 0, approved: 0 },
-          4: { week: 4, waiting: 0, reviewed: 0, approved: 0 },
-        };
+      // Read all progress docs
+      const progSnap = await getDocs(
+        collection(db, "users", uid, "progress")
+      );
 
-        for (const d of snap.docs) {
-          const data = d.data() as any;
-          const wkMatch = (data.path || "").match(/modules\/week(\d)\//i);
-          if (!wkMatch) continue;
+      const tallies: Record<number, WeekSummary> = {
+        1: { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+        2: { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+        3: { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+        4: { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+      };
 
-          const wk = Number(wkMatch[1]) as 1 | 2 | 3 | 4;
-          if (data.done) {
-            tallies[wk].reviewed++;
-            if (data.approved) tallies[wk].approved++;
-            else tallies[wk].waiting++;
-          }
+      for (const d of progSnap.docs) {
+        const data = d.data() as any;
+
+        // Filter by correct store
+        if (String(data.storeId) !== String(storeId)) continue;
+
+        let wk: number | null = null;
+
+        // Check explicit stored week
+        if (data.week === "week1") wk = 1;
+        else if (data.week === "week2") wk = 2;
+        else if (data.week === "week3") wk = 3;
+        else if (data.week === "week4") wk = 4;
+
+        // Fallback: parse from path
+        if (!wk) {
+          const m = (data.path || "").match(/modules\/week(\d)\//i);
+          if (m) wk = Number(m[1]);
         }
 
-        if (!alive) return;
-        setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
-      } catch {
-        if (!alive) return;
-      } finally {
-        if (alive) setLoading(false);
+        if (!wk) continue;
+
+        if (data.done) {
+          tallies[wk].reviewed++;
+          if (data.approved) tallies[wk].approved++;
+          else tallies[wk].waiting++;
+        }
       }
+
+      if (!alive) return;
+      setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
+      setLoading(false);
     })();
 
     return () => {
       alive = false;
     };
-  }, [uid]);
+  }, [uid, storeId]);
 
-  /* ---------------- RENDER UI ---------------- */
+  /* ---------------- UI ---------------- */
   return (
     <div className="space-y-6">
       <header>
@@ -132,11 +146,11 @@ export default function SupervisorPage() {
           Review trainee tasks and approve what’s done.
         </p>
 
-        {/* 🔥 TEST INDICATOR */}
+        {/* TEMP DEBUG */}
         <p className="text-red-600 font-bold text-lg mt-2">TEST999</p>
       </header>
 
-      {/* Week cards */}
+      {/* Weekly Summary Cards */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {weeks.map((w) => (
           <Link
@@ -153,18 +167,21 @@ export default function SupervisorPage() {
                     : `${w.waiting} pending, ${w.approved}/${w.reviewed} approved`}
                 </CardDescription>
               </CardHeader>
+              <CardContent />
             </Card>
           </Link>
         ))}
       </div>
 
-      {/* Trainees */}
+      {/* Trainee List */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
 
           {trainees.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No trainees assigned yet.</p>
+            <p className="text-sm text-muted-foreground">
+              No trainees assigned yet.
+            </p>
           ) : (
             <div className="grid gap-2">
               {trainees.map((t) => (
@@ -174,9 +191,11 @@ export default function SupervisorPage() {
                   className="block border p-3 rounded-lg bg-white hover:bg-primary/5 transition"
                 >
                   <div className="font-medium">
-                    {t.traineeEmail || t.traineeId}
+                    {t.traineeEmail || t.email || t.traineeId}
                   </div>
-                  <div className="text-xs text-muted-foreground">Tap to review</div>
+                  <div className="text-xs text-muted-foreground">
+                    Tap to review
+                  </div>
                 </Link>
               ))}
             </div>
@@ -184,7 +203,7 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* Notes link */}
+      {/* Notes */}
       {storeId && (
         <Link
           href={`/supervisor/notes?store=${storeId}`}

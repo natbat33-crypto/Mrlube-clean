@@ -32,9 +32,9 @@ import { useStoreCtx } from "@/app/providers/StoreProvider";
 
 type WeekSummary = {
   week: 1 | 2 | 3 | 4;
-  waiting: number;
-  reviewed: number;
-  approved: number;
+  waiting: number;   // done but not approved
+  reviewed: number;  // total done
+  approved: number;  // done + approved
 };
 
 function pickReviewUid(): string {
@@ -88,25 +88,25 @@ export default function SupervisorPage() {
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  /** AS UID */
+  /* ---------- AS UID ---------- */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
 
-  /** Save UID */
+  /* ---------- Save UID ---------- */
   useEffect(() => {
     if (uid && typeof window !== "undefined") {
       localStorage.setItem("reviewUid", uid);
     }
   }, [uid]);
 
-  /** store override via ?store= */
+  /* ---------- store override via ?store= ---------- */
   useEffect(() => {
     if (!storeOverride) return;
     setStoreId(String(storeOverride));
   }, [storeOverride]);
 
-  /** resolve store from ?as */
+  /* ---------- resolve store from ?as ---------- */
   useEffect(() => {
     if (!asUid) return;
     (async () => {
@@ -116,13 +116,13 @@ export default function SupervisorPage() {
     })();
   }, [asUid]);
 
-  /** store via provider */
+  /* ---------- store via provider ---------- */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) setStoreId(resolvedStoreId);
   }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
 
-  /** fallback store resolver */
+  /* ---------- fallback store resolver ---------- */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) return;
@@ -145,6 +145,7 @@ export default function SupervisorPage() {
         const v: any = snap.exists() ? snap.data() : null;
         let sid: string | null = v?.storeId ?? null;
 
+        // 1) Try explicit storeId on user
         if (!sid) {
           try {
             const storesSnap = await getDocs(collection(db, "stores"));
@@ -158,9 +159,12 @@ export default function SupervisorPage() {
                 break;
               }
             }
-          } catch {}
+          } catch {
+            // ignore
+          }
         }
 
+        // 2) Try supervisorUid field on store
         if (!sid) {
           try {
             const qs = await getDocs(
@@ -171,7 +175,9 @@ export default function SupervisorPage() {
               )
             );
             if (!qs.empty) sid = qs.docs[0].id;
-          } catch {}
+          } catch {
+            // ignore
+          }
         }
 
         setStoreId(sid);
@@ -184,7 +190,7 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  /** tally weeks */
+  /* ---------- tally weeks ---------- */
   useEffect(() => {
     let alive = true;
 
@@ -218,10 +224,15 @@ export default function SupervisorPage() {
       };
 
       try {
-        const usersSnap = await getDocs(collection(db, "users"));
+        // ✅ ONLY trainees for this store
+        const traineesSnap = await getDocs(
+          collection(db, "stores", String(sid), "trainees")
+        );
 
-        for (const user of usersSnap.docs) {
-          const traineeId = user.id;
+        for (const t of traineesSnap.docs) {
+          const traineeId = t.id;
+
+          // Read that trainee's progress
           const progSnap = await getDocs(
             collection(db, "users", traineeId, "progress")
           );
@@ -229,9 +240,11 @@ export default function SupervisorPage() {
           for (const d of progSnap.docs) {
             const data = d.data() as any;
             if (!data?.done) continue;
-            if (data.storeId !== sid) continue;
 
-            let wkNumber: any = null;
+            // ✅ Robust storeId comparison
+            if (String(data.storeId) !== String(sid)) continue;
+
+            let wkNumber: number | null = null;
 
             if (data.week === "week1") wkNumber = 1;
             else if (data.week === "week2") wkNumber = 2;
@@ -254,7 +267,16 @@ export default function SupervisorPage() {
 
         if (!alive) return;
         setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
-      } catch {
+      } catch (e) {
+        console.error("Error tallying supervisor weeks:", e);
+        if (alive) {
+          setWeeks([
+            { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+            { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+            { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+            { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+          ]);
+        }
       } finally {
         if (alive) setLoading(false);
       }
@@ -349,6 +371,7 @@ export default function SupervisorPage() {
     </div>
   );
 }
+
 
 
 
