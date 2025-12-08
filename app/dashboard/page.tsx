@@ -38,14 +38,10 @@ type WeekCard = {
   comingSoon?: boolean;
 };
 
-async function findStoreForTraineeWithoutIndex(
-  uid: string
-): Promise<string | null> {
+async function findStoreForTraineeWithoutIndex(uid: string): Promise<string | null> {
   const storesSnap = await getDocs(collection(db, "stores"));
   for (const s of storesSnap.docs) {
-    const traineesSnap = await getDocs(
-      collection(db, "stores", s.id, "trainees")
-    );
+    const traineesSnap = await getDocs(collection(db, "stores", s.id, "trainees"));
     if (traineesSnap.docs.some((d) => d.id === uid)) return s.id;
   }
   return null;
@@ -62,15 +58,7 @@ function defaultComingSoon(): WeekCard[] {
 }
 
 async function ensureDay1ProgressDoc(storeId: string, uid: string) {
-  const ref = doc(
-    db,
-    "stores",
-    String(storeId),
-    "trainees",
-    String(uid),
-    "progress",
-    "day-1"
-  );
+  const ref = doc(db, "stores", String(storeId), "trainees", String(uid), "progress", "day-1");
   await setDoc(ref, { doneIds: [], updatedAt: Date.now() }, { merge: true });
 }
 
@@ -79,10 +67,7 @@ interface TraineeNotesCardWrapperProps {
   traineeUid: string;
 }
 
-const TraineeNotesCardWrapper: FC<TraineeNotesCardWrapperProps> = ({
-  storeId,
-  traineeUid,
-}) => {
+const TraineeNotesCardWrapper: FC<TraineeNotesCardWrapperProps> = ({ storeId, traineeUid }) => {
   return <TraineeNotesCard {...({ storeId, traineeUid } as any)} />;
 };
 
@@ -98,6 +83,14 @@ export default function DashboardPage() {
   const [storeError, setStoreError] = useState<string | null>(null);
 
   const [weekDone, setWeekDone] = useState<Record<number, number>>({});
+
+  /* ---------------- GATING STATE ---------------- */
+  const [sectionApproved, setSectionApproved] = useState({
+    week1: false,
+    week2: false,
+    week3: false,
+    week4: false,
+  });
 
   /* ---------- resolve trainee + store ---------- */
   useEffect(() => {
@@ -123,13 +116,8 @@ export default function DashboardPage() {
           if (v?.storeId) sid = String(v.storeId);
         }
 
-        if (!sid) {
-          sid = await findStoreForTraineeWithoutIndex(u.uid);
-        }
-
-        if (!sid) {
-          setStoreError("No store assigned to this trainee yet.");
-        }
+        if (!sid) sid = await findStoreForTraineeWithoutIndex(u.uid);
+        if (!sid) setStoreError("No store assigned to this trainee yet.");
 
         setStoreId(sid);
       } catch (err) {
@@ -161,10 +149,7 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadWeek = async (
-      weekId: string,
-      weekNum: number
-    ): Promise<WeekCard> => {
+    const loadWeek = async (weekId: string, weekNum: number): Promise<WeekCard> => {
       const modRef = doc(db, "modules", weekId);
       const modSnap = await getDoc(modRef);
       const mod = modSnap.exists() ? (modSnap.data() as any) : null;
@@ -206,7 +191,7 @@ export default function DashboardPage() {
     };
   }, []);
 
-  /* ---------- load progress from users/<uid>/progress (weeks 1–4) ---------- */
+  /* ---------- load progress (weeks 1–4) ---------- */
   useEffect(() => {
     if (!traineeUid) return;
 
@@ -214,9 +199,7 @@ export default function DashboardPage() {
 
     (async () => {
       try {
-        const progSnap = await getDocs(
-          collection(db, "users", traineeUid, "progress")
-        );
+        const progSnap = await getDocs(collection(db, "users", traineeUid, "progress"));
 
         const counts: Record<number, number> = {};
 
@@ -237,14 +220,12 @@ export default function DashboardPage() {
           }
 
           if (!wkNum || wkNum < 1 || wkNum > 4) return;
-
           counts[wkNum] = (counts[wkNum] || 0) + 1;
         });
 
         if (!cancelled) setWeekDone(counts);
       } catch (e) {
-        if (!cancelled)
-          console.error("Error loading trainee week progress:", e);
+        if (!cancelled) console.error("Error loading trainee week progress:", e);
       }
     })();
 
@@ -252,6 +233,35 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [traineeUid]);
+
+  /* ---------------- LISTEN FOR APPROVALS ---------------- */
+  useEffect(() => {
+    if (!traineeUid) return;
+
+    const weeks = ["week1", "week2", "week3", "week4"];
+    const unsubs: any[] = [];
+
+    weeks.forEach((w) => {
+      const ref = doc(db, "users", traineeUid, "sections", w);
+      const unsub = onSnapshot(ref, (snap) => {
+        setSectionApproved((prev) => ({
+          ...prev,
+          [w]: snap.data()?.approved === true,
+        }));
+      });
+      unsubs.push(unsub);
+    });
+
+    return () => unsubs.forEach((u) => u && u());
+  }, [traineeUid]);
+
+  /* ---------------- GATING LOGIC ---------------- */
+  const isLocked = {
+    week1: false, // always open
+    week2: !sectionApproved.week1,
+    week3: !sectionApproved.week2,
+    week4: !sectionApproved.week3,
+  };
 
   const list = loadingWeeks ? defaultComingSoon() : cards;
   const isResolving = resolvingStore;
@@ -272,9 +282,7 @@ export default function DashboardPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="max-w-md text-center space-y-2">
-          <h1 className="text-xl font-semibold text-primary">
-            Trainee Dashboard
-          </h1>
+          <h1 className="text-xl font-semibold text-primary">Trainee Dashboard</h1>
           <p className="text-sm text-muted-foreground">{storeError}</p>
           <p className="text-xs text-muted-foreground">
             Please ask your manager to assign you to a store in the system.
@@ -289,9 +297,7 @@ export default function DashboardPage() {
     <div key={traineeUid} className="max-w-6xl mx-auto px-4 lg:px-6 py-6">
       <div className="space-y-4 lg:space-y-6">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-primary">
-            Mr. Lube Training Dashboard
-          </h1>
+          <h1 className="text-2xl lg:text-3xl font-bold text-primary">Mr. Lube Training Dashboard</h1>
           <p className="text-muted-foreground mt-1 lg:mt-2 text-sm lg:text-base">
             Track your training progress and complete required tasks.
           </p>
@@ -299,6 +305,7 @@ export default function DashboardPage() {
 
         {/* ---------------- CARDS ---------------- */}
         <div className="grid gap-3 lg:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          
           {storeId && traineeUid ? (
             <Day1Card storeId={storeId} traineeUid={traineeUid} />
           ) : (
@@ -309,46 +316,60 @@ export default function DashboardPage() {
             const done = weekDone[c.week] ?? c.done;
             const pct = c.total > 0 ? Math.round((done / c.total) * 100) : 0;
 
+            const locked = isLocked[`week${c.week}` as keyof typeof isLocked];
+
             const body = (
               <Card
                 key={c.week}
-                className={`border-primary/20 ${
-                  c.comingSoon ? "opacity-70" : ""
+                className={`border-primary/20 transition ${
+                  locked ? "opacity-50 pointer-events-none" : "hover:shadow-md"
                 }`}
               >
                 <CardHeader className="pb-2 lg:pb-3">
-                  <CardTitle className="text-base lg:text-lg">
+                  <CardTitle className="text-base lg:text-lg flex items-center gap-2">
                     Week {c.week}
+                    {locked && (
+                      <span className="text-red-600 text-xs font-semibold">
+                        (Awaiting approval)
+                      </span>
+                    )}
                   </CardTitle>
                   <CardDescription className="text-xs lg:text-sm">
                     {c.title}
-                    {c.comingSoon ? " • Coming soon" : ""}
                   </CardDescription>
                 </CardHeader>
+
                 <CardContent>
                   <div className="space-y-2">
                     <div className="flex justify-between text-xs lg:text-sm">
                       <span>Progress</span>
                       <span className="text-black">{pct}%</span>
                     </div>
-                    <Progress
-                      value={pct}
-                      className="h-2 [&>div]:bg-yellow-400"
-                    />
+
+                    <Progress value={pct} className="h-2 [&>div]:bg-yellow-400" />
+
                     <p className="text-xs text-muted-foreground">
                       {done}/{c.total} tasks completed
                     </p>
+
+                    {locked && (
+                      <p className="text-xs text-red-600 font-medium mt-2">
+                        A trainer or manager must approve the previous week to unlock this.
+                      </p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
             );
 
-            return c.href ? (
-              <Link key={`link-${c.week}`} href={c.href} className="block">
+            if (locked) {
+              return <div key={`wk-${c.week}`}>{body}</div>;
+            }
+
+            return (
+              <Link key={`link-${c.week}`} href={c.href || "#"} className="block">
                 {body}
               </Link>
-            ) : (
-              <div key={`week-${c.week}`}>{body}</div>
             );
           })}
         </div>
@@ -364,6 +385,7 @@ export default function DashboardPage() {
               Continue your Mr. Lube training program.
             </CardDescription>
           </CardHeader>
+
           <CardContent className="flex flex-col gap-3 lg:gap-4">
             <Link href="/dashboard/progress" className="block">
               <Card className="bg-primary/10 border-primary/20 hover:shadow-md transition">
@@ -371,9 +393,7 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-3 mb-3">
                     <Clock className="h-6 w-6 lg:h-8 lg:w-8 text-primary" />
                     <div className="min-w-0">
-                      <p className="font-semibold text-sm lg:text-base">
-                        Track Progress
-                      </p>
+                      <p className="font-semibold text-sm lg:text-base">Track Progress</p>
                       <p className="text-xs lg:text-sm text-muted-foreground">
                         30-day countdown and weekly calendar.
                       </p>
@@ -386,10 +406,7 @@ export default function DashboardPage() {
             {typeof storeId === "string" &&
               typeof traineeUid === "string" && (
                 <div className="mt-2">
-                  <TraineeNotesCardWrapper
-                    storeId={storeId}
-                    traineeUid={traineeUid}
-                  />
+                  <TraineeNotesCardWrapper storeId={storeId} traineeUid={traineeUid} />
                 </div>
               )}
           </CardContent>
@@ -399,7 +416,7 @@ export default function DashboardPage() {
   );
 }
 
-/* ------------------ DAY 1 CARD (NO PROGRESS) ------------------ */
+/* ------------------ DAY 1 CARD ------------------ */
 
 interface Day1CardProps {
   storeId?: string;
@@ -407,9 +424,8 @@ interface Day1CardProps {
 }
 
 const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
-  const [title, setTitle] = useState<string>("Orientation");
+  const [title, setTitle] = useState("Orientation");
 
-  // Load title only — no progress tracking
   useEffect(() => {
     let alive = true;
 
@@ -432,9 +448,7 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
       <Card className="border-primary/20">
         <CardHeader className="pb-2 lg:pb-3">
           <CardTitle className="text-base lg:text-lg">{title}</CardTitle>
-          <CardDescription className="text-xs lg:text-sm">
-            Day 1
-          </CardDescription>
+          <CardDescription className="text-xs lg:text-sm">Day 1</CardDescription>
         </CardHeader>
 
         <CardContent>
