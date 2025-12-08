@@ -254,18 +254,15 @@ export default function SupervisorPage() {
         </p>
       </header>
 
-      {/* DAY 1 CARD */}
+      {/* DAY 1 CARD – DISABLED AT TOP */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
 
-        <Link href={`/supervisor/day1`} className="block">
-          <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Day 1</CardTitle>
-              <CardDescription>Orientation Tasks</CardDescription>
-            </CardHeader>
-            <CardContent />
-          </Card>
-        </Link>
+        <Card className="border-primary/20 opacity-50 cursor-not-allowed">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Day 1</CardTitle>
+            <CardDescription>Select a trainee below to review</CardDescription>
+          </CardHeader>
+        </Card>
 
         {/* WEEK CARDS */}
         {weeks.map((w) => (
@@ -334,6 +331,7 @@ export default function SupervisorPage() {
     </div>
   );
 }
+
 
 
 
