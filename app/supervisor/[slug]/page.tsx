@@ -136,8 +136,23 @@ export default function SupervisorPage() {
         <p className="text-red-600 font-bold text-lg mt-2">TEST999</p>
       </header>
 
-      {/* Week cards */}
+      {/* ⭐⭐ ADD DAY-1 CARD HERE ⭐⭐ */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        <Link
+          href={`/supervisor/day1?as=${uid}`}
+          className="block"
+        >
+          <Card className="border-primary/20 hover:shadow-md cursor-pointer transition">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Day 1</CardTitle>
+              <CardDescription>
+                Review & approve Day-1 orientation
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+
+        {/* Existing week cards */}
         {weeks.map((w) => (
           <Link
             key={w.week}
