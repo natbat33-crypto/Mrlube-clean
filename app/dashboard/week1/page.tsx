@@ -271,7 +271,7 @@ export default function Week1Page() {
             fontWeight: 600,
           }}
         >
-          A trainer or manager must approve Week 1 before you can move on.
+          
         </div>
       )}
 
