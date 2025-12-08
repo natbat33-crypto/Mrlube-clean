@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 
 import { useSupervisorTrainees } from "@/lib/useSupervisorTrainees";
 import { db, auth } from "@/lib/firebase";
+import { onIdTokenChanged } from "firebase/auth";
 
 import {
   collection,
@@ -75,18 +76,17 @@ export default function SupervisorPage() {
     }
   }, [uid]);
 
-  /* get storeId from context provider */
+  /* get storeId from provider */
   useEffect(() => {
     if (!ctxLoading && ctxStore) setStoreId(ctxStore);
   }, [ctxStore, ctxLoading]);
 
-  /* weekly tallies logic (KEEPING YOUR ORIGINAL SYSTEM) */
+  /* weekly tallies */
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         setLoading(true);
-
         const snap = await getDocs(collection(db, "users", uid, "progress"));
 
         const tallies: Record<number, WeekSummary> = {
@@ -98,8 +98,6 @@ export default function SupervisorPage() {
 
         for (const d of snap.docs) {
           const data = d.data() as any;
-
-          // IN your system weeks are mapped from data.path
           const wkMatch = (data.path || "").match(/modules\/week(\d)\//i);
           if (!wkMatch) continue;
 
@@ -113,8 +111,8 @@ export default function SupervisorPage() {
 
         if (!alive) return;
         setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
-      } catch (e) {
-        console.log("tally error", e);
+      } catch {
+        if (!alive) return;
       } finally {
         if (alive) setLoading(false);
       }
@@ -129,36 +127,17 @@ export default function SupervisorPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold text-primary">
-          Supervisor Dashboard
-        </h1>
+        <h1 className="text-2xl font-bold text-primary">Supervisor Dashboard</h1>
         <p className="text-muted-foreground mt-1">
           Review trainee tasks and approve what’s done.
         </p>
+
+        {/* 🔥 TEST INDICATOR */}
+        <p className="text-red-600 font-bold text-lg mt-2">TEST999</p>
       </header>
 
-      {/* ---------------- DAY 1 CARD (NEW) ---------------- */}
+      {/* Week cards */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-
-        {/* DAY ONE CARD */}
-        <Card className="border-primary/20">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Day 1</CardTitle>
-            <CardDescription>Orientation Tasks</CardDescription>
-          </CardHeader>
-
-          {trainees.map((t) => (
-            <Link
-              key={t.id}
-              href={`/supervisor/day1?as=${t.traineeId}`}
-              className="block p-2 text-sm text-blue-600 hover:underline"
-            >
-              Review Day-1 for {t.traineeEmail || t.traineeId}
-            </Link>
-          ))}
-        </Card>
-
-        {/* WEEK CARDS (existing system untouched) */}
         {weeks.map((w) => (
           <Link
             key={w.week}
@@ -179,15 +158,13 @@ export default function SupervisorPage() {
         ))}
       </div>
 
-      {/* ---------------- TRAINEES BELOW ---------------- */}
+      {/* Trainees */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
 
           {trainees.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No trainees assigned yet.
-            </p>
+            <p className="text-sm text-muted-foreground">No trainees assigned yet.</p>
           ) : (
             <div className="grid gap-2">
               {trainees.map((t) => (
@@ -199,9 +176,7 @@ export default function SupervisorPage() {
                   <div className="font-medium">
                     {t.traineeEmail || t.traineeId}
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    Tap to review Week-1
-                  </div>
+                  <div className="text-xs text-muted-foreground">Tap to review</div>
                 </Link>
               ))}
             </div>
@@ -209,7 +184,7 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* ---------------- NOTES ---------------- */}
+      {/* Notes link */}
       {storeId && (
         <Link
           href={`/supervisor/notes?store=${storeId}`}

@@ -52,10 +52,12 @@ async function resolveStoreId(): Promise<string> {
     const tok = await u.getIdTokenResult(true);
     if (tok?.claims?.storeId) return String(tok.claims.storeId);
   }
+
   if (typeof window !== "undefined") {
     const ls = localStorage.getItem("storeId");
     if (ls) return String(ls);
   }
+
   if (u) {
     const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
     for (const sid of peek) {
@@ -63,6 +65,7 @@ async function resolveStoreId(): Promise<string> {
       if (snap.exists()) return sid;
     }
   }
+
   return "";
 }
 
@@ -85,47 +88,46 @@ export default function SupervisorPage() {
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  // AS override
+  /** AS UID */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
 
-  // Save UID
+  /** Save UID */
   useEffect(() => {
     if (uid && typeof window !== "undefined") {
       localStorage.setItem("reviewUid", uid);
     }
   }, [uid]);
 
-  // Store override
+  /** store override via ?store= */
   useEffect(() => {
     if (!storeOverride) return;
     setStoreId(String(storeOverride));
   }, [storeOverride]);
 
-  // Get store from trainee user doc
+  /** resolve store from ?as */
   useEffect(() => {
     if (!asUid) return;
-
     (async () => {
       const snap = await getDoc(doc(db, "users", asUid));
-      const d: any = snap.exists() ? snap.data() : null;
-      setStoreId(d?.storeId ? String(d.storeId) : null);
+      const v: any = snap.exists() ? snap.data() : null;
+      setStoreId(v?.storeId ? String(v.storeId) : null);
     })();
   }, [asUid]);
 
-  // store via provider
+  /** store via provider */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) setStoreId(resolvedStoreId);
   }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
 
-  // fallback resolver
+  /** fallback store resolver */
   useEffect(() => {
     if (storeOverride || asUid) return;
     if (resolvedStoreId) return;
 
-    let stopUserListener: null | (() => void) = null;
+    let stopUserListener: (() => void) | null = null;
 
     const stopAuth = onIdTokenChanged(auth, (u) => {
       if (stopUserListener) {
@@ -138,27 +140,38 @@ export default function SupervisorPage() {
         return;
       }
 
-      const ref = doc(db, "users", u.uid);
-      stopUserListener = onSnapshot(ref, async (snap) => {
+      const userRef = doc(db, "users", u.uid);
+      stopUserListener = onSnapshot(userRef, async (snap) => {
         const v: any = snap.exists() ? snap.data() : null;
-        let sid = v?.storeId ?? null;
+        let sid: string | null = v?.storeId ?? null;
 
         if (!sid) {
-          const snap = await getDocs(collection(db, "stores"));
-          for (const s of snap.docs) {
-            const emp = await getDoc(doc(db, "stores", s.id, "employees", u.uid));
-            if (emp.exists()) {
-              const d: any = emp.data();
-              if (d?.active !== false) sid = s.id;
+          try {
+            const storesSnap = await getDocs(collection(db, "stores"));
+            for (const s of storesSnap.docs) {
+              const empRef = doc(db, "stores", s.id, "employees", u.uid);
+              const empSnap = await getDoc(empRef);
+              if (empSnap.exists()) {
+                const data: any = empSnap.data();
+                if (data?.active === false) continue;
+                sid = s.id;
+                break;
+              }
             }
-          }
+          } catch {}
         }
 
         if (!sid) {
-          const qs = await getDocs(
-            query(collection(db, "stores"), where("supervisorUid", "==", u.uid), limit(1))
-          );
-          if (!qs.empty) sid = qs.docs[0].id;
+          try {
+            const qs = await getDocs(
+              query(
+                collection(db, "stores"),
+                where("supervisorUid", "==", u.uid),
+                limit(1)
+              )
+            );
+            if (!qs.empty) sid = qs.docs[0].id;
+          } catch {}
         }
 
         setStoreId(sid);
@@ -171,7 +184,7 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  // Tally Week approvals
+  /** tally weeks */
   useEffect(() => {
     let alive = true;
 
@@ -187,6 +200,12 @@ export default function SupervisorPage() {
 
       if (!sid) {
         if (!alive) return;
+        setWeeks([
+          { week: 1, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 2, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 3, waiting: 0, reviewed: 0, approved: 0 },
+          { week: 4, waiting: 0, reviewed: 0, approved: 0 },
+        ]);
         setLoading(false);
         return;
       }
@@ -201,31 +220,35 @@ export default function SupervisorPage() {
       try {
         const usersSnap = await getDocs(collection(db, "users"));
 
-        for (const u of usersSnap.docs) {
-          const traineeId = u.id;
-          const pSnap = await getDocs(collection(db, "users", traineeId, "progress"));
+        for (const user of usersSnap.docs) {
+          const traineeId = user.id;
+          const progSnap = await getDocs(
+            collection(db, "users", traineeId, "progress")
+          );
 
-          for (const d of pSnap.docs) {
-            const row: any = d.data();
-            if (!row.done) continue;
-            if (row.storeId !== sid) continue;
+          for (const d of progSnap.docs) {
+            const data = d.data() as any;
+            if (!data?.done) continue;
+            if (data.storeId !== sid) continue;
 
-            let wk = null;
+            let wkNumber: any = null;
 
-            if (row.week === "week1") wk = 1;
-            else if (row.week === "week2") wk = 2;
-            else if (row.week === "week3") wk = 3;
-            else if (row.week === "week4") wk = 4;
-            else if (row.path) {
-              const m = row.path.match(/modules\/week(\d)\//i);
-              if (m) wk = Number(m[1]);
+            if (data.week === "week1") wkNumber = 1;
+            else if (data.week === "week2") wkNumber = 2;
+            else if (data.week === "week3") wkNumber = 3;
+            else if (data.week === "week4") wkNumber = 4;
+
+            if (!wkNumber && data.path) {
+              const m = data.path.match(/modules\/week(\d)\//i);
+              if (m) wkNumber = Number(m[1]);
             }
 
-            if (!wk) continue;
+            if (!wkNumber) continue;
 
-            tallies[wk].reviewed++;
-            if (row.approved) tallies[wk].approved++;
-            else tallies[wk].waiting++;
+            const bucket = tallies[wkNumber];
+            bucket.reviewed += 1;
+            if (data.approved) bucket.approved += 1;
+            else bucket.waiting += 1;
           }
         }
 
@@ -243,43 +266,23 @@ export default function SupervisorPage() {
     };
   }, [storeId]);
 
-  // ---------------- RENDER ----------------
-
   return (
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-bold text-primary">Trainer Dashboard</h1>
         <p className="text-muted-foreground mt-1">
-          Review trainee tasks and approve what's done.
+          Review trainee tasks and approve what’s done.
         </p>
       </header>
 
+      {/* WEEK CARDS */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-
-        {/* ---------- FIXED DAY 1 CARD ---------- */}
-        {asUid ? (
-          <Link href={`/supervisor/day1?as=${asUid}`} className="block">
-            <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Day 1</CardTitle>
-                <CardDescription>
-                  Reviewing trainee: {asUid}
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ) : (
-          <Card className="border-primary/20 opacity-50 cursor-not-allowed">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Day 1</CardTitle>
-              <CardDescription>Select a trainee below to review</CardDescription>
-            </CardHeader>
-          </Card>
-        )}
-
-        {/* ---------- WEEK CARDS ---------- */}
         {weeks.map((w) => (
-          <Link key={w.week} href={`/supervisor/week${w.week}`} className="block">
+          <Link
+            key={w.week}
+            href={`/supervisor/week${w.week}`}
+            className="block focus:outline-none"
+          >
             <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Week {w.week}</CardTitle>
@@ -295,26 +298,28 @@ export default function SupervisorPage() {
         ))}
       </div>
 
-      {/* ---------- TRAINEE LIST ---------- */}
+      {/* TRAINEES */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
 
           {trainees.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No trainees assigned yet.</p>
+            <p className="text-sm text-muted-foreground">
+              No trainees assigned yet.
+            </p>
           ) : (
             <div className="grid gap-2">
               {trainees.map((t) => (
                 <Link
                   key={t.id}
-                  href={`/supervisor/day1?as=${t.traineeId}`}
+                  href={`/supervisor/week1?as=${t.traineeId}`}
                   className="block border p-3 rounded-lg bg-white hover:bg-primary/5 transition"
                 >
                   <div className="font-medium">
                     {t.email || t.traineeEmail || t.userEmail || t.traineeId}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Review Day 1
+                    Tap to review
                   </div>
                 </Link>
               ))}
@@ -323,11 +328,11 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* ---------- NOTES ---------- */}
+      {/* NOTES — permanently on dashboard */}
       {storeId && (
         <Link
           href={`/supervisor/notes?store=${encodeURIComponent(storeId)}`}
-          className="block"
+          className="block focus:outline-none"
         >
           <Card className="border-primary/30 bg-white hover:bg-primary/5 transition">
             <CardHeader className="pb-2">
@@ -344,7 +349,6 @@ export default function SupervisorPage() {
     </div>
   );
 }
-
 
 
 
