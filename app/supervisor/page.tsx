@@ -254,17 +254,30 @@ export default function SupervisorPage() {
         </p>
       </header>
 
-      {/* DAY 1 CARD – DISABLED AT TOP */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
 
-        <Card className="border-primary/20 opacity-50 cursor-not-allowed">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Day 1</CardTitle>
-            <CardDescription>Select a trainee below to review</CardDescription>
-          </CardHeader>
-        </Card>
+        {/* ---------- FIXED DAY 1 CARD ---------- */}
+        {asUid ? (
+          <Link href={`/supervisor/day1?as=${asUid}`} className="block">
+            <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Day 1</CardTitle>
+                <CardDescription>
+                  Reviewing trainee: {asUid}
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+        ) : (
+          <Card className="border-primary/20 opacity-50 cursor-not-allowed">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Day 1</CardTitle>
+              <CardDescription>Select a trainee below to review</CardDescription>
+            </CardHeader>
+          </Card>
+        )}
 
-        {/* WEEK CARDS */}
+        {/* ---------- WEEK CARDS ---------- */}
         {weeks.map((w) => (
           <Link key={w.week} href={`/supervisor/week${w.week}`} className="block">
             <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
@@ -282,7 +295,7 @@ export default function SupervisorPage() {
         ))}
       </div>
 
-      {/* TRAINEES */}
+      {/* ---------- TRAINEE LIST ---------- */}
       {storeId && (
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Your Trainees</h2>
@@ -310,7 +323,7 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* NOTES */}
+      {/* ---------- NOTES ---------- */}
       {storeId && (
         <Link
           href={`/supervisor/notes?store=${encodeURIComponent(storeId)}`}
@@ -331,6 +344,7 @@ export default function SupervisorPage() {
     </div>
   );
 }
+
 
 
 

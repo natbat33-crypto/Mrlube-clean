@@ -12,57 +12,130 @@ import {
   getDoc,
   onSnapshot,
   setDoc,
-  updateDoc,
   serverTimestamp,
 } from "firebase/firestore";
 
 import { onAuthStateChanged } from "firebase/auth";
 
-const GREEN = "#2e7d32";
 const GRAY = "#e9e9ee";
-const YELLOW = "#FFC20E";
 
 function num(v: any) {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
+/* ---------------------------------------------------
+   NEW: Resolve store + confirm trainee assignment
+---------------------------------------------------- */
+async function resolveStoreId(): Promise<string> {
+  const user = auth.currentUser;
+
+  // Try ID token claims
+  if (user) {
+    const tok = await user.getIdTokenResult(true);
+    if (tok?.claims?.storeId) return String(tok.claims.storeId);
+  }
+
+  // Try localStorage fallback
+  if (typeof window !== "undefined") {
+    const ls = localStorage.getItem("storeId");
+    if (ls) return ls;
+  }
+
+  // Fallback search
+  if (user) {
+    const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
+    for (const sid of peek) {
+      const snap = await getDoc(doc(db, "stores", sid, "employees", user.uid));
+      if (snap.exists()) return sid;
+    }
+  }
+
+  return "";
+}
+
 export default function SupervisorDay1Page() {
   const search = useSearchParams();
-  const traineeId = search.get("as"); // which trainee to review
+  const traineeId = search.get("as");
 
   const [reviewer, setReviewer] = useState<string | null>(null);
+  const [storeId, setStoreId] = useState("");
+  const [validAssignment, setValidAssignment] = useState<boolean | null>(null);
+
   const [tasks, setTasks] = useState<any[]>([]);
   const [progress, setProgress] = useState<Record<string, any>>({});
   const [approved, setApproved] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
 
-  // Supervisor UID
+  /* ----------------------------------------------
+     Supervisor UID
+  ---------------------------------------------- */
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    return onAuthStateChanged(auth, (u) => {
       setReviewer(u?.uid ?? null);
     });
-    return unsub;
   }, []);
 
-  // Load trainee section approval
+  /* ----------------------------------------------
+     NEW: Validate store + trainee assignment
+  ---------------------------------------------- */
+  useEffect(() => {
+    (async () => {
+      if (!traineeId) return;
+
+      const sid = await resolveStoreId();
+      setStoreId(sid);
+
+      if (!sid) {
+        setValidAssignment(false);
+        return;
+      }
+
+      const supUid = auth.currentUser?.uid;
+      if (!supUid) {
+        setValidAssignment(false);
+        return;
+      }
+
+      // Check if trainee is assigned to this supervisor
+      const tSnap = await getDoc(doc(db, "stores", sid, "trainees", traineeId));
+
+      if (!tSnap.exists()) {
+        setValidAssignment(false);
+        return;
+      }
+
+      const data = tSnap.data() as any;
+
+      if (data.supervisorId !== supUid || data.active !== true) {
+        setValidAssignment(false);
+        return;
+      }
+
+      setValidAssignment(true);
+    })();
+  }, [traineeId]);
+
+  /* ----------------------------------------------
+     Load Day-1 approval state
+  ---------------------------------------------- */
   useEffect(() => {
     if (!traineeId) return;
 
     const ref = doc(db, "users", traineeId, "sections", "day1");
-    const unsub = onSnapshot(ref, (snap) => {
+    return onSnapshot(ref, (snap) => {
       setApproved(snap.data()?.approved === true);
     });
-
-    return unsub;
   }, [traineeId]);
 
-  // Load tasks + trainee progress
+  /* ----------------------------------------------
+     Load tasks + trainee progress
+  ---------------------------------------------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
-      if (!traineeId) return;
+      if (!traineeId || validAssignment !== true) return;
 
       // Load tasks
       const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
@@ -74,21 +147,21 @@ export default function SupervisorDay1Page() {
             num(b.order ?? b.sort_order ?? 0)
         );
 
-      // Load trainee progress docs
-      const progRef = collection(db, "users", traineeId, "progress");
-      const progSnap = await getDocs(progRef);
+      // Load progress entries for this trainee
+      const progSnap = await getDocs(
+        collection(db, "users", traineeId, "progress")
+      );
 
       const prog: Record<string, any> = {};
-      progSnap.docs.forEach((d) => {
+      progSnap.forEach((d) => {
         const data = d.data() as any;
         if (data.path?.startsWith("days/day-1/tasks/")) {
-          const taskId = data.path.split("/").pop();
-          prog[taskId!] = data;
+          const tid = data.path.split("/").pop();
+          prog[tid!] = data;
         }
       });
 
       if (!alive) return;
-
       setTasks(loadedTasks);
       setProgress(prog);
       setLoading(false);
@@ -97,9 +170,11 @@ export default function SupervisorDay1Page() {
     return () => {
       alive = false;
     };
-  }, [traineeId]);
+  }, [traineeId, validAssignment]);
 
-  // Approve / Unapprove one task
+  /* ----------------------------------------------
+     Approve a single task
+  ---------------------------------------------- */
   async function toggleApprove(taskId: string, next: boolean) {
     if (!traineeId || !reviewer) return;
 
@@ -116,7 +191,9 @@ export default function SupervisorDay1Page() {
     );
   }
 
-  // Approve entire Day-1 section
+  /* ----------------------------------------------
+     Approve entire Day-1 section
+  ---------------------------------------------- */
   async function approveSection() {
     if (!traineeId || !reviewer) return;
 
@@ -131,8 +208,25 @@ export default function SupervisorDay1Page() {
     );
   }
 
-  if (loading) return <div className="p-6">Loading…</div>;
+  /* ----------------------------------------------
+     RENDER STATES
+  ---------------------------------------------- */
 
+  if (!traineeId) return <div className="p-6">Invalid trainee.</div>;
+
+  if (validAssignment === false)
+    return (
+      <div className="p-6 text-red-600 font-semibold">
+        You are not assigned to review this trainee.
+      </div>
+    );
+
+  if (loading || validAssignment === null)
+    return <div className="p-6">Loading…</div>;
+
+  /* ----------------------------------------------
+     MAIN UI
+  ---------------------------------------------- */
   return (
     <main className="p-6 max-w-2xl mx-auto space-y-6">
       <Link href={`/supervisor?as=${traineeId}`}>
