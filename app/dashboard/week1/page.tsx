@@ -1,3 +1,4 @@
+// app/dashboard/week1/page.tsx
 "use client";
 export const dynamic = "force-dynamic";
 
@@ -271,7 +272,7 @@ export default function Week1Page() {
             fontWeight: 600,
           }}
         >
-          
+           
         </div>
       )}
 
