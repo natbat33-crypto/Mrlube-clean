@@ -1,8 +1,7 @@
-// app/supervisor/week3/page.tsx
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -16,35 +15,46 @@ import {
   serverTimestamp,
   deleteField,
 } from "firebase/firestore";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-/* ---------- types ---------- */
-type TaskMeta = { id: string; title?: string; order?: number; sort_order?: number };
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+
+/* ============================================
+   Types
+============================================ */
+type TaskMeta = {
+  id: string;
+  title?: string;
+  order?: number;
+  sort_order?: number;
+};
 
 type ProgDoc = {
-  id: string;            // users/{traineeId}/progress/{progressId}
-  path?: string;         // "modules/week3/tasks/<taskId>"
+  id: string;
+  path?: string;
   done?: boolean;
   approved?: boolean;
-  completedAt?: any;
-  approvedAt?: any;
   traineeId?: string;
-  traineeName?: string | null;
   storeId?: string;
   week?: string;
 };
 
-/* ---------- store resolver (same as week1/2) ---------- */
+/* ============================================
+   Resolve store for supervisor
+============================================ */
 async function resolveStoreId(): Promise<string> {
   const u = auth.currentUser;
+
   if (u) {
     const tok = await u.getIdTokenResult(true);
     if (tok?.claims?.storeId) return String(tok.claims.storeId);
   }
+
   if (typeof window !== "undefined") {
     const ls = localStorage.getItem("storeId");
-    if (ls) return String(ls);
+    if (ls) return ls;
   }
+
   if (u) {
     const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
     for (const sid of peek) {
@@ -52,86 +62,75 @@ async function resolveStoreId(): Promise<string> {
       if (snap.exists()) return sid;
     }
   }
+
   return "";
 }
 
-/* ---------- helper: get task key from progress doc ---------- */
+/* ============================================
+   Get clean task key
+============================================ */
 function getTaskKey(p: ProgDoc): string {
   if (p.path) {
     const last = p.path.split("/").pop() || "";
     if (last) return last;
   }
+
   if (p.id) {
     const parts = p.id.split("__");
-    const tail = parts[parts.length - 1];
-    if (tail) return tail;
-    return p.id;
+    return parts[parts.length - 1] || p.id;
   }
+
   return "";
 }
 
-/* ---------- progress fetch from users/{uid}/progress (assigned trainees only) ---------- */
-async function fetchProgressForWeek3(storeId: string, supervisorUid: string) {
-  // 1) find trainees assigned to this supervisor in this store
-  const assignedSnap = await getDocs(collection(db, "stores", storeId, "trainees"));
+/* ============================================
+   Fetch Week 3 progress (MATCHES WEEK 1 + WEEK 2)
+============================================ */
+async function fetchProgressForWeek3(storeId: string) {
+  const traineesSnap = await getDocs(collection(db, "stores", storeId, "trainees"));
   const traineeIds: string[] = [];
 
-  assignedSnap.forEach((d) => {
-    const data = d.data() as any;
-    if (data.active && data.supervisorId === supervisorUid) {
-      traineeIds.push(d.id); // traineeUid
-    }
+  traineesSnap.forEach((d) => {
+    const t = d.data() as any;
+    if (t.active === true) traineeIds.push(d.id);
   });
 
   if (traineeIds.length === 0) {
-    return { level: "no-trainees", docs: [] as ProgDoc[] };
+    return { docs: [] };
   }
 
-  // 2) build map of user names
-  const userMap = new Map<string, { name?: string; displayName?: string }>();
-  const usersSnap = await getDocs(collection(db, "users"));
-  usersSnap.forEach((u) => {
-    const d = u.data() as any;
-    userMap.set(u.id, { name: d.name, displayName: d.displayName });
-  });
-
-  // 3) for each assigned trainee, load their week3 completed tasks for this store
   const docs: ProgDoc[] = [];
+
   for (const traineeId of traineeIds) {
-    const progCol = collection(db, "users", traineeId, "progress");
-    const qy = query(
-      progCol,
+    const q = query(
+      collection(db, "users", traineeId, "progress"),
       where("week", "==", "week3"),
       where("done", "==", true),
       where("storeId", "==", storeId)
     );
-    const snap = await getDocs(qy);
 
-    const nameInfo = userMap.get(traineeId);
-    const traineeName = nameInfo?.name || nameInfo?.displayName || null;
+    const snap = await getDocs(q);
 
     snap.forEach((d) => {
       docs.push({
         id: d.id,
         traineeId,
-        traineeName,
         ...(d.data() as any),
-      } as ProgDoc);
+      });
     });
   }
 
-  return { level: "assigned-trainees", docs };
+  return { docs };
 }
 
-/* ---------- page ---------- */
+/* ============================================
+   MAIN COMPONENT
+============================================ */
 export default function SupervisorWeek3Page() {
   const [storeId, setStoreId] = useState("");
   const [tasksById, setTasksById] = useState<Record<string, TaskMeta>>({});
   const [items, setItems] = useState<ProgDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [debugInfo, setDebugInfo] = useState<{ level: string; total: number } | null>(
-    null
-  );
 
   useEffect(() => {
     let alive = true;
@@ -146,29 +145,19 @@ export default function SupervisorWeek3Page() {
 
         if (!sid) {
           setItems([]);
-          setDebugInfo({ level: "no-store", total: 0 });
           return;
         }
 
-        // task metadata for week3
         const taskSnap = await getDocs(collection(db, "modules", "week3", "tasks"));
         const byId: Record<string, TaskMeta> = {};
         taskSnap.docs.forEach((d) => {
           byId[d.id] = { id: d.id, ...(d.data() as any) };
         });
-        if (!alive) return;
         setTasksById(byId);
 
-        // trainee progress docs for this store + week3 + done (assigned trainees only)
-        const sup = auth.currentUser;
-        const supervisorUid = sup?.uid || "";
-        const { level, docs } = await fetchProgressForWeek3(sid, supervisorUid);
+        const { docs } = await fetchProgressForWeek3(sid);
+        let data = docs.filter((d) => d.week === "week3" && d.done);
 
-        let data = docs.filter(
-          (d) => d.week === "week3" && d.storeId === sid && d.done
-        );
-
-        // sort by configured order then task id
         data.sort((a, b) => {
           const keyA = getTaskKey(a);
           const keyB = getTaskKey(b);
@@ -181,12 +170,8 @@ export default function SupervisorWeek3Page() {
 
         if (!alive) return;
         setItems(data);
-        setDebugInfo({ level, total: data.length });
-      } catch (e) {
-        if (!alive) return;
-        console.error("[Supervisor Week3] load error:", e);
-        setItems([]);
-        setDebugInfo({ level: "error", total: 0 });
+      } catch (err) {
+        console.error("[Week3] load error:", err);
       } finally {
         if (alive) setLoading(false);
       }
@@ -197,22 +182,17 @@ export default function SupervisorWeek3Page() {
     };
   }, []);
 
-  const reviewed = useMemo(() => items.length, [items]);
-  const approved = useMemo(() => items.filter((i) => i.approved).length, [items]);
-  const waiting = useMemo(() => items.filter((i) => i.done && !i.approved).length, [items]);
-  const pct = reviewed ? Math.round((approved / reviewed) * 100) : 0;
-
-  /* ---------- Approve/Undo toggle (writes to trainee’s doc by id) ---------- */
+  /* ============================================
+     APPROVAL + WEEK-3 GATING
+============================================ */
   async function setApproved(p: ProgDoc, next: boolean) {
-    // optimistic UI
     setItems((prev) =>
       prev.map((x) => (x.id === p.id ? { ...x, approved: next } : x))
     );
 
     try {
-      if (!storeId) throw new Error("No store found for your account.");
-      if (!p.traineeId) throw new Error("Missing traineeId on progress doc.");
-      if (!p.id) throw new Error("Missing progress doc id.");
+      if (!storeId) throw new Error("Missing storeId");
+      if (!p.traineeId) throw new Error("Missing traineeId");
 
       const ref = doc(db, "users", p.traineeId, "progress", p.id);
 
@@ -225,52 +205,78 @@ export default function SupervisorWeek3Page() {
         },
         { merge: true }
       );
+
+      // ---- Check if all Week 3 tasks approved ----
+      const allSnap = await getDocs(
+        query(
+          collection(db, "users", p.traineeId, "progress"),
+          where("week", "==", "week3"),
+          where("done", "==", true)
+        )
+      );
+
+      const allTasks = allSnap.docs.map((d) => d.data() as any);
+      const allApproved = allTasks.every((t) => t.approved === true);
+
+      const sectionRef = doc(db, "users", p.traineeId, "sections", "week3");
+
+      if (allApproved) {
+        await setDoc(
+          sectionRef,
+          { approved: true, approvedAt: serverTimestamp() },
+          { merge: true }
+        );
+      } else {
+        await setDoc(sectionRef, { approved: false }, { merge: true });
+      }
     } catch (e) {
-      console.error("setApproved error:", e);
-      // revert on failure
+      console.error("Approval error:", e);
+
       setItems((prev) =>
         prev.map((x) => (x.id === p.id ? { ...x, approved: !next } : x))
       );
-      alert("Failed to update approval. Check Firestore rules/assignment.");
+
+      alert("Approval failed — check permissions.");
     }
   }
 
+  /* ============================================
+     UI COMPUTED VALUES
+============================================ */
+  const reviewed = items.length;
+  const approved = items.filter((i) => i.approved).length;
+  const waiting = items.filter((i) => i.done && !i.approved).length;
+  const pct = reviewed ? Math.round((approved / reviewed) * 100) : 0;
+
+  /* ============================================
+     RENDER
+============================================ */
   return (
     <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex items-center justify-between">
-        <Link
-          href="/supervisor"
-          className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
-        >
-          <span aria-hidden>←</span> Back to Dashboard
-        </Link>
-        {debugInfo && (
-          <div className="text-xs text-muted-foreground">
-            Debug: store <b>{storeId || "—"}</b> • docs <b>{debugInfo.total}</b> • query{" "}
-            <b>{debugInfo.level}</b>
-          </div>
-        )}
-      </div>
+      <Link
+        href="/supervisor"
+        className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
+      >
+        ← Back to Dashboard
+      </Link>
 
       <Card className="border-primary/20">
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle>Review — Week 3</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-end gap-6">
-            <div className="text-sm text-muted-foreground">
-              <span className="font-medium">{waiting}</span> waiting •{" "}
-              <span className="font-medium">{approved}</span> approved •{" "}
-              <span className="font-medium">{pct}%</span> approved
-            </div>
+
+        <CardContent className="space-y-4">
+          <div className="text-sm text-muted-foreground">
+            <span className="font-medium">{waiting}</span> waiting •{" "}
+            <span className="font-medium">{approved}</span> approved •{" "}
+            <span className="font-medium">{pct}%</span> approved
           </div>
 
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : items.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No completed tasks for your assigned trainees yet.
+              No completed tasks yet.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -279,19 +285,15 @@ export default function SupervisorWeek3Page() {
                 const meta = tasksById[key];
                 const title = meta?.title || key;
                 const order = meta?.order ?? meta?.sort_order;
-                const traineeLabel = p.traineeName || "Trainee";
 
                 return (
                   <li
-                    key={p.id + (p.traineeId || "")}
+                    key={p.id + "_" + p.traineeId}
                     className="flex items-center justify-between gap-3 border rounded-md p-3 bg-white"
                   >
-                    <div className="min-w-0 font-semibold text-sm break-words">
+                    <div className="font-semibold text-sm break-words">
                       {order ? `${order}. ` : ""}
                       {title}
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        ({traineeLabel})
-                      </span>
                     </div>
 
                     <button

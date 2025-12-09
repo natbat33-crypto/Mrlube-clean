@@ -87,7 +87,7 @@ export default function Day1SupervisorPage() {
   }, []);
 
   /* ----------------------------------
-     2. SYNC storeId
+     2. SYNC storeId from provider
   ---------------------------------- */
   useEffect(() => {
     if (ctxStoreId) setStoreId(ctxStoreId);
@@ -107,7 +107,7 @@ export default function Day1SupervisorPage() {
   }, [asParam, trainees, selectedTraineeId]);
 
   /* ----------------------------------
-     4. LOAD day-1 TASK DEFINITIONS
+     4. LOAD DAY-1 TASK DEFINITIONS
   ---------------------------------- */
   useEffect(() => {
     let alive = true;
@@ -146,6 +146,7 @@ export default function Day1SupervisorPage() {
 
   /* ----------------------------------
      5. LISTEN FOR TRAINEE PROGRESS
+        (done + approved flags)
   ---------------------------------- */
   useEffect(() => {
     if (!selectedTraineeId) return;
@@ -159,6 +160,7 @@ export default function Day1SupervisorPage() {
       snap.forEach((d) => {
         const data = d.data() as any;
 
+        // key looks like "days__day-1__tasks__<taskId>"
         const parts = d.id.split("__");
         const taskId = parts[parts.length - 1];
 
@@ -189,7 +191,8 @@ export default function Day1SupervisorPage() {
   }, [selectedTraineeId]);
 
   /* ----------------------------------
-     7. AUTO WRITE SECTION APPROVAL
+     7. WRITE SECTION APPROVAL WHEN
+        ALL TASKS ARE APPROVED
   ---------------------------------- */
   useEffect(() => {
     if (!selectedTraineeId || tasks.length === 0) return;
@@ -198,6 +201,8 @@ export default function Day1SupervisorPage() {
       tasks.length > 0 &&
       tasks.every((t) => progressById[t.id]?.approved === true);
 
+    // If all approved, mark section approved.
+    // If not all approved, ensure approved=false.
     setDoc(
       doc(db, "users", selectedTraineeId, "sections", "day1"),
       {
@@ -211,7 +216,7 @@ export default function Day1SupervisorPage() {
   }, [selectedTraineeId, tasks, progressById]);
 
   /* ----------------------------------
-     8. APPROVE TOGGLE
+     8. SUPERVISOR TOGGLES APPROVAL
   ---------------------------------- */
   async function toggleApproved(taskId: string, next: boolean) {
     if (!selectedTraineeId) {
@@ -267,7 +272,7 @@ export default function Day1SupervisorPage() {
   ---------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      {/* Back */}
+      {/* Back to Trainer Dashboard */}
       <div style={{ marginBottom: 16 }}>
         <Link
           href="/supervisor"
@@ -301,7 +306,6 @@ export default function Day1SupervisorPage() {
           >
             Reviewing trainee:
           </label>
-
           <select
             value={selectedTraineeId ?? ""}
             onChange={(e) => setSelectedTraineeId(e.target.value || null)}
@@ -315,17 +319,18 @@ export default function Day1SupervisorPage() {
             <option value="" disabled>
               Select trainee…
             </option>
-
             {trainees.map((t) => (
               <option key={t.id} value={t.traineeId}>
-                {t.email || t.traineeEmail || t.userEmail || t.traineeId}
+                {t.email ||
+                  t.traineeEmail ||
+                  t.userEmail ||
+                  t.traineeId}
               </option>
             ))}
           </select>
         </div>
       )}
-
-      {/* HEADER */}
+  
       <h2 style={{ marginBottom: 6 }}>Day 1 — Orientation Review</h2>
       <div style={{ fontSize: 14, marginBottom: 6 }}>
         {doneCount}/{tasks.length} completed ({pct}%)
@@ -360,10 +365,6 @@ export default function Day1SupervisorPage() {
         </p>
       )}
 
-      {/* ----------------------------------
-          FIXED TASK RENDERING
-          ONLY SHOW TASKS trainee has done
-      ---------------------------------- */}
       {selectedTraineeId && (
         <ul
           style={{
@@ -374,131 +375,120 @@ export default function Day1SupervisorPage() {
             gap: 10,
           }}
         >
-          {tasks
-            .filter((t) => progressById[t.id]?.done === true)
-            .map((t, idx) => {
-              const order = num(t.order ?? t.sort_order ?? idx + 1);
-              const prog = progressById[t.id] || {
-                done: false,
-                approved: false,
-              };
-              const done = prog.done;
-              const approved = prog.approved;
+          {tasks.map((t, idx) => {
+            const order = num(t.order ?? t.sort_order ?? idx + 1);
+            const prog = progressById[t.id] || { done: false, approved: false };
+            const done = prog.done;
+            const approved = prog.approved;
 
-              return (
-                <li
-                  key={t.id}
+            return (
+              <li
+                key={t.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  background: "#fff",
+                  border: `1px solid ${done ? "#d6ead8" : GRAY}`,
+                  position: "relative",
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 5,
+                    background: done ? GREEN : "transparent",
+                    borderTopLeftRadius: 12,
+                    borderBottomLeftRadius: 12,
+                  }}
+                />
+
+                {/* APPROVE TOGGLE */}
+                <button
+                  onClick={() => toggleApproved(t.id, !approved)}
+                  disabled={!done}
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: "50%",
+                    border: `2px solid ${
+                      approved ? GREEN : done ? "#9aa0a6" : "#ccc"
+                    }`,
+                    background: approved ? GREEN : "#fff",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: done ? "pointer" : "not-allowed",
+                    opacity: done ? 1 : 0.5,
+                  }}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    stroke={approved ? "#fff" : "transparent"}
+                    strokeWidth="3"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                </button>
+
+                <div
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 14,
-                    padding: "12px 14px",
-                    borderRadius: 12,
-                    background: "#fff",
-                    border: `1px solid ${done ? "#d6ead8" : GRAY}`,
-                    position: "relative",
+                    gap: 8,
+                    flexWrap: "wrap",
                   }}
                 >
-                  {/* Left bar */}
+                  <div style={{ fontWeight: 600 }}>
+                    {order}. {t.title ?? t.id}
+                  </div>
+
                   <span
                     style={{
-                      position: "absolute",
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: 5,
-                      background: done ? GREEN : "transparent",
-                      borderTopLeftRadius: 12,
-                      borderBottomLeftRadius: 12,
-                    }}
-                  />
-
-                  {/* APPROVE TOGGLE */}
-                  <button
-                    onClick={() => toggleApproved(t.id, !approved)}
-                    disabled={!done}
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      border: `2px solid ${
-                        approved ? GREEN : done ? "#9aa0a6" : "#ccc"
+                      fontSize: 12,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: done ? "#e7f6ec" : "#f3f4f6",
+                      border: `1px solid ${
+                        done ? "#c7e8d3" : "rgba(148,163,184,0.5)"
                       }`,
-                      background: approved ? GREEN : "#fff",
-                      display: "grid",
-                      placeItems: "center",
-                      cursor: done ? "pointer" : "not-allowed",
-                      opacity: done ? 1 : 0.5,
+                      color: done ? "#1b5e20" : "#4b5563",
+                      fontWeight: 600,
                     }}
                   >
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="14"
-                      height="14"
-                      stroke={approved ? "#fff" : "transparent"}
-                      strokeWidth="3"
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                  </button>
+                    {done ? "Completed" : "Not completed"}
+                  </span>
 
-                  {/* TEXT */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ fontWeight: 600 }}>
-                      {order}. {t.title ?? t.id}
-                    </div>
-
+                  {approved && (
                     <span
                       style={{
                         fontSize: 12,
                         padding: "2px 8px",
                         borderRadius: 999,
-                        background: done ? "#e7f6ec" : "#f3f4f6",
-                        border: `1px solid ${
-                          done ? "#c7e8d3" : "rgba(148,163,184,0.5)"
-                        }`,
-                        color: done ? "#1b5e20" : "#4b5563",
+                        background: "#e7f6ec",
+                        border: "1px solid #c7e8d3",
+                        color: "#1b5e20",
                         fontWeight: 600,
                       }}
                     >
-                      {done ? "Completed" : "Not completed"}
+                      Approved ✓
                     </span>
-
-                    {approved && (
-                      <span
-                        style={{
-                          fontSize: 12,
-                          padding: "2px 8px",
-                          borderRadius: 999,
-                          background: "#e7f6ec",
-                          border: "1px solid #c7e8d3",
-                          color: "#1b5e20",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Approved ✓
-                      </span>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
   );
 }
-
-
-
-

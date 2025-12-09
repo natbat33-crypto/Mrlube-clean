@@ -29,7 +29,7 @@ const NAVY = "#0b3d91";
 const GREEN = "#2e7d32";
 const GRAY = "#e9e9ee";
 
-// Temporary for now but harmless — supervisors will override this later
+// Temporary store fallback
 const currentStoreId = "STORE_001";
 
 function num(v: unknown): number {
@@ -48,7 +48,9 @@ export default function Day1Page() {
 
   const [day1Approved, setDay1Approved] = useState(false);
 
-  // 🔐 Load user UID
+  /* ---------------------------------------
+     AUTH
+  ---------------------------------------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUid(u?.uid ?? null);
@@ -57,7 +59,9 @@ export default function Day1Page() {
     return unsub;
   }, []);
 
-  // 📌 Listen for approval status
+  /* ---------------------------------------
+     Listen for approval
+  ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
 
@@ -69,13 +73,15 @@ export default function Day1Page() {
     return unsub;
   }, [uid]);
 
-  // 📌 Load Day-1 tasks + title
+  /* ---------------------------------------
+     Load static task definitions
+  ---------------------------------------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
       try {
-        // Load Title
+        // Load Page Title
         const dayDoc = await getDoc(doc(db, "days", "day-1"));
         if (alive && dayDoc.exists()) {
           const dt = dayDoc.data() as any;
@@ -112,7 +118,41 @@ export default function Day1Page() {
     };
   }, []);
 
-  // 🟡 Toggle task done
+  /* ---------------------------------------
+     ⭐ LOAD USER'S SAVED PROGRESS (THE FIX)
+     This populates `done` for each task
+  ---------------------------------------- */
+  useEffect(() => {
+    if (!uid) return;
+
+    const col = collection(db, "users", uid, "progress");
+
+    const unsub = onSnapshot(col, (snap) => {
+      const map: Record<string, boolean> = {};
+
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data.week === "day-1") {
+          const parts = d.id.split("__");
+          const taskId = parts[parts.length - 1];
+          map[taskId] = !!data.done;
+        }
+      });
+
+      setTasks((prev) =>
+        prev.map((t) => ({
+          ...t,
+          done: map[t.id] ?? false,
+        }))
+      );
+    });
+
+    return unsub;
+  }, [uid]);
+
+  /* ---------------------------------------
+     Toggle task complete
+  ---------------------------------------- */
   async function toggleTask(id: string, next: boolean) {
     if (!uid) {
       alert("Please log in to save your progress.");
@@ -121,13 +161,13 @@ export default function Day1Page() {
 
     const t = tasks.find((x) => x.id === id);
 
-    // optimistic UI update
+    // Optimistic UI
     setTasks((prev) =>
       prev.map((x) => (x.id === id ? { ...x, done: next } : x))
     );
 
     try {
-      // Try updating shared (ignore failures)
+      // Try updating shared (ignore errors)
       try {
         await updateDoc(doc(db, "days", "day-1", "tasks", id), {
           done: next,
@@ -135,7 +175,7 @@ export default function Day1Page() {
         });
       } catch {}
 
-      // Per-user progress (THIS is what supervisors read)
+      // Save per-user progress — this is what supervisors read
       const path = `days/day-1/tasks/${id}`;
       const key = path.replace(/\//g, "__");
 
@@ -163,7 +203,9 @@ export default function Day1Page() {
     }
   }
 
-  // ⭐ When all Day-1 tasks completed → create section doc
+  /* ---------------------------------------
+     Auto-create /sections/day1 on complete
+  ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
 
@@ -171,12 +213,11 @@ export default function Day1Page() {
       tasks.length > 0 && tasks.every((t) => t.done === true);
 
     if (allComplete) {
-      // Create or update /sections/day1
       setDoc(
         doc(db, "users", uid, "sections", "day1"),
         {
           completed: true,
-          approved: false, // Trainer will set this later
+          approved: false,
           completedAt: serverTimestamp(),
         },
         { merge: true }
@@ -184,6 +225,9 @@ export default function Day1Page() {
     }
   }, [uid, tasks]);
 
+  /* ---------------------------------------
+     Derived values
+  ---------------------------------------- */
   const doneCount = useMemo(
     () => tasks.filter((t) => t.done).length,
     [tasks]
@@ -198,6 +242,9 @@ export default function Day1Page() {
   if (authLoading || loading)
     return <main style={{ padding: 24 }}>Loading…</main>;
 
+  /* ---------------------------------------
+     UI
+  ---------------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <div style={{ marginBottom: 16 }}>
@@ -221,7 +268,6 @@ export default function Day1Page() {
         </Link>
       </div>
 
-      {/* Approval banner */}
       {day1Approved && (
         <div
           style={{
@@ -250,11 +296,11 @@ export default function Day1Page() {
             fontWeight: 600,
           }}
         >
-          Day 1 completed — waiting for trainer approval.
+          Day 1 completed — waiting for approval.
         </div>
       )}
 
-      <h2 style={{ margin: "0 0 6px 0" }}>{pageTitle} — Tasks</h2>
+      <h2 style={{ marginBottom: 6 }}>{pageTitle} — Tasks</h2>
 
       <div style={{ fontSize: 14, marginBottom: 6 }}>
         {doneCount}/{tasks.length} completed ({pct}%)
@@ -348,10 +394,8 @@ export default function Day1Page() {
                 </svg>
               </button>
 
-              <div>
-                <div style={{ fontWeight: 600 }}>
-                  {order}. {t.title ?? t.id}
-                </div>
+              <div style={{ fontWeight: 600 }}>
+                {order}. {t.title ?? t.id}
               </div>
             </li>
           );
@@ -360,3 +404,4 @@ export default function Day1Page() {
     </main>
   );
 }
+

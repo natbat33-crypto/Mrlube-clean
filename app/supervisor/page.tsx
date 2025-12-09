@@ -30,19 +30,22 @@ import {
 
 import { useStoreCtx } from "@/app/providers/StoreProvider";
 
+// ========================================
+// TYPES
+// ========================================
 type WeekSummary = {
   week: 1 | 2 | 3 | 4;
-  waiting: number;   // done but not approved
-  reviewed: number;  // total done
-  approved: number;  // done + approved
+  waiting: number;
+  reviewed: number;
+  approved: number;
 };
 
-function pickReviewUid(): string {
-  if (typeof window === "undefined") return "demo-user";
+function pickReviewUid(): string | null {
+  if (typeof window === "undefined") return null;
   return (
     localStorage.getItem("reviewUid") ||
     localStorage.getItem("uid") ||
-    "demo-user"
+    null
   );
 }
 
@@ -69,8 +72,12 @@ async function resolveStoreId(): Promise<string> {
   return "";
 }
 
+// ========================================
+// COMPONENT
+// ========================================
 export default function SupervisorPage() {
-  const [uid, setUid] = useState<string>(() => pickReviewUid());
+  const [uid, setUid] = useState<string | null>(() => pickReviewUid());
+
   const [weeks, setWeeks] = useState<WeekSummary[]>([
     { week: 1, waiting: 0, reviewed: 0, approved: 0 },
     { week: 2, waiting: 0, reviewed: 0, approved: 0 },
@@ -78,35 +85,46 @@ export default function SupervisorPage() {
     { week: 4, waiting: 0, reviewed: 0, approved: 0 },
   ]);
 
+  const [day1Summary, setDay1Summary] = useState({
+    waiting: 0,
+    reviewed: 0,
+    approved: 0,
+  });
+
   const [loading, setLoading] = useState(true);
   const [storeId, setStoreId] = useState<string | null>(null);
 
-  const { storeId: resolvedStoreId, loading: storeCtxLoading } = useStoreCtx();
+  const { storeId: resolvedStoreId } = useStoreCtx();
   const trainees = useSupervisorTrainees(storeId);
 
   const searchParams = useSearchParams();
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  /* ---------- AS UID ---------- */
+  // =========================================================
+  // HANDLE ?as=
+  // =========================================================
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
 
-  /* ---------- Save UID ---------- */
+  useEffect(() => {
+    if (!uid && trainees.length > 0) setUid(trainees[0].traineeId);
+  }, [uid, trainees]);
+
   useEffect(() => {
     if (uid && typeof window !== "undefined") {
       localStorage.setItem("reviewUid", uid);
     }
   }, [uid]);
 
-  /* ---------- store override via ?store= ---------- */
+  // =========================================================
+  // STORE OVERRIDES
+  // =========================================================
   useEffect(() => {
-    if (!storeOverride) return;
-    setStoreId(String(storeOverride));
+    if (storeOverride) setStoreId(storeOverride);
   }, [storeOverride]);
 
-  /* ---------- resolve store from ?as ---------- */
   useEffect(() => {
     if (!asUid) return;
     (async () => {
@@ -116,18 +134,19 @@ export default function SupervisorPage() {
     })();
   }, [asUid]);
 
-  /* ---------- store via provider ---------- */
   useEffect(() => {
-    if (storeOverride || asUid) return;
-    if (resolvedStoreId) setStoreId(resolvedStoreId);
-  }, [resolvedStoreId, storeCtxLoading, storeOverride, asUid]);
+    if (!storeOverride && !asUid && resolvedStoreId) {
+      setStoreId(resolvedStoreId);
+    }
+  }, [resolvedStoreId, storeOverride, asUid]);
 
-  /* ---------- fallback store resolver ---------- */
+  // =========================================================
+  // FALLBACK STORE DETECTION
+  // =========================================================
   useEffect(() => {
-    if (storeOverride || asUid) return;
-    if (resolvedStoreId) return;
+    if (storeOverride || asUid || resolvedStoreId) return;
 
-    let stopUserListener: (() => void) | null = null;
+    let stopUserListener: null | (() => void) = null;
 
     const stopAuth = onIdTokenChanged(auth, (u) => {
       if (stopUserListener) {
@@ -143,9 +162,8 @@ export default function SupervisorPage() {
       const userRef = doc(db, "users", u.uid);
       stopUserListener = onSnapshot(userRef, async (snap) => {
         const v: any = snap.exists() ? snap.data() : null;
-        let sid: string | null = v?.storeId ?? null;
+        let sid = v?.storeId ?? null;
 
-        // 1) Try explicit storeId on user
         if (!sid) {
           try {
             const storesSnap = await getDocs(collection(db, "stores"));
@@ -159,12 +177,9 @@ export default function SupervisorPage() {
                 break;
               }
             }
-          } catch {
-            // ignore
-          }
+          } catch {}
         }
 
-        // 2) Try supervisorUid field on store
         if (!sid) {
           try {
             const qs = await getDocs(
@@ -175,9 +190,7 @@ export default function SupervisorPage() {
               )
             );
             if (!qs.empty) sid = qs.docs[0].id;
-          } catch {
-            // ignore
-          }
+          } catch {}
         }
 
         setStoreId(sid);
@@ -190,7 +203,9 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  /* ---------- tally weeks ---------- */
+  // =========================================================
+  // WEEK SUMMARY TALLY
+  // =========================================================
   useEffect(() => {
     let alive = true;
 
@@ -206,12 +221,6 @@ export default function SupervisorPage() {
 
       if (!sid) {
         if (!alive) return;
-        setWeeks([
-          { week: 1, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 2, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 3, waiting: 0, reviewed: 0, approved: 0 },
-          { week: 4, waiting: 0, reviewed: 0, approved: 0 },
-        ]);
         setLoading(false);
         return;
       }
@@ -224,15 +233,12 @@ export default function SupervisorPage() {
       };
 
       try {
-        // ✅ ONLY trainees for this store
         const traineesSnap = await getDocs(
           collection(db, "stores", String(sid), "trainees")
         );
 
         for (const t of traineesSnap.docs) {
           const traineeId = t.id;
-
-          // Read that trainee's progress
           const progSnap = await getDocs(
             collection(db, "users", traineeId, "progress")
           );
@@ -240,43 +246,34 @@ export default function SupervisorPage() {
           for (const d of progSnap.docs) {
             const data = d.data() as any;
             if (!data?.done) continue;
-
-            // ✅ Robust storeId comparison
             if (String(data.storeId) !== String(sid)) continue;
 
-            let wkNumber: number | null = null;
+            let wk: number | null = null;
 
-            if (data.week === "week1") wkNumber = 1;
-            else if (data.week === "week2") wkNumber = 2;
-            else if (data.week === "week3") wkNumber = 3;
-            else if (data.week === "week4") wkNumber = 4;
+            if (data.week === "week1") wk = 1;
+            else if (data.week === "week2") wk = 2;
+            else if (data.week === "week3") wk = 3;
+            else if (data.week === "week4") wk = 4;
 
-            if (!wkNumber && data.path) {
+            if (!wk && data.path) {
               const m = data.path.match(/modules\/week(\d)\//i);
-              if (m) wkNumber = Number(m[1]);
+              if (m) wk = Number(m[1]);
             }
 
-            if (!wkNumber) continue;
+            if (!wk) continue;
 
-            const bucket = tallies[wkNumber];
-            bucket.reviewed += 1;
-            if (data.approved) bucket.approved += 1;
-            else bucket.waiting += 1;
+            const b = tallies[wk];
+            b.reviewed += 1;
+            if (data.approved) b.approved += 1;
+            else b.waiting += 1;
           }
         }
 
-        if (!alive) return;
-        setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
-      } catch (e) {
-        console.error("Error tallying supervisor weeks:", e);
         if (alive) {
-          setWeeks([
-            { week: 1, waiting: 0, reviewed: 0, approved: 0 },
-            { week: 2, waiting: 0, reviewed: 0, approved: 0 },
-            { week: 3, waiting: 0, reviewed: 0, approved: 0 },
-            { week: 4, waiting: 0, reviewed: 0, approved: 0 },
-          ]);
+          setWeeks([tallies[1], tallies[2], tallies[3], tallies[4]]);
         }
+      } catch (err) {
+        console.error(err);
       } finally {
         if (alive) setLoading(false);
       }
@@ -288,6 +285,65 @@ export default function SupervisorPage() {
     };
   }, [storeId]);
 
+  // =========================================================
+  // ⭐ DAY-1 SUMMARY — FIXED HERE ⭐
+  // =========================================================
+  useEffect(() => {
+    if (!storeId) return;
+
+    let alive = true;
+
+    async function tallyDay1() {
+      const summary = { waiting: 0, reviewed: 0, approved: 0 };
+
+      try {
+        const traineesSnap = await getDocs(
+          collection(db, "stores", String(storeId), "trainees")
+        );
+
+        for (const t of traineesSnap.docs) {
+          const traineeId = t.id;
+
+          const progSnap = await getDocs(
+            collection(db, "users", traineeId, "progress")
+          );
+
+          for (const d of progSnap.docs) {
+            const data: any = d.data();
+            if (!data?.done) continue;
+            if (data.week !== "day-1") continue;
+
+            // ⭐ FIX: Day-1 progress often lacks storeId, so skip store check ONLY for day-1
+            if (data.week !== "day-1" &&
+                String(data.storeId) !== String(storeId)) {
+              continue;
+            }
+
+            summary.reviewed += 1;
+            if (data.approved) summary.approved += 1;
+            else summary.waiting += 1;
+          }
+        }
+
+        if (alive) setDay1Summary(summary);
+      } catch (err) {
+        console.error("Day 1 tally error:", err);
+      }
+    }
+
+    tallyDay1();
+    return () => {
+      alive = false;
+    };
+  }, [storeId]);
+
+  // =========================================================
+  // UI
+  // =========================================================
+  const day1Href = uid ? `/supervisor/day1?as=${uid}` : "/supervisor/day1";
+  const weekHref = (week: number) =>
+    uid ? `/supervisor/week${week}?as=${uid}` : `/supervisor/week${week}`;
+
   return (
     <div className="space-y-6">
       <header>
@@ -297,15 +353,27 @@ export default function SupervisorPage() {
         </p>
       </header>
 
-      {/* WEEK CARDS */}
+      {/* DAY-1 CARD WITH FIXED COUNTS */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+
+        <Link href={day1Href}>
+          <Card className="border-primary/20 hover:shadow-md cursor-pointer">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Day 1</CardTitle>
+              <CardDescription>
+                {loading
+                  ? "Loading…"
+                  : `${day1Summary.waiting} pending, ${day1Summary.approved}/${day1Summary.reviewed} approved`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent />
+          </Card>
+        </Link>
+
+        {/* WEEK CARDS unchanged */}
         {weeks.map((w) => (
-          <Link
-            key={w.week}
-            href={`/supervisor/week${w.week}`}
-            className="block focus:outline-none"
-          >
-            <Card className="border-primary/20 hover:shadow-md transition cursor-pointer">
+          <Link key={w.week} href={weekHref(w.week)}>
+            <Card className="border-primary/20 hover:shadow-md cursor-pointer">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Week {w.week}</CardTitle>
                 <CardDescription>
@@ -326,23 +394,19 @@ export default function SupervisorPage() {
           <h2 className="text-lg font-semibold">Your Trainees</h2>
 
           {trainees.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No trainees assigned yet.
-            </p>
+            <p className="text-sm text-muted-foreground">No trainees assigned yet.</p>
           ) : (
             <div className="grid gap-2">
               {trainees.map((t) => (
                 <Link
                   key={t.id}
-                  href={`/supervisor/week1?as=${t.traineeId}`}
+                  href={`/supervisor/day1?as=${t.traineeId}`}
                   className="block border p-3 rounded-lg bg-white hover:bg-primary/5 transition"
                 >
                   <div className="font-medium">
                     {t.email || t.traineeEmail || t.userEmail || t.traineeId}
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    Tap to review
-                  </div>
+                  <div className="text-xs text-muted-foreground">Tap to review</div>
                 </Link>
               ))}
             </div>
@@ -350,17 +414,12 @@ export default function SupervisorPage() {
         </div>
       )}
 
-      {/* NOTES — permanently on dashboard */}
+      {/* NOTES LINK */}
       {storeId && (
-        <Link
-          href={`/supervisor/notes?store=${encodeURIComponent(storeId)}`}
-          className="block focus:outline-none"
-        >
-          <Card className="border-primary/30 bg-white hover:bg-primary/5 transition">
+        <Link href={`/supervisor/notes?store=${storeId}`}>
+          <Card className="border-primary/30 hover:bg-primary/5 cursor-pointer">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold text-primary">
-                Notes
-              </CardTitle>
+              <CardTitle className="text-base text-primary">Notes</CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
               Open your notes
@@ -371,10 +430,6 @@ export default function SupervisorPage() {
     </div>
   );
 }
-
-
-
-
 
 
 
