@@ -21,6 +21,8 @@ type Emp = {
   name?: string;
   email?: string;
   active?: boolean;
+  supervisor?: string; // where assignTrainee likely writes
+  trainer?: string;    // future-safe if you rename field
 };
 
 type Store = {
@@ -81,7 +83,8 @@ export default function ManagerDashboard() {
       if (!u) {
         setUid(null);
         setStoreId(null);
-        return setLoading(false);
+        setLoading(false);
+        return;
       }
 
       setUid(u.uid);
@@ -146,7 +149,9 @@ export default function ManagerDashboard() {
         setSupervisors(supList);
         setTrainees(trnList);
         setEveryone(all);
-      } catch {}
+      } catch {
+        // ignore for now, page will just show empty lists
+      }
     })();
 
     return () => {
@@ -213,10 +218,36 @@ export default function ManagerDashboard() {
     }
   }
 
+  /* ---------- helper: find trainer for a trainee ---------- */
+  function getTrainerLabelForTrainee(traineeId: string): string | null {
+    // find this trainee’s employee doc in the store
+    const empDoc = everyone.find((e) => e.uid === traineeId);
+    if (!empDoc) return null;
+
+    const trainerUid =
+      (empDoc.trainer as string | undefined) ||
+      (empDoc.supervisor as string | undefined);
+
+    if (!trainerUid) return null;
+
+    const trainerEmp =
+      everyone.find((e) => e.uid === trainerUid) ||
+      supervisors.find((s) => s.uid === trainerUid);
+
+    if (!trainerEmp) return null;
+
+    return trainerEmp.name || trainerEmp.email || null;
+  }
+
   /* ---------- render ---------- */
   if (!uid) return <main className="p-8">Please sign in.</main>;
   if (loading) return <main className="p-8">Loading…</main>;
   if (!storeId) return <main className="p-8">No store assigned.</main>;
+
+  // employees list should not duplicate trainees
+  const nonTraineeEmployees = everyone.filter(
+    (e) => e.active && String(e.role || "").toLowerCase() !== "trainee"
+  );
 
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
@@ -262,13 +293,15 @@ export default function ManagerDashboard() {
 
         {openStaff && (
           <div className="mt-5 space-y-6">
-
-            {/* Supervisors */}
-            <Block title="Supervisors">
+            {/* Trainers (formerly Supervisors) */}
+            <Block title="Trainers">
               {supervisors.length === 0
-                ? "No supervisors yet."
+                ? "No trainers yet."
                 : supervisors.map((s) => (
-                    <div key={s.uid} className="break-words whitespace-normal">
+                    <div
+                      key={s.uid}
+                      className="text-xs sm:text-sm break-words whitespace-normal"
+                    >
                       {s.name || s.email}
                     </div>
                   ))}
@@ -278,53 +311,78 @@ export default function ManagerDashboard() {
             <Block title="Trainees">
               {trainees.length === 0
                 ? "No trainees yet."
-                : trainees.map((t) => (
+                : trainees.map((t) => {
+                    const trainerLabel = getTrainerLabelForTrainee(t.uid);
+
+                    return (
+                      <Link
+                        href={`/manager/employees/${t.uid}`}
+                        key={t.uid}
+                        className="mb-4 block cursor-pointer rounded-xl p-2 hover:bg-gray-50"
+                      >
+                        <div className="break-words whitespace-normal text-sm font-medium">
+                          {t.name || t.email}
+                        </div>
+
+                        {t.email && (
+                          <div className="text-xs text-gray-600 break-words whitespace-normal">
+                            {t.email}
+                          </div>
+                        )}
+
+                        {trainerLabel && (
+                          <div className="mt-1 text-[11px] text-gray-700">
+                            Trainer: {trainerLabel}
+                          </div>
+                        )}
+
+                        <div className="w-full bg-gray-200 rounded-full h-3 mt-2 overflow-hidden">
+                          <div
+                            className="h-3 rounded-full"
+                            style={{
+                              width: `${progressMap[t.uid] ?? 0}%`,
+                              backgroundColor: "#f2b705",
+                            }}
+                          />
+                        </div>
+
+                        <div className="text-xs text-gray-600 mt-1">
+                          {progressMap[t.uid] ?? 0}% complete
+                        </div>
+                      </Link>
+                    );
+                  })}
+            </Block>
+
+            {/* Employees (non-trainee) */}
+            <Block title="Employees">
+              {nonTraineeEmployees.length === 0
+                ? "No employees yet."
+                : nonTraineeEmployees.map((e) => (
                     <div
-                      key={t.uid}
-                      className="mb-4 break-words whitespace-normal"
+                      key={e.uid}
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs sm:text-sm break-words whitespace-normal"
                     >
                       <div className="break-words whitespace-normal">
-                        {t.name || t.email}
+                        {e.name || e.email}
+                        {e.email && e.name && (
+                          <span className="text-gray-500">
+                            {" "}
+                            • {e.email}
+                          </span>
+                        )}
                       </div>
-
-                      <div className="w-full bg-gray-200 rounded-full h-3 mt-2">
-                        <div
-                          className="h-3 rounded-full"
-                          style={{
-                            width: `${progressMap[t.uid] ?? 0}%`,
-                            backgroundColor: "#f2b705",
-                          }}
-                        />
-                      </div>
-
-                      <div className="text-xs text-gray-600 mt-1">
-                        {progressMap[t.uid] ?? 0}% complete
+                      <div className="text-[11px] sm:text-xs text-gray-600">
+                        {String(e.role || "").toLowerCase()}
                       </div>
                     </div>
                   ))}
             </Block>
 
-            {/* Employees */}
-            <Block title="Employees">
-              {everyone.length === 0
-                ? "Loading…"
-                : everyone
-                    .filter((e) => e.active)
-                    .map((e) => (
-                      <div
-                        key={e.uid}
-                        className="break-words whitespace-normal"
-                      >
-                        {e.name || e.email} —{" "}
-                        {String(e.role || "").toLowerCase()}
-                      </div>
-                    ))}
-            </Block>
-
             {/* Assign */}
             <section className="border rounded-2xl bg-white p-5">
               <h3 className="font-semibold mb-3">
-                Assign Trainee → Supervisor
+                Assign Trainee → Trainer
               </h3>
 
               <div className="grid md:grid-cols-2 gap-3">
@@ -345,13 +403,13 @@ export default function ManagerDashboard() {
                 </label>
 
                 <label className="text-sm">
-                  Supervisor
+                  Trainer
                   <select
                     value={selSupervisor}
                     onChange={(e) => setSelSupervisor(e.target.value)}
                     className="mt-1 w-full border rounded-md p-2 text-sm"
                   >
-                    <option value="">Select supervisor…</option>
+                    <option value="">Select trainer…</option>
                     {supervisors.map((s) => (
                       <option key={s.uid} value={s.uid}>
                         {s.name || s.email}
@@ -365,7 +423,7 @@ export default function ManagerDashboard() {
                 <button
                   onClick={doAssign}
                   disabled={!selTrainee || !selSupervisor}
-                  className="border px-3 py-1 rounded text-sm hover:bg-gray-50"
+                  className="border px-3 py-1 rounded text-sm hover:bg-gray-50 disabled:opacity-60"
                 >
                   Assign
                 </button>
@@ -393,8 +451,6 @@ function Block({
   return (
     <div className="rounded-2xl bg-white p-5">
       <div className="font-semibold mb-2">{title}</div>
-
-      {/* FIXED — enforce wrapping inside Block */}
       <div className="text-sm break-words whitespace-normal">
         {children}
       </div>

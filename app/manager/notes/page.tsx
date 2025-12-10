@@ -15,39 +15,58 @@ import {
   query,
   where,
   serverTimestamp,
-  getDoc
 } from "firebase/firestore";
+
+/* ---------------------------------------------------------
+   TYPES
+--------------------------------------------------------- */
+type Ts = { seconds?: number } | null | undefined;
 
 type Note = {
   id: string;
-  text: string;
-  fromRole: string;
-  toRole: string;
-  storeId?: string;
+  text?: string;
+  fromRole?: string;
+  toRole?: string;
+  fromName?: string;
+  toName?: string;
   targetUid?: string;
   createdBy?: string;
-  createdAt?: { seconds?: number; nanoseconds?: number } | null;
+  createdAt?: Ts;
+  storeId?: string;
+  source?: "root" | "store";
 };
 
+type SimpleUser = {
+  uid: string;
+  email: string;
+  name?: string;
+  role?: string;
+};
+
+type RecipientType = "admin" | "trainer" | "trainee";
+
+/* ---------------------------------------------------------
+   PAGE START
+--------------------------------------------------------- */
 export default function ManagerNotesPage() {
   const [storeId, setStoreId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [admins, setAdmins] = useState<{ uid: string; email: string }[]>([]);
-  const [supervisors, setSupervisors] = useState<{ uid: string; email: string }[]>([]);
-  const [selectedAdmin, setSelectedAdmin] = useState("");
-  const [selectedSupervisor, setSelectedSupervisor] = useState("");
+  const [admins, setAdmins] = useState<SimpleUser[]>([]);
+  const [trainers, setTrainers] = useState<SimpleUser[]>([]);
+  const [trainees, setTrainees] = useState<SimpleUser[]>([]);
 
-  const [adminNotes, setAdminNotes] = useState<Note[]>([]);
-  const [supNotes, setSupNotes] = useState<Note[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
 
-  const [textAdmin, setTextAdmin] = useState("");
-  const [textSup, setTextSup] = useState("");
+  const [recipientType, setRecipientType] =
+    useState<RecipientType>("admin");
+  const [selectedRecipient, setSelectedRecipient] = useState("");
+  const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // ---------------------------------------------------------
-  //   FIX #1 — BULLETPROOF STOREID DETECTION
-  // ---------------------------------------------------------
+  /* ---------------------------------------------------------
+     DETECT STORE (Bulletproof)
+  --------------------------------------------------------- */
   useEffect(() => {
     const stop = onIdTokenChanged(auth, async (u) => {
       if (!u) {
@@ -58,27 +77,29 @@ export default function ManagerNotesPage() {
 
       let sid: string | null = null;
 
-      // 1) Try token claims
+      // 1. Token claims
       const token = await u.getIdTokenResult(true);
       sid = (token.claims?.storeId as string) || null;
 
-      // 2) Try stores → managerUid
+      // 2. store via managerUid
       if (!sid) {
         const snap = await getDocs(
-          query(collection(db, "stores"), where("managerUid", "==", u.uid))
+          query(collection(db!, "stores"), where("managerUid", "==", u.uid))
         );
         if (!snap.empty) sid = snap.docs[0].id;
       }
 
-      // 3) Try employees table (manager inside store employees)
+      // 3. find via employees
       if (!sid) {
-        const storesSnap = await getDocs(collection(db, "stores"));
+        const storesSnap = await getDocs(collection(db!, "stores"));
         for (const s of storesSnap.docs) {
           const empSnap = await getDocs(
-            collection(db, "stores", s.id, "employees")
+            collection(db!, "stores", s.id, "employees")
           );
           const found = empSnap.docs.find(
-            (e) => (e.data() as any).uid === u.uid && (e.data() as any).role === "manager"
+            (d) =>
+              (d.data() as any).uid === u.uid &&
+              (d.data() as any).role === "manager"
           );
           if (found) {
             sid = s.id;
@@ -94,404 +115,336 @@ export default function ManagerNotesPage() {
     return () => stop();
   }, []);
 
-  // ---------------------------------------------------------
-  //   Load admins
-  // ---------------------------------------------------------
+  /* ---------------------------------------------------------
+     LOAD ADMINS
+  --------------------------------------------------------- */
   useEffect(() => {
-    const load = async () => {
+    async function load() {
       const snap = await getDocs(
-        query(collection(db, "users"), where("role", "==", "admin"))
+        query(collection(db!, "users"), where("role", "==", "admin"))
       );
       setAdmins(
-        snap.docs.map((d) => ({
-          uid: d.id,
-          email: (d.data() as any).email,
-        }))
+        snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            uid: d.id,
+            email: data.email,
+            name: data.name,
+            role: "admin",
+          };
+        })
       );
-    };
+    }
     load();
   }, []);
 
-  // ---------------------------------------------------------
-  //   Load supervisors (FIXED)
-  // ---------------------------------------------------------
+  /* ---------------------------------------------------------
+     LOAD TRAINERS + TRAINEES
+--------------------------------------------------------- */
   useEffect(() => {
     if (!storeId) return;
+    const sid = storeId;
 
-    const load = async () => {
-      const snap = await getDocs(
-        query(
-          collection(db, "stores", storeId, "employees"),
-          where("role", "==", "supervisor"),
-          where("active", "==", true)
-        )
+    async function load() {
+      const base = collection(db!, "stores", sid, "employees");
+
+      const [supSnap, trSnap] = await Promise.all([
+        getDocs(query(base, where("role", "==", "supervisor"))),
+        getDocs(query(base, where("role", "==", "trainee"))),
+      ]);
+
+      setTrainers(
+        supSnap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            uid: data.uid ?? d.id,
+            email: data.email,
+            name: data.name,
+            role: "trainer",
+          };
+        })
       );
 
-      setSupervisors(
-        snap.docs.map((d) => ({
-          uid: (d.data() as any).uid,
-          email: (d.data() as any).email,
-        }))
+      setTrainees(
+        trSnap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            uid: data.uid ?? d.id,
+            email: data.email,
+            name: data.name,
+            role: data.role ?? "trainee",
+          };
+        })
       );
-    };
+    }
 
     load();
   }, [storeId]);
 
-  // ---------------------------------------------------------
-  //   Admin → Manager notes
-  // ---------------------------------------------------------
+  /* ---------------------------------------------------------
+     UNIFIED NOTES FEED
+--------------------------------------------------------- */
   useEffect(() => {
     if (!storeId) return;
-    const qy = query(
-      collection(db, "notes"),
-      where("toRole", "==", "manager"),
+
+    let root: Note[] = [];
+    let store: Note[] = [];
+
+    function publish() {
+      const merged = [...root, ...store].sort(
+        (a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
+      );
+      setNotes(merged);
+    }
+
+    const qRoot = query(
+      collection(db!, "notes"),
       where("storeId", "==", storeId)
     );
-    const unsub = onSnapshot(qy, (snap) => {
-      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      rows.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-      setAdminNotes(rows);
-    });
-    return () => unsub();
-  }, [storeId]);
-
-  // ---------------------------------------------------------
-  //   Manager ↔ Supervisor notes
-  // ---------------------------------------------------------
-  useEffect(() => {
-    if (!storeId) return;
-
-    const base = collection(db, "stores", storeId, "notes");
-
-    const qToSup = query(
-      base,
-      where("fromRole", "==", "manager"),
-      where("toRole", "==", "supervisor")
-    );
-
-    const qFromSup = query(
-      base,
-      where("fromRole", "==", "supervisor"),
-      where("toRole", "==", "manager")
-    );
-
-    let a: Note[] = [];
-    let b: Note[] = [];
-
-    const publish = () => {
-      const map = new Map<string, Note>();
-      [...a, ...b].forEach((n) => map.set(n.id, n));
-      const merged = Array.from(map.values()).sort(
-        (x, y) => (y.createdAt?.seconds ?? 0) - (x.createdAt?.seconds ?? 0)
-      );
-      setSupNotes(merged);
-    };
-
-    const u1 = onSnapshot(qToSup, (snap) => {
-      a = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+    const unsubRoot = onSnapshot(qRoot, (snap) => {
+      root = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+        source: "root" as const,
+      }));
       publish();
     });
 
-    const u2 = onSnapshot(qFromSup, (snap) => {
-      b = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+    const qStore = query(collection(db!, "stores", storeId, "notes"));
+    const unsubStore = onSnapshot(qStore, (snap) => {
+      store = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as any),
+        source: "store" as const,
+      }));
       publish();
     });
 
     return () => {
-      u1();
-      u2();
+      unsubRoot();
+      unsubStore();
     };
   }, [storeId]);
 
-  // ---------------------------------------------------------
-  //   Remove note
-  // ---------------------------------------------------------
-  async function removeNote(id: string) {
-    if (!confirm("Remove this note?")) return;
-
-    try {
-      await deleteDoc(doc(db, "notes", id)).catch(() => Promise.resolve());
-      if (storeId) {
-        await deleteDoc(doc(db, "stores", storeId, "notes", id)).catch(() =>
-          Promise.resolve()
-        );
-      }
-    } catch {
-      alert("Could not remove note.");
-    }
+  /* ---------------------------------------------------------
+     HELPERS
+--------------------------------------------------------- */
+  function formatTs(ts: Ts) {
+    if (!ts?.seconds) return "—";
+    return new Date(ts.seconds * 1000).toLocaleString();
   }
 
-  // ---------------------------------------------------------
-  //   Send Note
-  // ---------------------------------------------------------
-  async function sendNote(
-    toRole: "admin" | "supervisor",
-    text: string,
-    setText: (v: string) => void
-  ) {
-    const clean = text.trim();
-    if (!clean || !storeId) return;
+  function findName(uid?: string, fallback?: string): string {
+    if (!uid) return fallback || "";
+    const combined = [...admins, ...trainers, ...trainees];
+    const user = combined.find((u) => u.uid === uid);
+    return user?.name || user?.email || fallback || "";
+  }
+
+  function prettyRole(r?: string) {
+    if (!r) return "Unknown";
+    if (r === "supervisor") return "Trainer";
+    if (r === "trainee") return "Trainee";
+    if (r === "manager") return "Manager";
+    if (r === "admin") return "Admin";
+    return r;
+  }
+
+  /* ---------------------------------------------------------
+     SEND NOTE
+--------------------------------------------------------- */
+  async function sendNote() {
+    const body = text.trim();
+    if (!body || !selectedRecipient || !storeId) return;
 
     setSaving(true);
+    const fromUid = auth.currentUser?.uid ?? null;
 
     try {
-      if (toRole === "supervisor") {
-        if (!selectedSupervisor) {
-          alert("Select a supervisor first.");
-          return;
-        }
-
-        await addDoc(collection(db, "stores", storeId, "notes"), {
-          text: clean,
+      if (recipientType === "admin") {
+        await addDoc(collection(db!, "notes"), {
+          text: body,
           fromRole: "manager",
-          toRole: "supervisor",
+          toRole: "admin",
+          targetUid: selectedRecipient,
           storeId,
-          targetUid: selectedSupervisor,
-          createdBy: auth.currentUser?.uid ?? null,
+          createdBy: fromUid,
           createdAt: serverTimestamp(),
         });
       } else {
-        if (!selectedAdmin) {
-          alert("Select an admin first.");
-          return;
-        }
-
-        await addDoc(collection(db, "notes"), {
-          text: clean,
+        await addDoc(collection(db!, "stores", storeId, "notes"), {
+          text: body,
           fromRole: "manager",
-          toRole: "admin",
+          toRole: recipientType === "trainer" ? "supervisor" : "trainee",
+          targetUid: selectedRecipient,
           storeId,
-          targetUid: selectedAdmin,
-          createdBy: auth.currentUser?.uid ?? null,
+          createdBy: fromUid,
           createdAt: serverTimestamp(),
         });
       }
-
       setText("");
-    } catch {
-      alert("Could not send note.");
     } finally {
       setSaving(false);
     }
   }
 
-  // ---------------------------------------------------------
-  //   RENDER
-  // ---------------------------------------------------------
-  if (loading) {
-    return <main className="mx-auto max-w-3xl p-6">Loading…</main>;
+  /* ---------------------------------------------------------
+     REMOVE NOTE
+--------------------------------------------------------- */
+  async function removeNote(id: string) {
+    if (!confirm("Remove this note?")) return;
+    if (!storeId) return;
+
+    try {
+      await deleteDoc(doc(db!, "notes", id)).catch(() => {});
+      await deleteDoc(doc(db!, "stores", storeId, "notes", id)).catch(() => {});
+    } catch {
+      alert("Could not remove note.");
+    }
   }
 
+  /* ---------------------------------------------------------
+     RENDER
+--------------------------------------------------------- */
+  if (loading) {
+    return <main className="p-6">Loading…</main>;
+  }
+
+  const list =
+    recipientType === "admin"
+      ? admins
+      : recipientType === "trainer"
+      ? trainers
+      : trainees;
+
   return (
-    <main className="mgr-notes mx-auto max-w-3xl p-4 lg:p-6">
-      <div className="mb-5 flex items-center justify-between">
+    <main className="mx-auto max-w-3xl p-4 space-y-8">
+      <div className="flex justify-between items-center">
         <h1 className="text-xl font-semibold">Notes</h1>
         <Link
           href="/manager"
-          className="inline-flex items-center rounded-full border px-3 py-1.5 text-sm hover:bg-muted"
+          className="text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
         >
-          ← Back to Dashboard
+          ← Back
         </Link>
       </div>
 
-      {/* ---- Admin Notes ---- */}
-      <section className="section">
-        <div className="section-title">From Admin</div>
+      {/* SEND NOTE */}
+      <section className="border rounded-xl p-4 space-y-4 bg-white shadow-sm">
+        <h2 className="text-sm font-medium">Send a new note</h2>
 
-        {adminNotes.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No messages yet.</div>
-        ) : (
-          <ul className="space-y-2">
-            {adminNotes.map((n) => (
-              <li key={n.id} className="item-row">
-                <div className="min-w-0">
-                  <div className="meta">
-                    {n.createdAt?.seconds
-                      ? new Date(n.createdAt.seconds * 1000).toLocaleString()
-                      : "—"}
-                  </div>
-                  <div className="text-sm whitespace-pre-wrap">{n.text}</div>
-                </div>
-                <button onClick={() => removeNote(n.id)} className="link-danger">
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {/* Reply */}
-        <div className="composer">
-          <label className="label">Reply to Admin</label>
-
-          <select
-            value={selectedAdmin}
-            onChange={(e) => setSelectedAdmin(e.target.value)}
-            className="input mb-2"
-          >
-            <option value="">Select admin…</option>
-            {admins.map((a) => (
-              <option key={a.uid} value={a.uid}>
-                {a.email}
-              </option>
-            ))}
-          </select>
-
-          <textarea
-            rows={3}
-            value={textAdmin}
-            onChange={(e) => setTextAdmin(e.target.value)}
-            placeholder="Type your note…"
-            className="input"
-          />
-
-          <div className="actions">
-            <button
-              onClick={() => sendNote("admin", textAdmin, setTextAdmin)}
-              disabled={saving || !textAdmin.trim()}
-              className="btn-neutral"
-            >
-              Send
-            </button>
+        <div className="grid gap-3 md:grid-cols-2">
+          
+          {/* SEND TO */}
+          <div className="flex flex-col text-sm">
+            Send to
+            <div className="relative">
+              <select
+                value={recipientType}
+                onChange={(e) => {
+                  setRecipientType(e.target.value as RecipientType);
+                  setSelectedRecipient("");
+                }}
+                className="border rounded-xl px-3 py-2 mt-1 text-sm bg-white w-full appearance-none pr-8"
+              >
+                <option value="admin">Admin</option>
+                <option value="trainer">Trainer</option>
+                <option value="trainee">Trainee</option>
+              </select>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">
+                ▼
+              </span>
+            </div>
           </div>
+
+          {/* RECIPIENT */}
+          <div className="flex flex-col text-sm">
+            Recipient
+            <div className="relative">
+              <select
+                value={selectedRecipient}
+                onChange={(e) => setSelectedRecipient(e.target.value)}
+                className="border rounded-xl px-3 py-2 mt-1 text-sm bg-white w-full appearance-none pr-8"
+              >
+                <option value="">
+                  {list.length ? "Select recipient…" : "No users available"}
+                </option>
+                {list.map((u) => (
+                  <option key={u.uid} value={u.uid}>
+                    {(u.name || u.email) + " — " + prettyRole(u.role)}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">
+                ▼
+              </span>
+            </div>
+          </div>
+
+        </div>
+
+        <textarea
+          rows={3}
+          className="w-full border rounded px-3 py-2 text-sm"
+          placeholder="Type your note…"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+
+        <div className="flex justify-end">
+          <button
+            disabled={!text.trim() || !selectedRecipient || saving}
+            onClick={sendNote}
+            className="border rounded-full px-4 py-1.5 text-sm bg-white"
+          >
+            {saving ? "Sending…" : "Send"}
+          </button>
         </div>
       </section>
 
-      {/* ---- Supervisor Notes ---- */}
-      <section className="section">
-        <div className="section-title">From Supervisor</div>
+      {/* NOTES FEED */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium">Store notes</h2>
 
-        {supNotes.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No messages yet.</div>
+        {notes.length === 0 ? (
+          <div className="text-sm text-gray-500">No messages yet.</div>
         ) : (
-          <ul className="space-y-2">
-            {supNotes.map((n) => (
-              <li key={n.id} className="item-row">
-                <div className="min-w-0">
-                  <div className="meta">
-                    {n.fromRole} → {n.toRole}{" "}
-                    {n.createdAt?.seconds
-                      ? " • " +
-                        new Date(n.createdAt.seconds * 1000).toLocaleString()
-                      : ""}
+          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+            {notes.map((n) => (
+              <div
+                key={n.id}
+                className="border rounded-lg p-2.5 bg-white shadow-sm text-sm"
+              >
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-medium">
+                      {findName(n.createdBy)} ({prettyRole(n.fromRole)}) →{" "}
+                      {findName(n.targetUid)} ({prettyRole(n.toRole)})
+                    </div>
+
+                    <div className="text-xs text-gray-500">
+                      {formatTs(n.createdAt)}{" "}
+                      {n.source === "root" ? "(Admin channel)" : ""}
+                    </div>
                   </div>
-                  <div className="text-sm whitespace-pre-wrap">{n.text}</div>
+
+                  <button
+                    onClick={() => removeNote(n.id)}
+                    className="text-red-500 text-[11px] hover:underline"
+                  >
+                    Remove
+                  </button>
                 </div>
-                <button onClick={() => removeNote(n.id)} className="link-danger">
-                  Remove
-                </button>
-              </li>
+
+                <div className="mt-1.5 text-[13px] leading-snug whitespace-pre-wrap">
+                  {n.text}
+                </div>
+              </div>
             ))}
-          </ul>
-        )}
-
-        <div className="composer">
-          <label className="label">Send a note to Supervisor</label>
-
-          <select
-            value={selectedSupervisor}
-            onChange={(e) => setSelectedSupervisor(e.target.value)}
-            className="input mb-2"
-          >
-            <option value="">Select supervisor…</option>
-            {supervisors.map((s) => (
-              <option key={s.uid} value={s.uid}>
-                {s.email}
-              </option>
-            ))}
-          </select>
-
-          <textarea
-            rows={3}
-            value={textSup}
-            onChange={(e) => setTextSup(e.target.value)}
-            placeholder="Type your note…"
-            className="input"
-          />
-
-          <div className="actions">
-            <button
-              onClick={() => sendNote("supervisor", textSup, setTextSup)}
-              disabled={saving || !textSup.trim()}
-              className="btn-neutral"
-            >
-              Send
-            </button>
           </div>
-        </div>
+        )}
       </section>
-
-      {/* Styles */}
-      <style jsx global>{`
-        .mgr-notes {
-          --line: #eaecef;
-          --muted: #f8f9fb;
-        }
-        .section {
-          padding: 12px 0 18px;
-          border-top: 1px solid var(--line);
-        }
-        .section:first-of-type {
-          border-top: none;
-        }
-        .section-title {
-          font-size: 14px;
-          font-weight: 600;
-          margin-bottom: 8px;
-        }
-        .item-row {
-          padding: 10px 12px;
-          border: 1px solid var(--line);
-          border-radius: 10px;
-          background: white;
-          display: flex;
-          justify-content: space-between;
-          gap: 12px;
-        }
-        .meta {
-          font-size: 12px;
-          color: #6b7280;
-          margin-bottom: 4px;
-        }
-        .composer {
-          margin-top: 10px;
-        }
-        .label {
-          font-size: 12px;
-          color: #6b7280;
-          margin-bottom: 6px;
-        }
-        .input {
-          width: 100%;
-          border: 1px solid var(--line);
-          border-radius: 8px;
-          padding: 10px 12px;
-          font-size: 14px;
-          background: white;
-        }
-        .actions {
-          display: flex;
-          justify-content: flex-end;
-          margin-top: 8px;
-        }
-        .btn-neutral {
-          border: 1px solid var(--line);
-          padding: 6px 12px;
-          border-radius: 8px;
-          background: white;
-        }
-        .link-danger {
-          color: #ef4444;
-          font-size: 12px;
-        }
-      `}</style>
     </main>
   );
 }
-
-
-
-
-
 

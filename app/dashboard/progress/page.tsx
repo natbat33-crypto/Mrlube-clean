@@ -13,6 +13,7 @@ import {
   collection,
   getCountFromServer,
 } from "firebase/firestore";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
@@ -112,23 +113,23 @@ function ProgressPageInner({ uid }: { uid: string }) {
   const today = startOfDay(new Date());
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [savingWhmis, setSavingWhmis] = useState(false);
+  const [savingMsg, setSavingMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [durationDays, setDurationDays] = useState<number>(30);
+  const [storeId, setStoreId] = useState<string | null>(null);
 
   // progress
   const [tasksDone, setTasksDone] = useState<number>(0);
-  const [tasksTotal, setTasksTotal] = useState<number>(46); // <– total tasks
+  const [tasksTotal, setTasksTotal] = useState<number>(46);
 
   // WHMIS
   const [whmisCompletedDate, setWhmisCompletedDate] = useState<Date | null>(null);
   const [whmisExpiryDate, setWhmisExpiryDate] = useState<Date | null>(null);
   const [whmisProvider, setWhmisProvider] = useState<string>("");
 
-  /* derived */
   const endDate = useMemo(
     () => (startDate ? addDays(startDate, durationDays - 1) : null),
     [startDate, durationDays]
@@ -146,17 +147,9 @@ function ProgressPageInner({ uid }: { uid: string }) {
     [startDate, durationDays, daysElapsed]
   );
 
-  const timePct = useMemo(
-    () =>
-      startDate
-        ? Math.round(((durationDays - daysRemaining) / durationDays) * 100)
-        : 0,
-    [startDate, durationDays, daysRemaining]
-  );
-
   const tasksPct = tasksTotal ? Math.round((tasksDone / tasksTotal) * 100) : 0;
 
-  /* ---------------- load ---------------- */
+  /* ---------------- load data ---------------- */
   useEffect(() => {
     let alive = true;
 
@@ -166,33 +159,36 @@ function ProgressPageInner({ uid }: { uid: string }) {
 
         await ensureTraineeDoc(uid, 30);
 
-        const tRef = doc(db, "trainees", uid);
-        const tSnap = await getDoc(tRef);
+        // load main user doc (storeId, WHMIS, startDate)
+        const userRef = doc(db, "users", uid);
+        const userSnap = await getDoc(userRef);
 
-        if (tSnap.exists()) {
-          const data = tSnap.data() as any;
+        if (userSnap.exists()) {
+          const data = userSnap.data() as any;
 
-          if (data.startDate) setStartDate(data.startDate.toDate());
+          setStoreId(data.storeId || null);
+
+          if (data.startDate instanceof Timestamp)
+            setStartDate(data.startDate.toDate());
+
           if (typeof data.durationDays === "number")
             setDurationDays(data.durationDays);
+
           if (data.whmisCompletedDate instanceof Timestamp)
             setWhmisCompletedDate(data.whmisCompletedDate.toDate());
+
           if (data.whmisExpiryDate instanceof Timestamp)
             setWhmisExpiryDate(data.whmisExpiryDate.toDate());
+
           if (typeof data.whmisProvider === "string")
             setWhmisProvider(data.whmisProvider);
         }
 
-        // ---------------- REAL PROGRESS FROM users/{uid}/progress ----------------
+        // task progress count
         try {
           const progressCol = collection(db, "users", uid, "progress");
           const doneSnap = await getCountFromServer(progressCol);
-          const done = doneSnap.data().count || 0;
-
-          if (alive) {
-            setTasksDone(done);
-            setTasksTotal(46); // adjust total if needed
-          }
+          setTasksDone(doneSnap.data().count || 0);
         } catch (err) {
           console.error("progress load failed:", err);
         }
@@ -210,61 +206,50 @@ function ProgressPageInner({ uid }: { uid: string }) {
     };
   }, [uid]);
 
-  /* ---------------- save start ---------------- */
-  async function saveStart(dateStr: string, days: number) {
-    try {
-      setSaving(true);
-      const d = new Date(dateStr + "T00:00:00");
-      await setDoc(
-        doc(db, "trainees", uid),
-        {
-          startDate: Timestamp.fromDate(d),
-          durationDays: days,
-        },
-        { merge: true }
-      );
-      setStartDate(d);
-      setDurationDays(days);
-    } catch (e: any) {
-      setError(e.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  /* ---------------- save whmis ---------------- */
-  async function saveWhmis(
-    completedStr: string,
-    expiryStr: string,
-    provider: string
-  ) {
+  /* ---------------- save WHMIS ---------------- */
+  async function saveWhmis() {
     try {
       setSavingWhmis(true);
+      setSavingMsg(null);
 
-      const completed = completedStr
-        ? new Date(completedStr + "T00:00:00")
+      const completed = whmisCompletedDate
+        ? Timestamp.fromDate(whmisCompletedDate)
         : null;
-      const expiry = expiryStr ? new Date(expiryStr + "T00:00:00") : null;
 
+      const expiry = whmisExpiryDate
+        ? Timestamp.fromDate(whmisExpiryDate)
+        : null;
+
+      // 1️⃣ Save to main user doc
       await setDoc(
-        doc(db, "trainees", uid),
+        doc(db, "users", uid),
         {
-          whmisCompletedDate: completed
-            ? Timestamp.fromDate(completed)
-            : null,
-          whmisExpiryDate: expiry ? Timestamp.fromDate(expiry) : null,
-          whmisProvider: provider || "",
+          whmisCompletedDate: completed,
+          whmisExpiryDate: expiry,
+          whmisProvider,
         },
         { merge: true }
       );
 
-      setWhmisCompletedDate(completed);
-      setWhmisExpiryDate(expiry);
-      setWhmisProvider(provider);
+      // 2️⃣ Mirror to store trainee doc
+      if (storeId) {
+        await setDoc(
+          doc(db, "stores", storeId, "trainees", uid),
+          {
+            whmisCompletedDate: completed,
+            whmisExpiryDate: expiry,
+            whmisProvider,
+          },
+          { merge: true }
+        );
+      }
+
+      setSavingMsg("Saved!");
     } catch (e: any) {
       setError(e.message ?? String(e));
     } finally {
       setSavingWhmis(false);
+      setTimeout(() => setSavingMsg(null), 1500);
     }
   }
 
@@ -277,86 +262,27 @@ function ProgressPageInner({ uid }: { uid: string }) {
   /* ---------------- UI ---------------- */
   return (
     <div className="max-w-4xl mx-auto px-4 lg:px-6 py-6 space-y-6">
+      {/* TITLE */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl lg:text-3xl font-bold text-primary">
           Training Progress
         </h1>
         <Link
           href="/dashboard"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            textDecoration: "none",
-            background: "#fff",
-            border: `1px solid ${GRAY}`,
-            borderRadius: 999,
-            padding: "8px 14px",
-            fontWeight: 600,
-            color: NAVY,
-            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-          }}
+          className="inline-flex items-center gap-2 border rounded-full px-3 py-2 text-primary bg-white shadow-sm"
         >
           ← Back to Dashboard
         </Link>
       </div>
 
-      {!loading && !startDate && (
-        <Card className="border-primary/20">
-          <CardHeader>
-            <CardTitle>Set your training start</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <label className="text-sm flex-1">
-                Start date
-                <input
-                  id="startDateInput"
-                  type="date"
-                  defaultValue={ymd(today)}
-                  className="mt-1 w-full border rounded-md px-3 py-2"
-                />
-              </label>
-              <label className="text-sm w-36">
-                Duration (days)
-                <input
-                  id="durationInput"
-                  type="number"
-                  defaultValue={30}
-                  className="mt-1 w-full border rounded-md px-3 py-2"
-                />
-              </label>
-            </div>
-
-            <button
-              onClick={() => {
-                const d = (
-                  document.getElementById(
-                    "startDateInput"
-                  ) as HTMLInputElement
-                ).value;
-                const dur = (
-                  document.getElementById(
-                    "durationInput"
-                  ) as HTMLInputElement
-                ).value;
-                saveStart(d || ymd(today), Number(dur || 30));
-              }}
-              disabled={saving}
-              className="px-4 py-2 rounded-md bg-primary text-white disabled:opacity-60"
-            >
-              {saving ? "Saving…" : "Start Training"}
-            </button>
-            {error && (
-              <p className="text-xs text-red-600 mt-1">{error}</p>
-            )}
-          </CardContent>
-        </Card>
+      {/* LOADING */}
+      {loading && (
+        <p className="text-sm text-muted-foreground">Loading…</p>
       )}
 
-      {startDate && (
+      {/* TOP CARD */}
+      {!loading && startDate && (
         <>
-          {/* TOP CARD */}
           <Card>
             <CardContent className="p-4 lg:p-6 space-y-4">
               <div className="flex flex-wrap gap-6 items-end">
@@ -388,10 +314,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
                     <span>Tasks Progress</span>
                     <span>{tasksPct}%</span>
                   </div>
-                  <Progress
-                    value={tasksPct}
-                    className="h-2 [&>div]:bg-yellow-400"
-                  />
+                  <Progress value={tasksPct} className="h-2" />
                   <div className="text-xs text-muted-foreground mt-1">
                     {tasksDone}/{tasksTotal} tasks completed
                   </div>
@@ -445,7 +368,7 @@ function ProgressPageInner({ uid }: { uid: string }) {
             </CardContent>
           </Card>
 
-          {/* WHMIS */}
+          {/* WHMIS SECTION */}
           <Card className="border-primary/20">
             <CardHeader>
               <CardTitle className="text-base">WHMIS Status</CardTitle>
@@ -497,17 +420,15 @@ function ProgressPageInner({ uid }: { uid: string }) {
               </div>
 
               <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">
-                  Keep WHMIS up to date for compliance.
-                </p>
+                {savingMsg && (
+                  <p className="text-green-600 text-xs">{savingMsg}</p>
+                )}
+                {error && (
+                  <p className="text-red-600 text-xs">{error}</p>
+                )}
+
                 <button
-                  onClick={() =>
-                    saveWhmis(
-                      whmisCompletedStr,
-                      whmisExpiryStr,
-                      whmisProvider
-                    )
-                  }
+                  onClick={saveWhmis}
                   disabled={savingWhmis}
                   className="px-3 py-2 rounded-md bg-primary text-white text-sm disabled:opacity-60"
                 >
