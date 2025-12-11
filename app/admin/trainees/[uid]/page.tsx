@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -17,31 +18,24 @@ import {
 
 /* ---------------- Types ---------------- */
 type FirestoreTimestamp = { seconds: number; nanoseconds: number };
-
 type Role =
   | "trainee"
   | "trainer"
   | "supervisor"
   | "assistant-manager"
   | "manager"
-  | "admin"
-  | string;
+  | "admin";
 
-type ManagerUser = {
+type UserInfo = {
   uid: string;
   role?: Role;
   storeId?: string | number;
-};
-
-type TraineeUser = {
-  uid: string;
-  name?: string;
   email?: string;
-  role?: Role;
-  storeId?: string | number;
-  startDate?: FirestoreTimestamp | Date | string;
-  whmisCompletedDate?: FirestoreTimestamp | Date | string;
-  whmisExpiryDate?: FirestoreTimestamp | Date | string;
+  displayName?: string;
+  name?: string;
+  startDate?: any;
+  whmisCompletedDate?: any;
+  whmisExpiryDate?: any;
 };
 
 type RawTask = {
@@ -63,7 +57,6 @@ type TaskWithState = RawTask & {
 };
 
 type SectionKey = "day1" | "week1" | "week2" | "week3" | "week4";
-
 type SectionState = {
   title: string;
   key: SectionKey;
@@ -85,20 +78,22 @@ function num(v: unknown): number {
 function firestoreTsToDate(value: any): Date | null {
   if (!value) return null;
   if (value instanceof Date) return value;
+
   if (typeof value === "string") {
     const d = new Date(value);
     return isNaN(d.getTime()) ? null : d;
   }
+
   if (typeof value === "object" && typeof value.seconds === "number") {
     return new Date(value.seconds * 1000);
   }
+
   return null;
 }
 
 function formatDate(value: any): string {
   const d = firestoreTsToDate(value);
-  if (!d) return "—";
-  return d.toLocaleDateString();
+  return d ? d.toLocaleDateString() : "—";
 }
 
 function msToClock(ms?: number): string {
@@ -109,9 +104,10 @@ function msToClock(ms?: number): string {
   return `${m}:${s}`;
 }
 
-/* ---------- Load all task templates ---------- */
+/* ---------------- Load tasks ---------------- */
+
 async function loadAllTasks() {
-  async function loadOrdered(pathArr: string[]): Promise<RawTask[]> {
+  async function loadOrdered(pathArr: string[]) {
     const qRef = query(
       collection(db, pathArr[0], pathArr[1], pathArr[2]),
       orderBy("order", "asc")
@@ -121,7 +117,7 @@ async function loadAllTasks() {
       .map((d) => {
         const data = d.data();
         const { done, ...rest } = data;
-        return { id: d.id, ...(rest as Partial<RawTask>) };
+        return { id: d.id, ...(rest as any) };
       })
       .sort((a, b) => num(a.order ?? a.sort_order) - num(b.order ?? b.sort_order));
   }
@@ -138,27 +134,35 @@ async function loadAllTasks() {
 }
 
 /* ===========================================================
-   EMPLOYEE DETAIL PAGE
+   ADMIN TRAINEE DETAIL PAGE
 =========================================================== */
 
-export default function EmployeeDetailPage({ params }: { params: { uid: string } }) {
-  const traineeUid = params.uid;
+export default function AdminTraineePage({
+  params,
+}: {
+  params: { storeId: string; uid: string };
+}) {
+  const { storeId, uid: traineeUid } = params;
 
-  const [authUser, setAuthUser] = useState<ManagerUser | null>(null);
-  const [trainee, setTrainee] = useState<TraineeUser | null>(null);
+  const [authUser, setAuthUser] = useState<UserInfo | null>(null);
+  const [trainee, setTrainee] = useState<UserInfo | null>(null);
   const [sections, setSections] = useState<SectionsByKey | null>(null);
   const [loading, setLoading] = useState(true);
   const [approveBusy, setApproveBusy] = useState<SectionKey | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [error, setError] = useState<string | null>(null);
 
-  /* ---------- Auth ---------- */
+  /* ---------- Auth (admins always allowed) ---------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) return setAuthUser(null);
       const snap = await getDoc(doc(db, "users", u.uid));
       const data = snap.data() || {};
-      setAuthUser({ uid: u.uid, role: data.role || "manager", storeId: data.storeId });
+      setAuthUser({
+        uid: u.uid,
+        role: data.role || "admin",
+        storeId: data.storeId,
+      });
     });
     return () => unsub();
   }, []);
@@ -174,13 +178,14 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
 
         const tSnap = await getDoc(doc(db, "users", traineeUid));
         if (!tSnap.exists()) throw new Error("Trainee not found.");
+        const td = tSnap.data() || {};
 
-        const td = tSnap.data() as any;
-        const traineeInfo: TraineeUser = {
+        const traineeInfo: UserInfo = {
           uid: traineeUid,
-          name: td.name || td.displayName || "",
-          email: td.email || "",
-          role: td.role || "trainee",
+          email: td.email,
+          displayName: td.displayName,
+          name: td.name,
+          role: td.role,
           storeId: td.storeId,
           startDate: td.startDate,
           whmisCompletedDate: td.whmisCompletedDate,
@@ -190,7 +195,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
         const templates = await loadAllTasks();
 
         const progSnap = await getDocs(collection(db, "users", traineeUid, "progress"));
-        const completedIds: string[] = [];
+        const completed: string[] = [];
         const timers: Record<string, any> = {};
 
         progSnap.forEach((d) => {
@@ -198,10 +203,11 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
           const v = d.data() || {};
 
           const isDone =
-            v.done || v.completed || v.status === "done" || v.approved || v.completedAt;
+            v.done || v.completed || v.status === "done" || v.completedAt || v.approved;
 
-          if (isDone) completedIds.push(id);
+          if (isDone) completed.push(id);
 
+          // Week 4 timers
           if (id.startsWith("modules__week4__tasks__")) {
             const tid = id.split("__").pop()!;
             timers[tid] = {
@@ -229,7 +235,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
             return {
               ...t,
               order: t.order ?? t.sort_order ?? idx + 1,
-              completed: completedIds.includes(full),
+              completed: completed.includes(full),
               timer: timerMap?.[t.id],
             };
           });
@@ -241,45 +247,44 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
             title: "Day 1 — Orientation & Basics",
             tasks: mapTasks(templates.day1, "days__day-1__tasks"),
             approved: approval.day1?.approved ?? false,
-            approvedAt: approval.day1?.approvedAt ?? null,
-            approvedBy: approval.day1?.approvedBy ?? null,
+            approvedAt: approval.day1?.approvedAt,
+            approvedBy: approval.day1?.approvedBy,
           },
           week1: {
             key: "week1",
             title: "Week 1 — Core Services",
             tasks: mapTasks(templates.week1, "modules__week1__tasks"),
             approved: approval.week1?.approved ?? false,
-            approvedAt: approval.week1?.approvedAt ?? null,
-            approvedBy: approval.week1?.approvedBy ?? null,
+            approvedAt: approval.week1?.approvedAt,
+            approvedBy: approval.week1?.approvedBy,
           },
           week2: {
             key: "week2",
             title: "Week 2 — Intermediate Skills",
             tasks: mapTasks(templates.week2, "modules__week2__tasks"),
             approved: approval.week2?.approved ?? false,
-            approvedAt: approval.week2?.approvedAt ?? null,
-            approvedBy: approval.week2?.approvedBy ?? null,
+            approvedAt: approval.week2?.approvedAt,
+            approvedBy: approval.week2?.approvedBy,
           },
           week3: {
             key: "week3",
             title: "Week 3 — Advanced Skills",
             tasks: mapTasks(templates.week3, "modules__week3__tasks"),
             approved: approval.week3?.approved ?? false,
-            approvedAt: approval.week3?.approvedAt ?? null,
-            approvedBy: approval.week3?.approvedBy ?? null,
+            approvedAt: approval.week3?.approvedAt,
+            approvedBy: approval.week3?.approvedBy,
           },
           week4: {
             key: "week4",
             title: "Week 4 — Timed Tasks",
             tasks: mapTasks(templates.week4, "modules__week4__tasks", timers),
             approved: approval.week4?.approved ?? false,
-            approvedAt: approval.week4?.approvedAt ?? null,
-            approvedBy: approval.week4?.approvedBy ?? null,
+            approvedAt: approval.week4?.approvedAt,
+            approvedBy: approval.week4?.approvedBy,
           },
         };
 
         if (!alive) return;
-
         setTrainee(traineeInfo);
         setSections(merged);
       } catch (e: any) {
@@ -295,7 +300,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
     };
   }, [traineeUid]);
 
-  /* ---------- Training Day Calculation ---------- */
+  /* ---------- Training day calc ---------- */
   const startInfo = useMemo(() => {
     if (!trainee?.startDate) return { hasStart: false };
 
@@ -311,27 +316,24 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
       startDateStr: d.toLocaleDateString(),
       daysIn: diff,
       isOverdue: remaining < 0,
-      label: remaining < 0 ? `Overdue by ${Math.abs(remaining)} days` : `${remaining} days remaining`,
+      label:
+        remaining < 0
+          ? `Overdue by ${Math.abs(remaining)} days`
+          : `${remaining} days remaining`,
     };
   }, [trainee]);
 
-  const canApprove =
-    authUser &&
-    ["trainer", "supervisor", "assistant-manager", "admin"].includes(
-      (authUser.role || "").toString().toLowerCase()
-    );
+  const canApprove = true; // Admins always can approve
 
   async function handleApprove(sectionKey: SectionKey) {
-    if (!canApprove) return;
     try {
       setApproveBusy(sectionKey);
-      const role = authUser?.role || "manager";
       await setDoc(
         doc(db, "users", traineeUid, "sections", sectionKey),
         {
           approved: true,
           approvedAt: serverTimestamp(),
-          approvedBy: role,
+          approvedBy: "admin",
         },
         { merge: true }
       );
@@ -343,7 +345,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
                 ...prev[sectionKey],
                 approved: true,
                 approvedAt: new Date(),
-                approvedBy: role,
+                approvedBy: "admin",
               },
             }
           : prev
@@ -353,17 +355,15 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
     }
   }
 
-  if (loading) {
-    return (
-      <main className="max-w-5xl mx-auto p-6">Loading trainee…</main>
-    );
-  }
+  /* ---------- Render ---------- */
+  if (loading)
+    return <main className="max-w-5xl mx-auto p-6">Loading trainee…</main>;
 
-  if (error || !trainee || !sections) {
+  if (error || !trainee || !sections)
     return (
       <main className="max-w-5xl mx-auto p-6">
         <Link
-          href="/manager"
+          href={`/admin/stores/${storeId}`}
           className="inline-block text-sm px-3 py-1 rounded-full bg-gray-100"
         >
           ← Back
@@ -371,25 +371,30 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
         <div className="text-red-600">{error || "Unable to load trainee"}</div>
       </main>
     );
-  }
 
   const whmisCompleted = !!trainee.whmisCompletedDate;
   const whmisExpired =
     trainee.whmisExpiryDate &&
     firestoreTsToDate(trainee.whmisExpiryDate)?.getTime()! < Date.now();
 
-  const sectionOrder: SectionKey[] = ["day1", "week1", "week2", "week3", "week4"];
+  const sectionOrder: SectionKey[] = [
+    "day1",
+    "week1",
+    "week2",
+    "week3",
+    "week4",
+  ];
 
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
       {/* Back */}
       <div>
         <Link
-          href="/manager"
-          className="inline-flex items-center gap-2 text-sm px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200"
-        >
-          ← Back to Manager Dashboard
-        </Link>
+           href={`/admin/stores/${trainee.storeId}`}
+            className="inline-flex items-center gap-2 text-sm px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200"
+>
+             ← Back to Store
+          </Link>
       </div>
 
       {/* Trainee Card */}
@@ -397,15 +402,14 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
         <div className="text-xs uppercase text-gray-500">Trainee</div>
 
         <div className="text-[13px] text-gray-700 break-all leading-tight">
-            {trainee.name || trainee.email || trainee.uid}
+          {trainee.email}
         </div>
 
         <div className="flex flex-wrap gap-2 text-[11px] text-gray-700">
-          {trainee.role && (
-            <span className="px-2 py-1 rounded-full bg-gray-100 whitespace-nowrap">
-              Role: {String(trainee.role).replace("-", " ")}
-            </span>
-          )}
+          <span className="px-2 py-1 rounded-full bg-gray-100 whitespace-nowrap">
+            Role: {String(trainee.role || "trainee")}
+          </span>
+
           {trainee.storeId && (
             <span className="px-2 py-1 rounded-full bg-gray-100 whitespace-nowrap">
               Store: {trainee.storeId}
@@ -413,21 +417,20 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
           )}
         </div>
 
-        {/* Start / Training Window */}
         {startInfo.hasStart && (
           <div className="p-3 rounded-xl bg-gray-50 border text-xs space-y-1">
-            <div className="flex flex-wrap justify-between text-[11px]">
-              <span className="font-medium">Start date:</span>{" "}
+            <div className="flex flex-wrap justify-between">
+              <span className="font-medium text-[11px]">Start date:</span>
               {startInfo.startDateStr}
             </div>
-
-            <div className="text-[11px]">Days in training: {startInfo.daysIn}</div>
-
+            <div className="text-[11px]">
+              Days in training: {startInfo.daysIn}
+            </div>
             <div
               className={
                 startInfo.isOverdue
                   ? "text-red-700 font-semibold text-[11px]"
-                  : "text-gray-800 font-medium text-[11px]"
+                  : "text-gray-700 font-medium text-[11px]"
               }
             >
               {startInfo.label}
@@ -461,11 +464,11 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
 
         <div className="grid sm:grid-cols-2 gap-2 text-[11px] text-gray-700">
           <div>
-            <span className="font-medium">Completed:</span>{" "}
+            <span className="font-semibold">Completed:</span>{" "}
             {formatDate(trainee.whmisCompletedDate)}
           </div>
           <div>
-            <span className="font-medium">Expiry:</span>{" "}
+            <span className="font-semibold">Expiry:</span>{" "}
             {formatDate(trainee.whmisExpiryDate)}
           </div>
         </div>
@@ -476,14 +479,15 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
         const sec = sections[key];
         const total = sec.tasks.length;
         const done = sec.tasks.filter((t) => t.completed).length;
-        const pct = total ? Math.round((done / total) * 100) : 0;
+        const pct = Math.round((done / total) * 100);
         const pending = done === total && !sec.approved;
-
-        const isOpen = openSections[key];
+        const open = openSections[key];
 
         return (
-          <section key={key} className="rounded-2xl border bg-white p-5 space-y-4">
-            {/* Header */}
+          <section
+            key={key}
+            className="rounded-2xl border bg-white p-5 space-y-4"
+          >
             <div
               className="flex justify-between items-start cursor-pointer"
               onClick={() =>
@@ -491,7 +495,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
               }
             >
               <div className="min-w-0">
-                <div className="text-sm font-semibold break-words">{sec.title}</div>
+                <div className="text-sm font-semibold">{sec.title}</div>
                 <div className="text-[11px] text-gray-600">
                   {done}/{total} ({pct}%)
                 </div>
@@ -501,10 +505,10 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
                 <div
                   className={
                     sec.approved
-                      ? "px-2 py-1 rounded-full bg-green-100 text-green-800 whitespace-nowrap"
+                      ? "px-2 py-1 rounded-full bg-green-100 text-green-800"
                       : pending
-                      ? "px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 whitespace-nowrap"
-                      : "px-2 py-1 rounded-full bg-gray-100 text-gray-700 whitespace-nowrap"
+                      ? "px-2 py-1 rounded-full bg-yellow-100 text-yellow-800"
+                      : "px-2 py-1 rounded-full bg-gray-100 text-gray-700"
                   }
                 >
                   {sec.approved
@@ -515,20 +519,21 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
                 </div>
 
                 {sec.approvedAt && (
-                  <div className="text-[10px] text-gray-500 whitespace-nowrap">
+                  <div className="text-[10px] text-gray-500">
                     {sec.approvedAt.toLocaleDateString()}
                     {sec.approvedBy ? ` by ${sec.approvedBy}` : ""}
                   </div>
                 )}
 
-                {canApprove && !sec.approved && (
+                {/* Admin can approve */}
+                {!sec.approved && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleApprove(sec.key);
                     }}
                     disabled={approveBusy === sec.key}
-                    className="mt-1 px-2 py-1 rounded-full border text-[10px] hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"
+                    className="mt-1 px-2 py-1 rounded-full border text-[10px] hover:bg-gray-50 disabled:opacity-60"
                   >
                     {approveBusy === sec.key ? "Approving…" : "Approve"}
                   </button>
@@ -536,8 +541,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
               </div>
             </div>
 
-            {/* Collapsible tasks */}
-            {isOpen && (
+            {open && (
               <div className="space-y-2">
                 {sec.tasks.map((t) => (
                   <div
@@ -571,12 +575,13 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
                           {t.order}. {t.title || t.id}
                         </div>
                         {t.required && (
-                          <div className="text-[10px] text-gray-500">Required</div>
+                          <div className="text-[10px] text-gray-500">
+                            Required
+                          </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Week 4 timers */}
                     {key === "week4" && t.timer && (
                       <div className="text-[10px] text-gray-600 sm:text-right whitespace-nowrap">
                         Last: {msToClock(t.timer.lastMs)}{" "}
@@ -596,4 +601,5 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
     </main>
   );
 }
+
 

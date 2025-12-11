@@ -1,4 +1,3 @@
-// app/manager/notes/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -55,6 +54,7 @@ export default function ManagerNotesPage() {
   const [admins, setAdmins] = useState<SimpleUser[]>([]);
   const [trainers, setTrainers] = useState<SimpleUser[]>([]);
   const [trainees, setTrainees] = useState<SimpleUser[]>([]);
+  const [globalUsers, setGlobalUsers] = useState<SimpleUser[]>([]);
 
   const [notes, setNotes] = useState<Note[]>([]);
 
@@ -116,6 +116,26 @@ export default function ManagerNotesPage() {
   }, []);
 
   /* ---------------------------------------------------------
+     LOAD GLOBAL USERS (for name lookup)
+--------------------------------------------------------- */
+  useEffect(() => {
+    async function load() {
+      const snap = await getDocs(collection(db!, "users"));
+      const rows: SimpleUser[] = snap.docs.map((d) => {
+        const data = d.data() as any;
+        return {
+          uid: d.id,
+          email: data.email,
+          name: data.name,
+          role: data.role,
+        };
+      });
+      setGlobalUsers(rows);
+    }
+    load();
+  }, []);
+
+  /* ---------------------------------------------------------
      LOAD ADMINS
   --------------------------------------------------------- */
   useEffect(() => {
@@ -160,7 +180,7 @@ export default function ManagerNotesPage() {
             uid: data.uid ?? d.id,
             email: data.email,
             name: data.name,
-            role: "trainer",
+            role: "trainer", // display as trainer
           };
         })
       );
@@ -227,23 +247,30 @@ export default function ManagerNotesPage() {
   }, [storeId]);
 
   /* ---------------------------------------------------------
-     HELPERS
+     NAME HELPER (GLOBAL)
 --------------------------------------------------------- */
-  function formatTs(ts: Ts) {
-    if (!ts?.seconds) return "—";
-    return new Date(ts.seconds * 1000).toLocaleString();
+  function findName(uid?: string): string {
+    if (!uid) return "";
+
+    const merged = [
+      ...globalUsers,
+      ...admins,
+      ...trainers,
+      ...trainees,
+    ];
+
+    const p = merged.find((x) => x.uid === uid);
+
+    return p?.name || p?.email || uid;
   }
 
-  function findName(uid?: string, fallback?: string): string {
-    if (!uid) return fallback || "";
-    const combined = [...admins, ...trainers, ...trainees];
-    const user = combined.find((u) => u.uid === uid);
-    return user?.name || user?.email || fallback || "";
-  }
-
+  /* ---------------------------------------------------------
+     ROLE DISPLAY
+--------------------------------------------------------- */
   function prettyRole(r?: string) {
     if (!r) return "Unknown";
     if (r === "supervisor") return "Trainer";
+    if (r === "trainer") return "Trainer";
     if (r === "trainee") return "Trainee";
     if (r === "manager") return "Manager";
     if (r === "admin") return "Admin";
@@ -371,7 +398,7 @@ export default function ManagerNotesPage() {
                 </option>
                 {list.map((u) => (
                   <option key={u.uid} value={u.uid}>
-                    {(u.name || u.email) + " — " + prettyRole(u.role)}
+                    {findName(u.uid)} — {prettyRole(u.role)}
                   </option>
                 ))}
               </select>
@@ -423,7 +450,9 @@ export default function ManagerNotesPage() {
                     </div>
 
                     <div className="text-xs text-gray-500">
-                      {formatTs(n.createdAt)}{" "}
+                      {n.createdAt?.seconds
+                        ? new Date(n.createdAt.seconds * 1000).toLocaleString()
+                        : "—"}{" "}
                       {n.source === "root" ? "(Admin channel)" : ""}
                     </div>
                   </div>

@@ -6,14 +6,14 @@ import { useSearchParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import {
   collection,
-  onSnapshot,
   query,
   where,
+  onSnapshot,
+  addDoc,
+  getDocs,
   deleteDoc,
   doc,
-  addDoc,
   serverTimestamp,
-  getDocs,
 } from "firebase/firestore";
 
 type Note = {
@@ -24,13 +24,14 @@ type Note = {
   storeId?: string;
   targetUid?: string | null;
   createdBy?: string | null;
-  createdAt?: { seconds?: number; nanoseconds?: number } | null;
+  createdAt?: { seconds?: number } | null;
 };
 
-type Manager = {
+type Person = {
   uid: string;
-  email?: string;
   name?: string;
+  role?: string;
+  email?: string;
 };
 
 export default function AdminStoreNotesPage() {
@@ -40,15 +41,46 @@ export default function AdminStoreNotesPage() {
   const [loading, setLoading] = useState(true);
   const [notes, setNotes] = useState<Note[]>([]);
 
-  const [managers, setManagers] = useState<Manager[]>([]);
-  const [selectedManager, setSelectedManager] = useState("");
+  const [people, setPeople] = useState<Person[]>([]);
+  const [allUsers, setAllUsers] = useState<Person[]>([]); // ⭐ NEW
 
-  const [textMgr, setTextMgr] = useState("");
+  const [selectedRecipient, setSelectedRecipient] = useState("");
+
+  const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
 
-  // -------------------------------
-  // Load notes sent to admin
-  // -------------------------------
+  /* ---------------------------------------------------------
+     PRETTY ROLE DISPLAY
+  --------------------------------------------------------- */
+  function prettyRole(r?: string) {
+    if (!r) return "Unknown";
+    if (r === "supervisor") return "Trainer";
+    if (r === "manager") return "Manager";
+    if (r === "trainee") return "Trainee";
+    if (r === "admin") return "Admin";
+    return r;
+  }
+
+  /* ---------------------------------------------------------
+     RESOLVE NAME OR EMAIL FOR UID  (Admin, Manager, Trainee, etc.)
+  --------------------------------------------------------- */
+  function resolveName(uid?: string | null) {
+    if (!uid) return null;
+
+    // First check store employees
+    let p = people.find((x) => x.uid === uid);
+
+    // Then check global users (admins + any user in /users)
+    if (!p) p = allUsers.find((x) => x.uid === uid);
+
+    if (!p) return null;
+
+    return p.name?.trim() ? p.name : p.email || null;
+  }
+
+  /* ---------------------------------------------------------
+     LOAD NOTES FOR THIS STORE
+  --------------------------------------------------------- */
   useEffect(() => {
     if (!storeId) return;
 
@@ -56,15 +88,14 @@ export default function AdminStoreNotesPage() {
 
     const qy = query(
       collection(db, "notes"),
-      where("toRole", "==", "admin"),
       where("storeId", "==", String(storeId))
     );
 
     const unsub = onSnapshot(qy, (snap) => {
-      const rows: Note[] = snap.docs.map((d) => ({
+      const rows = snap.docs.map((d) => ({
         id: d.id,
         ...(d.data() as any),
-      }));
+      })) as Note[];
 
       rows.sort(
         (a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
@@ -77,61 +108,66 @@ export default function AdminStoreNotesPage() {
     return () => unsub();
   }, [storeId]);
 
-  // -------------------------------
-  // Load active managers
-  // -------------------------------
+  /* ---------------------------------------------------------
+     LOAD EMPLOYEES FOR THIS STORE
+  --------------------------------------------------------- */
   useEffect(() => {
     if (!storeId) return;
 
     (async () => {
       const coll = collection(db, "stores", String(storeId), "employees");
-      const qy = query(
-        coll,
-        where("active", "==", true),
-        where("role", "==", "manager")
-      );
+      const snap = await getDocs(coll);
 
-      const snap = await getDocs(qy);
-
-      const rows: Manager[] = snap.docs.map((d) => {
+      const rows: Person[] = snap.docs.map((d) => {
         const data = d.data() as any;
         return {
           uid: data.uid || d.id,
-          email: data.email,
-          name: data.name,
+          name: data.name || "",
+          role: data.role || "",
+          email: data.email || "",
         };
       });
 
-      setManagers(rows);
-
-      if (rows.length === 1) {
-        setSelectedManager(rows[0].uid);
-      }
+      setPeople(rows);
     })();
   }, [storeId]);
 
-  // -------------------------------
-  // Delete note
-  // -------------------------------
-  async function removeNote(id: string) {
-    if (!confirm("Remove this note?")) return;
+  /* ---------------------------------------------------------
+     LOAD ALL USERS (ADMINS INCLUDED)
+  --------------------------------------------------------- */
+  useEffect(() => {
+    (async () => {
+      const snap = await getDocs(collection(db, "users"));
 
-    try {
-      await deleteDoc(doc(db, "notes", id));
-    } catch {
-      alert("Could not remove note.");
-    }
-  }
+      const rows: Person[] = snap.docs.map((d) => {
+        const data = d.data() as any;
+        return {
+          uid: d.id,
+          name: data.name || "",
+          role: data.role || "",
+          email: data.email || "",
+        };
+      });
 
-  // -------------------------------
-  // Send note to manager
-  // -------------------------------
-  async function sendToManager() {
-    const clean = textMgr.trim();
+      setAllUsers(rows);
+    })();
+  }, []);
+
+  /* ---------------------------------------------------------
+     SEND NOTE
+  --------------------------------------------------------- */
+  async function sendNote() {
+    const clean = text.trim();
     if (!clean || !storeId) return;
 
-    if (!selectedManager) {
-      alert("Select a manager first.");
+    if (!selectedRecipient) {
+      alert("Choose who to send this to.");
+      return;
+    }
+
+    const recipient = people.find((p) => p.uid === selectedRecipient);
+    if (!recipient) {
+      alert("Recipient not found.");
       return;
     }
 
@@ -141,33 +177,47 @@ export default function AdminStoreNotesPage() {
       await addDoc(collection(db, "notes"), {
         text: clean,
         fromRole: "admin",
-        toRole: "manager",
+        toRole: recipient.role || "employee",
+        targetUid: recipient.uid,
         storeId,
-        targetUid: selectedManager,
         createdBy: auth.currentUser?.uid ?? null,
         createdAt: serverTimestamp(),
       });
 
-      setTextMgr("");
-    } catch {
+      setText("");
+    } catch (e) {
       alert("Could not send note.");
     } finally {
       setSending(false);
     }
   }
 
-  // -------------------------------
-  // Render
-  // -------------------------------
+  /* ---------------------------------------------------------
+     DELETE NOTE
+  --------------------------------------------------------- */
+  async function removeNote(id: string) {
+    if (!confirm("Delete this note?")) return;
+    try {
+      await deleteDoc(doc(db, "notes", id));
+    } catch {
+      alert("Could not remove note.");
+    }
+  }
+
+  /* ---------------------------------------------------------
+     UI
+  --------------------------------------------------------- */
   if (!storeId)
     return (
-      <main className="mx-auto max-w-3xl p-6">Missing ?store=STORE_ID</main>
+      <main className="mx-auto max-w-3xl p-6">
+        Missing ?store=STORE_ID
+      </main>
     );
 
   return (
     <main className="admin-notes mx-auto max-w-3xl p-4 lg:p-6">
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Notes</h1>
+        <h1 className="text-xl font-semibold">Store Notes</h1>
 
         <Link
           href={`/admin/stores/${storeId}`}
@@ -177,11 +227,11 @@ export default function AdminStoreNotesPage() {
         </Link>
       </div>
 
-      {/* ============================== */}
-      {/*     NOTES FROM MANAGER         */}
-      {/* ============================== */}
+      {/* ======================================================
+          NOTE TIMELINE
+      ======================================================= */}
       <section className="section">
-        <div className="section-title">From Manager</div>
+        <div className="section-title">All Store Messages</div>
 
         {loading ? (
           <div className="text-sm text-muted-foreground">Loading…</div>
@@ -189,61 +239,72 @@ export default function AdminStoreNotesPage() {
           <div className="text-sm text-muted-foreground">No messages yet.</div>
         ) : (
           <ul className="space-y-2">
-            {notes.map((n) => (
-              <li key={n.id} className="item-row">
-                <div className="min-w-0">
-                  <div className="meta">
-                    manager → admin{" "}
-                    {n.createdAt?.seconds
-                      ? "• " +
-                        new Date(n.createdAt.seconds * 1000).toLocaleString()
-                      : ""}
-                  </div>
-                  <div className="text-sm whitespace-pre-wrap">{n.text}</div>
-                </div>
+            {notes.map((n) => {
+              const senderName =
+                resolveName(n.createdBy) || prettyRole(n.fromRole);
 
-                <button onClick={() => removeNote(n.id)} className="link-danger">
-                  Remove
-                </button>
-              </li>
-            ))}
+              const recipientName =
+                resolveName(n.targetUid) || prettyRole(n.toRole);
+
+              return (
+                <li key={n.id} className="item-row">
+                  <div className="min-w-0">
+                    <div className="meta">
+                      {senderName} → {recipientName}{" "}
+                      {n.createdAt?.seconds
+                        ? "• " +
+                          new Date(n.createdAt.seconds * 1000).toLocaleString()
+                        : ""}
+                    </div>
+
+                    <div className="text-sm whitespace-pre-wrap">{n.text}</div>
+                  </div>
+
+                  <button
+                    onClick={() => removeNote(n.id)}
+                    className="link-danger"
+                  >
+                    Remove
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
 
-      {/* ============================== */}
-      {/*       REPLY TO MANAGER         */}
-      {/* ============================== */}
+      {/* ======================================================
+          SEND MESSAGE
+      ======================================================= */}
       <section className="section">
-        <div className="section-title">Send a note to Manager</div>
+        <div className="section-title">Send a Note</div>
 
-        {/* Manager dropdown */}
         <select
-          value={selectedManager}
-          onChange={(e) => setSelectedManager(e.target.value)}
+          value={selectedRecipient}
+          onChange={(e) => setSelectedRecipient(e.target.value)}
           className="input mb-2"
         >
-          <option value="">Select manager…</option>
-          {managers.map((m) => (
-            <option key={m.uid} value={m.uid}>
-              {m.email || m.name || m.uid}
+          <option value="">Send to…</option>
+
+          {people.map((p) => (
+            <option key={p.uid} value={p.uid}>
+              {(p.name || p.email || p.uid) + " — " + prettyRole(p.role)}
             </option>
           ))}
         </select>
 
-        {/* Message box */}
         <textarea
           rows={3}
           placeholder="Type your note…"
           className="input"
-          value={textMgr}
-          onChange={(e) => setTextMgr(e.target.value)}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
         />
 
         <div className="actions">
           <button
-            onClick={sendToManager}
-            disabled={sending || !textMgr.trim()}
+            onClick={sendNote}
+            disabled={sending || !text.trim()}
             className="btn-neutral"
           >
             Send
@@ -251,7 +312,9 @@ export default function AdminStoreNotesPage() {
         </div>
       </section>
 
-      {/* MATCHING STYLES (copied from manager version) */}
+      {/* ======================================================
+          STYLES
+      ======================================================= */}
       <style jsx global>{`
         .admin-notes {
           --line: #eaecef;
@@ -310,4 +373,6 @@ export default function AdminStoreNotesPage() {
     </main>
   );
 }
+
+
 

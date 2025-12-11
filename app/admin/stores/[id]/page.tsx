@@ -1,3 +1,4 @@
+// app/admin/stores/[id]/page.tsx
 import Link from "next/link";
 import { adminDb } from "@/lib/firebase-admin";
 
@@ -17,6 +18,13 @@ type StoreDoc = {
 };
 
 type AnyDoc = Record<string, any>;
+
+type Trainee = {
+  id: string;   // store trainee doc id
+  uid: string;  // actual user uid
+  name: string;
+  pct: number;
+};
 
 function clamp(n: number) {
   return Math.max(0, Math.min(100, Math.round(n)));
@@ -98,7 +106,7 @@ export default async function StorePage({ params }: StorePageProps) {
   if (!store) return <main className="p-6">Store not found</main>;
 
   // ---------------------------
-  // 🔥 FIXED MANAGER LOOKUP 🔥
+  // Manager lookup
   // ---------------------------
   let managerLabel: string | null = null;
 
@@ -115,17 +123,17 @@ export default async function StorePage({ params }: StorePageProps) {
       mgr.email ||
       null;
   }
+
   // ---------------------------
-
   // Trainees
+  // ---------------------------
   const traineesSnap = await storeRef.collection("trainees").get();
-
   const programTotalTasks = await getProgramTotalTasks();
 
-  const trainees = await Promise.all(
+  const trainees: Trainee[] = await Promise.all(
     traineesSnap.docs.map(async (row, i) => {
       const data = row.data() as AnyDoc;
-      const uid = (data.traineeId as string) || row.id;
+      const uid: string = (data.traineeId as string) || row.id;
 
       const name =
         (typeof data.displayName === "string" && data.displayName.trim()) ||
@@ -137,7 +145,12 @@ export default async function StorePage({ params }: StorePageProps) {
         pct = await getTraineePercent(uid, programTotalTasks);
       }
 
-      return { id: row.id, name, pct: clamp(pct || 0) };
+      return {
+        id: row.id,
+        uid,
+        name,
+        pct: clamp(pct || 0),
+      };
     })
   );
 
@@ -174,22 +187,26 @@ export default async function StorePage({ params }: StorePageProps) {
           ) : (
             <ul className="mt-2 grid gap-3 grid-cols-1 sm:grid-cols-2">
               {trainees.map((t) => (
-                <li
-                  key={t.id}
-                  className="rounded-lg border border-[var(--line,#eaecef)] bg-white p-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium text-sm truncate">{t.name}</div>
-                    <div className="ml-3 text-xs text-muted-foreground tabular-nums">
-                      {t.pct}%
+                <li key={t.id}>
+                  <Link
+                    href={`/admin/trainees/${t.uid}?store=${storeId}`}
+                    className="block rounded-lg border border-[var(--line,#eaecef)] bg-white p-3 hover:bg-[var(--muted,#f8f9fb)]"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-medium text-sm truncate">
+                        {t.name}
+                      </div>
+                      <div className="ml-3 text-xs text-muted-foreground tabular-nums">
+                        {t.pct}%
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-2 h-2 w-full rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-blue-500"
-                      style={{ width: `${t.pct}%` }}
-                    />
-                  </div>
+                    <div className="mt-2 h-2 w-full rounded-full bg-gray-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-blue-500"
+                        style={{ width: `${t.pct}%` }}
+                      />
+                    </div>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -224,6 +241,5 @@ export default async function StorePage({ params }: StorePageProps) {
     </main>
   );
 }
-
 
 

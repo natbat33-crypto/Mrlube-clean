@@ -21,8 +21,8 @@ type Emp = {
   name?: string;
   email?: string;
   active?: boolean;
-  supervisor?: string; // where assignTrainee likely writes
-  trainer?: string;    // future-safe if you rename field
+  supervisor?: string; // Firestore field (still exists)
+  trainer?: string;    // Future-proof field if added
 };
 
 type Store = {
@@ -62,13 +62,14 @@ export default function ManagerDashboard() {
   const [storeId, setStoreId] = useState<string | null>(null);
   const [store, setStore] = useState<Store | null>(null);
 
-  const [supervisors, setSupervisors] = useState<Emp[]>([]);
+  // SUPERVISORS → TRAINERS
+  const [trainers, setTrainers] = useState<Emp[]>([]);
   const [trainees, setTrainees] = useState<Emp[]>([]);
   const [everyone, setEveryone] = useState<Emp[]>([]);
   const [openStaff, setOpenStaff] = useState(false);
 
   const [selTrainee, setSelTrainee] = useState("");
-  const [selSupervisor, setSelSupervisor] = useState("");
+  const [selTrainer, setSelTrainer] = useState("");
   const [status, setStatus] = useState("");
 
   const [loading, setLoading] = useState(true);
@@ -130,27 +131,30 @@ export default function ManagerDashboard() {
     let alive = true;
     (async () => {
       try {
-        const [supList, trnList, all] = await Promise.all([
-          loadRole("supervisor"),
-          loadRole("trainee"),
-          (async () => {
-            const s = await getDocs(
-              query(
-                collection(db, "stores", storeId, "employees"),
-                where("active", "==", true)
-              )
-            );
-            return s.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
-          })(),
-        ]);
+        // Load trainers (old role: supervisor)
+        const supList = await loadRole("supervisor");
+
+        // Load trainees
+        const trnList = await loadRole("trainee");
+
+        // Load all employees
+        const all = await (async () => {
+          const s = await getDocs(
+            query(
+              collection(db, "stores", storeId, "employees"),
+              where("active", "==", true)
+            )
+          );
+          return s.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
+        })();
 
         if (!alive) return;
 
-        setSupervisors(supList);
+        setTrainers(supList); // STILL "supervisor" in DB but shown as trainer
         setTrainees(trnList);
         setEveryone(all);
       } catch {
-        // ignore for now, page will just show empty lists
+        // ignore
       }
     })();
 
@@ -175,13 +179,11 @@ export default function ManagerDashboard() {
         const snap = await getDocs(collection(db, "users", t.uid, "progress"));
 
         let done = 0;
-
         snap.forEach((d) => {
           const taskId = d.id;
           if (!realTasks.includes(taskId)) return;
 
           const v: any = d.data();
-
           const isDone =
             v.done === true ||
             v.completed === true ||
@@ -204,13 +206,13 @@ export default function ManagerDashboard() {
     };
   }, [trainees]);
 
-  /* ---------- assign trainee ---------- */
+  /* ---------- assign trainee → trainer ---------- */
   async function doAssign() {
-    if (!uid || !storeId || !selTrainee || !selSupervisor) return;
+    if (!uid || !storeId || !selTrainee || !selTrainer) return;
 
     try {
       setStatus("Assigning…");
-      await assignTrainee(storeId, selTrainee, selSupervisor);
+      await assignTrainee(storeId, selTrainee, selTrainer);
       setStatus("Assigned ✓");
       setTimeout(() => setStatus(""), 1200);
     } catch {
@@ -218,21 +220,20 @@ export default function ManagerDashboard() {
     }
   }
 
-  /* ---------- helper: find trainer for a trainee ---------- */
+  /* ---------- helper: find trainer for trainee ---------- */
   function getTrainerLabelForTrainee(traineeId: string): string | null {
-    // find this trainee’s employee doc in the store
     const empDoc = everyone.find((e) => e.uid === traineeId);
     if (!empDoc) return null;
 
     const trainerUid =
-      (empDoc.trainer as string | undefined) ||
-      (empDoc.supervisor as string | undefined);
+      empDoc.trainer ||
+      empDoc.supervisor; // DB still uses supervisor until new schema
 
     if (!trainerUid) return null;
 
     const trainerEmp =
       everyone.find((e) => e.uid === trainerUid) ||
-      supervisors.find((s) => s.uid === trainerUid);
+      trainers.find((s) => s.uid === trainerUid);
 
     if (!trainerEmp) return null;
 
@@ -244,7 +245,6 @@ export default function ManagerDashboard() {
   if (loading) return <main className="p-8">Loading…</main>;
   if (!storeId) return <main className="p-8">No store assigned.</main>;
 
-  // employees list should not duplicate trainees
   const nonTraineeEmployees = everyone.filter(
     (e) => e.active && String(e.role || "").toLowerCase() !== "trainee"
   );
@@ -253,9 +253,7 @@ export default function ManagerDashboard() {
     <main className="max-w-5xl mx-auto p-6 space-y-6">
       {store && (
         <section className="rounded-2xl border bg-white p-5">
-          <div className="text-lg font-semibold">
-            Store #{store.number}
-          </div>
+          <div className="text-lg font-semibold">Store #{store.number}</div>
           <div className="text-sm">{store.name}</div>
           <div className="text-sm">{store.address}</div>
         </section>
@@ -293,11 +291,12 @@ export default function ManagerDashboard() {
 
         {openStaff && (
           <div className="mt-5 space-y-6">
-            {/* Trainers (formerly Supervisors) */}
+            
+            {/* TRAINERS */}
             <Block title="Trainers">
-              {supervisors.length === 0
+              {trainers.length === 0
                 ? "No trainers yet."
-                : supervisors.map((s) => (
+                : trainers.map((s) => (
                     <div
                       key={s.uid}
                       className="text-xs sm:text-sm break-words whitespace-normal"
@@ -307,7 +306,7 @@ export default function ManagerDashboard() {
                   ))}
             </Block>
 
-            {/* Trainees */}
+            {/* TRAINEES */}
             <Block title="Trainees">
               {trainees.length === 0
                 ? "No trainees yet."
@@ -354,7 +353,7 @@ export default function ManagerDashboard() {
                   })}
             </Block>
 
-            {/* Employees (non-trainee) */}
+            {/* EMPLOYEES */}
             <Block title="Employees">
               {nonTraineeEmployees.length === 0
                 ? "No employees yet."
@@ -366,10 +365,7 @@ export default function ManagerDashboard() {
                       <div className="break-words whitespace-normal">
                         {e.name || e.email}
                         {e.email && e.name && (
-                          <span className="text-gray-500">
-                            {" "}
-                            • {e.email}
-                          </span>
+                          <span className="text-gray-500"> • {e.email}</span>
                         )}
                       </div>
                       <div className="text-[11px] sm:text-xs text-gray-600">
@@ -379,7 +375,7 @@ export default function ManagerDashboard() {
                   ))}
             </Block>
 
-            {/* Assign */}
+            {/* ASSIGN TRAINEE TO TRAINER */}
             <section className="border rounded-2xl bg-white p-5">
               <h3 className="font-semibold mb-3">
                 Assign Trainee → Trainer
@@ -405,12 +401,12 @@ export default function ManagerDashboard() {
                 <label className="text-sm">
                   Trainer
                   <select
-                    value={selSupervisor}
-                    onChange={(e) => setSelSupervisor(e.target.value)}
+                    value={selTrainer}
+                    onChange={(e) => setSelTrainer(e.target.value)}
                     className="mt-1 w-full border rounded-md p-2 text-sm"
                   >
                     <option value="">Select trainer…</option>
-                    {supervisors.map((s) => (
+                    {trainers.map((s) => (
                       <option key={s.uid} value={s.uid}>
                         {s.name || s.email}
                       </option>
@@ -422,7 +418,7 @@ export default function ManagerDashboard() {
               <div className="mt-3 flex items-center gap-3">
                 <button
                   onClick={doAssign}
-                  disabled={!selTrainee || !selSupervisor}
+                  disabled={!selTrainee || !selTrainer}
                   className="border px-3 py-1 rounded text-sm hover:bg-gray-50 disabled:opacity-60"
                 >
                   Assign
