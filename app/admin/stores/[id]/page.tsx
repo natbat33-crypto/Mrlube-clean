@@ -125,6 +125,29 @@ export default async function StorePage({ params }: StorePageProps) {
   }
 
   // ---------------------------
+  // Trainers (supervisors)
+  // ---------------------------
+  const trainersSnap = await storeRef
+    .collection("employees")
+    .where("role", "in", ["trainer", "supervisor"])
+    .get();
+
+  const trainers: string[] = await Promise.all(
+    trainersSnap.docs.map(async (doc) => {
+      const d = doc.data() as AnyDoc;
+      const label =
+        d.displayName ||
+        d.name ||
+        d.email ||
+        (await resolveUserLabel(d.uid)) ||
+        null;
+      return label;
+    })
+  );
+
+  trainers.sort((a, b) => a.localeCompare(b));
+
+  // ---------------------------
   // Trainees
   // ---------------------------
   const traineesSnap = await storeRef.collection("trainees").get();
@@ -174,6 +197,28 @@ export default async function StorePage({ params }: StorePageProps) {
             </div>
           ) : (
             <p className="mt-1 text-sm text-muted-foreground">Unassigned</p>
+          )}
+        </section>
+
+        {/* Trainers */}
+        <section className="mt-6">
+          <h2 className="text-sm font-semibold">Trainers</h2>
+
+          {!trainers.length ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              No trainers found for this store.
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-1">
+              {trainers.map((t, i) => (
+                <li
+                  key={i}
+                  className="inline-flex items-center rounded-full border border-[var(--line,#eaecef)] bg-white px-2 py-0.5 text-[12px]"
+                >
+                  {t}
+                </li>
+              ))}
+            </ul>
           )}
         </section>
 

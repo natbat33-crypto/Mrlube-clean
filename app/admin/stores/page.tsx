@@ -3,7 +3,12 @@
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  orderBy,
+  query,
+} from "firebase/firestore";
 import {
   Card,
   CardContent,
@@ -19,8 +24,124 @@ type Store = {
   address: string;
 };
 
+type StoreWithProgress = Store & {
+  progress?: number;
+};
+
+function clamp(n: number) {
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+// Count ALL active tasks in the program (Day1 + Weeks 1–4)
+async function getProgramTotalTasks(): Promise<number> {
+  let total = 0;
+
+  // Weeks (modules)
+  try {
+    const modulesSnap = await getDocs(collection(db, "modules"));
+    for (const mod of modulesSnap.docs) {
+      const tasksSnap = await getDocs(
+        collection(mod.ref, "tasks")
+      );
+      tasksSnap.forEach((t) => {
+        const td = t.data() as any;
+        if (td.active === false) return;
+        total += 1;
+      });
+    }
+  } catch (e) {
+    console.error("Error loading modules tasks for progress:", e);
+  }
+
+  // Day 1 (days)
+  try {
+    const daysSnap = await getDocs(collection(db, "days"));
+    for (const dayDoc of daysSnap.docs) {
+      const tasksSnap = await getDocs(
+        collection(dayDoc.ref, "tasks")
+      );
+      tasksSnap.forEach((t) => {
+        const td = t.data() as any;
+        if (td.active === false) return;
+        total += 1;
+      });
+    }
+  } catch (e) {
+    console.error("Error loading days tasks for progress:", e);
+  }
+
+  return total;
+}
+
+// Get a single trainee's % completed
+async function getTraineePercent(
+  uid: string,
+  programTotalTasks: number
+): Promise<number> {
+  if (!uid || programTotalTasks <= 0) return 0;
+
+  try {
+    const progSnap = await getDocs(
+      collection(db, "users", uid, "progress")
+    );
+
+    if (progSnap.empty) return 0;
+
+    let completed = 0;
+    progSnap.forEach((doc) => {
+      const d = doc.data() as any;
+      if (d.done === true || d.completed === true || d.approved === true) {
+        completed += 1;
+      }
+    });
+
+    return clamp((completed / programTotalTasks) * 100);
+  } catch (e) {
+    console.error("Error loading trainee progress:", e);
+    return 0;
+  }
+}
+
+// Get one store's overall training % (avg of all trainees)
+async function getStoreProgress(
+  storeId: string,
+  programTotalTasks: number
+): Promise<number> {
+  if (!storeId || programTotalTasks <= 0) return 0;
+
+  try {
+    const employeesSnap = await getDocs(
+      collection(db, "stores", storeId, "employees")
+    );
+
+    const traineeUids: string[] = [];
+    employeesSnap.forEach((doc) => {
+      const data = doc.data() as any;
+      if (data.role === "trainee" && data.uid) {
+        traineeUids.push(data.uid as string);
+      }
+    });
+
+    if (traineeUids.length === 0) {
+      return 0;
+    }
+
+    let sum = 0;
+    for (const uid of traineeUids) {
+      const pct = await getTraineePercent(uid, programTotalTasks);
+      sum += pct;
+    }
+
+    const avg = sum / traineeUids.length;
+    return clamp(avg);
+  } catch (e) {
+    console.error("Error computing store progress:", e);
+    return 0;
+  }
+}
+
 export default function StoresPage() {
-  const [stores, setStores] = useState<Store[]>([]);
+  const [stores, setStores] = useState<StoreWithProgress[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,14 +151,41 @@ export default function StoresPage() {
       try {
         setLoading(true);
 
-        const qy = query(collection(db, "stores"), orderBy("number", "asc"));
+        // 1️⃣ Load stores
+        const qy = query(
+          collection(db, "stores"),
+          orderBy("number", "asc")
+        );
         const snap = await getDocs(qy);
 
-        const list: Store[] = [];
-        snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) }));
+        const baseList: Store[] = [];
+        snap.forEach((d) =>
+          baseList.push({ id: d.id, ...(d.data() as any) })
+        );
 
         if (!alive) return;
-        setStores(list);
+
+        // 2️⃣ Get total tasks once
+        const programTotalTasks = await getProgramTotalTasks();
+
+        // 3️⃣ For each store, compute overall % (avg trainee %)
+        const listWithProgress: StoreWithProgress[] = [];
+
+        for (const store of baseList) {
+          const progress = await getStoreProgress(
+            store.id,
+            programTotalTasks
+          );
+          listWithProgress.push({
+            ...store,
+            progress,
+          });
+        }
+
+        if (!alive) return;
+        setStores(listWithProgress);
+      } catch (e) {
+        console.error("Error loading stores:", e);
       } finally {
         if (alive) setLoading(false);
       }
@@ -66,8 +214,24 @@ export default function StoresPage() {
             </CardHeader>
 
             <CardContent className="pt-3">
-              {/* FIXED — always show address, no clamp */}
+              {/* Address */}
               <div className="text-sm">{s.address}</div>
+
+              {/* Store Progress */}
+              {typeof s.progress === "number" ? (
+                <div className="mt-3">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    Training Progress: {s.progress}%
+                  </div>
+
+                  <div className="mt-1 h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 rounded-full transition-all"
+                      style={{ width: `${s.progress}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         </Link>
@@ -107,3 +271,4 @@ export default function StoresPage() {
     </main>
   );
 }
+
