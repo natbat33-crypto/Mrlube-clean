@@ -86,33 +86,18 @@ const TraineeNotesCardWrapper: FC<TraineeNotesCardWrapperProps> = ({
   return <TraineeNotesCard {...({ storeId, traineeUid } as any)} />;
 };
 
-/* ------------------ GATING LOGIC ------------------ */
-// Check if every task in the requested week is approved
-async function checkWeekApproved(
-  traineeUid: string,
-  weekNum: number
-): Promise<boolean> {
-  const progSnap = await getDocs(
-    collection(db, "users", traineeUid, "progress")
-  );
-  const tasks: any[] = [];
+/* ------------------ AUTHORITY (SOURCE OF TRUTH) ------------------ */
+/**
+ * Source of truth:
+ * users/{uid}/sections/{sectionId}.approved === true => approved
+ * missing/false/undefined => not approved
+ *
+ * IMPORTANT: use onSnapshot so old users get locked immediately when approvals change.
+ */
+type SectionId = "day1" | "week1" | "week2" | "week3";
 
-  progSnap.forEach((d: any) => {
-    const data: any = d.data();
-    if (!data?.week || !data?.done) return;
-
-    // week field like "week1", "week2", etc
-    const match = String(data.week).match(/^week(\d)$/i);
-    if (!match) return;
-
-    const num = Number(match[1]);
-    if (num === weekNum) {
-      tasks.push(data);
-    }
-  });
-
-  if (tasks.length === 0) return false;
-  return tasks.every((t) => t.approved === true);
+function sectionRef(uid: string, sectionId: SectionId) {
+  return doc(db, "users", uid, "sections", sectionId);
 }
 
 /* ------------------ main page ------------------ */
@@ -128,12 +113,20 @@ export default function DashboardPage() {
 
   const [weekDone, setWeekDone] = useState<Record<number, number>>({});
 
-  // week gating: 1 is always unlocked, others depend on previous approvals
+  // 🔒 week gating (AUTHORITY)
   const [weekUnlocked, setWeekUnlocked] = useState<Record<number, boolean>>({
-    1: true,
+    1: false,
     2: false,
     3: false,
     4: false,
+  });
+
+  // local approved flags (live)
+  const [approved, setApproved] = useState<Record<SectionId, boolean>>({
+    day1: false,
+    week1: false,
+    week2: false,
+    week3: false,
   });
 
   /* ---------- resolve trainee + store ---------- */
@@ -183,12 +176,8 @@ export default function DashboardPage() {
   /* ---------- reset progress when trainee changes ---------- */
   useEffect(() => {
     setWeekDone({});
-    setWeekUnlocked({
-      1: true,
-      2: false,
-      3: false,
-      4: false,
-    });
+    setWeekUnlocked({ 1: false, 2: false, 3: false, 4: false });
+    setApproved({ day1: false, week1: false, week2: false, week3: false });
   }, [traineeUid]);
 
   /* ---------- ensure Day1 doc ---------- */
@@ -291,35 +280,40 @@ export default function DashboardPage() {
     };
   }, [traineeUid]);
 
-  /* ---------- COMPUTE GATES ---------- */
+  /* ---------- LIVE AUTHORITY SUBSCRIPTIONS (NO HISTORY, CURRENT STATE WINS) ---------- */
   useEffect(() => {
     if (!traineeUid) return;
 
-    let cancelled = false;
+    const unsubs: Array<() => void> = [];
 
-    (async () => {
-      try {
-        const w1 = await checkWeekApproved(traineeUid, 1);
-        const w2 = await checkWeekApproved(traineeUid, 2);
-        const w3 = await checkWeekApproved(traineeUid, 3);
+    (["day1", "week1", "week2", "week3"] as SectionId[]).forEach((sid) => {
+      const unsub = onSnapshot(
+        sectionRef(traineeUid, sid),
+        (snap) => {
+          const ok = snap.exists() && snap.data()?.approved === true;
+          setApproved((prev) => (prev[sid] === ok ? prev : { ...prev, [sid]: ok }));
+        },
+        (e) => console.error(`[dashboard] sections/${sid} snapshot error`, e)
+      );
+      unsubs.push(unsub);
+    });
 
-        if (cancelled) return;
+    return () => unsubs.forEach((u) => u());
+  }, [traineeUid]);
 
-        setWeekUnlocked({
-          1: true,
-          2: w1, // unlock week2 when week1 approved
-          3: w2, // unlock week3 when week2 approved
-          4: w3, // unlock week4 when week3 approved
-        });
-      } catch (e) {
-        console.error("Error computing week gating:", e);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [traineeUid, weekDone]); // re-check when trainee or counts change
+  /* ---------- COMPUTE GATES (AUTHORITATIVE, CURRENT STATE) ---------- */
+  useEffect(() => {
+    // Week1 requires day1 approved
+    // Week2 requires week1 approved
+    // Week3 requires week2 approved
+    // Week4 requires week3 approved
+    setWeekUnlocked({
+      1: approved.day1 === true,
+      2: approved.week1 === true,
+      3: approved.week2 === true,
+      4: approved.week3 === true,
+    });
+  }, [approved.day1, approved.week1, approved.week2, approved.week3]);
 
   const list = loadingWeeks ? defaultComingSoon() : cards;
   const isResolving = resolvingStore;
@@ -377,6 +371,11 @@ export default function DashboardPage() {
 
             const unlocked = weekUnlocked[c.week] ?? false;
 
+            const lockMsg =
+              c.week === 1
+                ? "Complete Day 1 to unlock"
+                : "Complete previous section to unlock";
+
             const cardBody = (
               <Card
                 className={`border-primary/20 ${
@@ -402,9 +401,7 @@ export default function DashboardPage() {
                       className="h-2 [&>div]:bg-yellow-400"
                     />
                     {!unlocked && (
-                      <p className="text-xs text-red-500">
-                        Complete previous week to unlock
-                      </p>
+                      <p className="text-xs text-red-500">{lockMsg}</p>
                     )}
                     <p className="text-xs text-muted-foreground">
                       {done}/{c.total} tasks completed
@@ -414,7 +411,7 @@ export default function DashboardPage() {
               </Card>
             );
 
-            // If no href or locked, just render a div (no navigation)
+            // locked OR missing href => not clickable
             if (!unlocked || !c.href) {
               return (
                 <div key={`week-${c.week}`} className="block">
@@ -423,7 +420,6 @@ export default function DashboardPage() {
               );
             }
 
-            // href is guaranteed string here
             return (
               <Link key={`link-${c.week}`} href={c.href} className="block">
                 {cardBody}
@@ -548,9 +544,7 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
           return;
         }
         const p = snap.data() as any;
-        const doneIds: string[] = Array.isArray(p?.doneIds)
-          ? p.doneIds
-          : [];
+        const doneIds: string[] = Array.isArray(p?.doneIds) ? p.doneIds : [];
         setDone(doneIds.length);
       },
       (e: unknown) => console.error("Day1 progress snapshot error:", e)
@@ -568,9 +562,7 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
       <Card className="border-primary/20">
         <CardHeader className="pb-2 lg:pb-3">
           <CardTitle className="text-base lg:text-lg">{title}</CardTitle>
-          <CardDescription className="text-xs lg:text-sm">
-            Day 1
-          </CardDescription>
+          <CardDescription className="text-xs lg:text-sm">Day 1</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
@@ -588,4 +580,5 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
     </Link>
   );
 };
+
 

@@ -6,7 +6,13 @@ import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 
-type AllowedRole = "admin" | "manager" | "supervisor" | "trainee" | "employee";
+type AllowedRole =
+  | "admin"
+  | "gm"
+  | "manager"
+  | "supervisor"
+  | "trainee"
+  | "employee";
 
 interface Props {
   allow: AllowedRole[];
@@ -65,7 +71,6 @@ export default function RoleGate({ allow, children }: Props) {
     return () => unsub();
   }, [allow, router]);
 
-  // Show loader while waiting (no redirect, no flicker)
   if (phase === "checking") {
     return (
       <div className="min-h-screen flex items-center justify-center text-gray-500">

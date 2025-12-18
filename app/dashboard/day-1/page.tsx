@@ -205,6 +205,7 @@ export default function Day1Page() {
 
   /* ---------------------------------------
      Auto-create /sections/day1 on complete
+     ✅ IMPORTANT: trainee NEVER writes `approved`
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
@@ -212,17 +213,18 @@ export default function Day1Page() {
     const allComplete =
       tasks.length > 0 && tasks.every((t) => t.done === true);
 
-    if (allComplete) {
-      setDoc(
-        doc(db, "users", uid, "sections", "day1"),
-        {
-          completed: true,
-          approved: false,
-          completedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
+    if (!allComplete) return;
+
+    setDoc(
+      doc(db, "users", uid, "sections", "day1"),
+      {
+        completed: true,
+        completedAt: serverTimestamp(),
+        // DO NOT WRITE approved HERE
+        // approved is authority and must be set only by trainer/supervisor/admin
+      },
+      { merge: true }
+    );
   }, [uid, tasks]);
 
   /* ---------------------------------------
@@ -404,4 +406,5 @@ export default function Day1Page() {
     </main>
   );
 }
+
 

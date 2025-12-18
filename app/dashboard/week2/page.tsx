@@ -3,22 +3,25 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { db, auth } from "@/lib/firebase";
-import { getStoreId } from "@/lib/getStoreId";
 import {
   collection,
   getDocs,
   orderBy,
   query,
   setDoc,
-  updateDoc,
   doc,
   serverTimestamp,
   deleteField,
   onSnapshot,
+  where,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
+/* ----------------------------------
+   TYPES
+---------------------------------- */
 type Task = {
   id: string;
   title?: string;
@@ -33,15 +36,25 @@ const NAVY = "#0b3d91";
 const GREEN = "#2e7d32";
 const GRAY = "#e9e9ee";
 
+/* ----------------------------------
+   MAIN
+---------------------------------- */
 export default function Week2Page() {
+  const router = useRouter();
+
   const [uid, setUid] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [approvedById, setApprovedById] = useState<Record<string, boolean>>({});
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  // 1. Get logged-in user
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  // 🔒 AUTHORITY
+  const [week1Approved, setWeek1Approved] = useState<boolean | null>(null);
+
+  /* ----------------------------------
+     AUTH
+  ---------------------------------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUid(u?.uid ?? null);
@@ -50,7 +63,28 @@ export default function Week2Page() {
     return unsub;
   }, []);
 
-  // 2. Load Week 2 tasks
+  /* ----------------------------------
+     🔒 WEEK 1 AUTHORITY (LIVE)
+  ---------------------------------- */
+  useEffect(() => {
+    if (!uid) return;
+
+    const ref = doc(db, "users", uid, "sections", "week1");
+    const unsub = onSnapshot(ref, (snap) => {
+      const ok = snap.exists() && snap.data()?.approved === true;
+      setWeek1Approved(ok);
+
+      if (!ok) {
+        router.replace("/dashboard");
+      }
+    });
+
+    return unsub;
+  }, [uid, router]);
+
+  /* ----------------------------------
+     LOAD TASK DEFINITIONS
+  ---------------------------------- */
   useEffect(() => {
     let alive = true;
 
@@ -60,23 +94,16 @@ export default function Week2Page() {
         const q = query(col, orderBy("order", "asc"));
         const snap = await getDocs(q);
 
-        const list: Task[] = snap.docs
-          .map((d) => {
-            const data = d.data() as any;
-            const { done, ...rest } = data || {};
-            return { id: d.id, ...(rest as Partial<Task>) };
-          })
-          .sort(
-            (a, b) =>
-              num(a.order ?? a.sort_order) - num(b.order ?? b.sort_order)
-          );
+        const list: Task[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Partial<Task>),
+        }));
 
         if (alive) {
           setTasks(list);
           setErr(null);
         }
       } catch (e: any) {
-        console.error("[Week2] fetch error:", e);
         if (alive) {
           setErr(e?.message ?? String(e));
           setTasks([]);
@@ -91,126 +118,71 @@ export default function Week2Page() {
     };
   }, []);
 
-  // Hydrate DONE from progress docs
+  /* ----------------------------------
+     LOAD USER PROGRESS
+  ---------------------------------- */
   useEffect(() => {
-    if (!uid || !tasks.length) return;
-    let alive = true;
+    if (!uid || tasks.length === 0) return;
 
     (async () => {
       try {
-        const progCol = collection(db, "users", uid, "progress");
-        const snap = await getDocs(progCol);
+        const col = collection(db, "users", uid, "progress");
+        const q = query(col, where("week", "==", "week2"));
+        const snap = await getDocs(q);
 
-        const doneById: Record<string, boolean> = {};
-
+        const doneMap: Record<string, boolean> = {};
         snap.forEach((d) => {
           const data = d.data() as any;
-          if (!data?.done) return;
-          if (data.week !== "week2") return;
-
-          const key = d.id;
-          const m = key.match(/^modules__week2__tasks__(.+)$/);
-          if (!m) return;
-          const taskId = m[1];
-          doneById[taskId] = true;
+          if (!data.done) return;
+          const parts = d.id.split("__");
+          doneMap[parts[parts.length - 1]] = true;
         });
 
-        if (!alive) return;
-        if (Object.keys(doneById).length === 0) return;
-
         setTasks((prev) =>
-          prev.map((t) => (doneById[t.id] ? { ...t, done: true } : t))
+          prev.map((t) => ({ ...t, done: !!doneMap[t.id] }))
         );
       } catch {}
     })();
-
-    return () => {
-      alive = false;
-    };
   }, [uid, tasks.length]);
 
-  // Realtime approvals
+  /* ----------------------------------
+     ✅ AUTO-CREATE sections/week2
+     (trainee never writes approved)
+  ---------------------------------- */
   useEffect(() => {
-    if (!uid || !tasks.length) return;
+    if (!uid) return;
 
-    const unsubs = tasks.map((t) => {
-      const key = `modules__week2__tasks__${t.id}`;
-      return onSnapshot(doc(db, "users", uid, "progress", key), (snap) => {
-        const approved = !!snap.data()?.approved;
-        setApprovedById((prev) =>
-          prev[t.id] === approved ? prev : { ...prev, [t.id]: approved }
-        );
-      });
-    });
+    const allDone =
+      tasks.length > 0 && tasks.every((t) => t.done === true);
 
-    return () => unsubs.forEach((u) => u && u());
+    if (!allDone) return;
+
+    setDoc(
+      doc(db, "users", uid, "sections", "week2"),
+      {
+        completed: true,
+        completedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
   }, [uid, tasks]);
 
-  const doneCount = useMemo(
-    () => tasks.filter((t) => t.done).length,
-    [tasks]
-  );
-  const pct = useMemo(
-    () =>
-      tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0,
-    [doneCount, tasks.length]
-  );
-
-  // 4. Toggle Task (FIX ADDED)
-  async function toggleTask(id: string, next: boolean) {
-    if (!uid) {
-      alert("Please log in to save your progress.");
-      return;
-    }
-
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, done: next } : t))
-    );
-
-    try {
-      try {
-        await setDoc(
-          doc(db, "modules", "week2", "tasks", id),
-          {
-            done: next,
-            completedAt: next ? serverTimestamp() : deleteField(),
-          },
-          { merge: true }
-        );
-      } catch {}
-
-      const key = `modules__week2__tasks__${id}`;
-      const t = tasks.find((x) => x.id === id);
-      const storeId = await getStoreId();
-
-      await setDoc(
-        doc(db, "users", uid, "progress", key),
-        {
-          storeId: storeId || "",
-          traineeId: uid,
-          createdBy: uid,
-          week: "week2",
-
-          // ⭐ REQUIRED FOR SUPERVISOR TO SEE THE TASK
-          path: `modules/week2/tasks/${id}`,
-
-          title: t?.title ?? id,
-          done: next,
-          completedAt: next ? serverTimestamp() : deleteField(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    } catch (e) {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, done: !next } : t))
-      );
-      alert("Failed to save. Check Firestore rules.");
-    }
+  /* ----------------------------------
+     BLOCK UNTIL AUTH RESOLVED
+  ---------------------------------- */
+  if (authLoading || loading || week1Approved === null) {
+    return <main style={{ padding: 24 }}>Checking access…</main>;
   }
 
-  if (authLoading || loading)
-    return <main style={{ padding: 24 }}>Loading…</main>;
+  if (week1Approved === false) {
+    return <main style={{ padding: 24 }}>Access denied.</main>;
+  }
+
+  /* ----------------------------------
+     UI
+  ---------------------------------- */
+  const doneCount = tasks.filter((t) => t.done).length;
+  const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
@@ -226,6 +198,7 @@ export default function Week2Page() {
             borderRadius: 999,
             padding: "8px 14px",
             fontWeight: 600,
+            textDecoration: "none",
             color: NAVY,
           }}
         >
@@ -233,16 +206,13 @@ export default function Week2Page() {
         </Link>
       </div>
 
-      <h2 style={{ margin: "0 0 6px 0" }}>Week 2 — Tasks</h2>
+      <h2>Week 2</h2>
+
       <div style={{ fontSize: 14, marginBottom: 6 }}>
         {doneCount}/{tasks.length} completed ({pct}%)
       </div>
 
       <div
-        role="progressbar"
-        aria-valuenow={pct}
-        aria-valuemin={0}
-        aria-valuemax={100}
         style={{
           height: 12,
           background: "#d9d9df",
@@ -256,112 +226,33 @@ export default function Week2Page() {
             height: "100%",
             width: `${pct}%`,
             background: YELLOW,
-            transition: "width 200ms ease",
           }}
         />
       </div>
 
-      {err && <p style={{ color: "crimson" }}>Error: {err}</p>}
+      {err && <p style={{ color: "crimson" }}>{err}</p>}
 
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "grid",
-          gap: 10,
-        }}
-      >
-        {tasks.map((t, idx) => {
-          const order = t.order ?? t.sort_order ?? idx + 1;
-          const done = !!t.done;
-          const approved = !!approvedById[t.id];
-
-          return (
-            <li
-              key={t.id}
-              style={{
-                display: "flex",
-                padding: "12px 14px",
-                borderRadius: 12,
-                background: "#fff",
-                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
-                position: "relative",
-              }}
-            >
-              <span
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: 5,
-                  background: done ? GREEN : "transparent",
-                  borderTopLeftRadius: 12,
-                  borderBottomLeftRadius: 12,
-                }}
-              />
-
-              <button
-                onClick={() => toggleTask(t.id, !done)}
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: "50%",
-                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
-                  background: done ? GREEN : "#fff",
-                  cursor: "pointer",
-                  marginRight: 12,
-                }}
-              >
-                {done && (
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="14"
-                    height="14"
-                    stroke="#fff"
-                    strokeWidth="3"
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
-                )}
-              </button>
-
-              <div style={{ flexGrow: 1 }}>
-                <div style={{ fontWeight: 600 }}>
-                  {order}. {t.title ?? t.id}
-                </div>
-
-                {approved && (
-                  <span
-                    style={{
-                      fontSize: 12,
-                      padding: "2px 8px",
-                      borderRadius: 999,
-                      background: "#e7f6ec",
-                      border: "1px solid #c7e8d3",
-                      color: "#1b5e20",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Approved ✓
-                  </span>
-                )}
-              </div>
-            </li>
-          );
-        })}
+      <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 10 }}>
+        {tasks.map((t, i) => (
+          <li
+            key={t.id}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 12,
+              background: "#fff",
+              border: `1px solid ${t.done ? "#d6ead8" : GRAY}`,
+            }}
+          >
+            <strong>
+              {(t.order ?? t.sort_order ?? i + 1)}. {t.title}
+            </strong>
+          </li>
+        ))}
       </ul>
     </main>
   );
 }
 
-function num(v: unknown): number {
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
+
 
 

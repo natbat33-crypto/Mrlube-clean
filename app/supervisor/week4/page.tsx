@@ -16,6 +16,7 @@ import {
   setDoc,
   where,
   getDoc,
+  deleteField,
 } from "firebase/firestore";
 
 /* -------------------------------------- */
@@ -76,13 +77,12 @@ export default function SupervisorWeek4Page() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  /* Load trainees correctly */
+  /* Load trainees */
   useEffect(() => {
     (async () => {
       try {
         const sid = await resolveStoreId();
         setStoreId(sid);
-
         if (!sid) return;
 
         const sup = auth.currentUser;
@@ -102,21 +102,16 @@ export default function SupervisorWeek4Page() {
           const uSnap = await getDoc(doc(db, "users", d.id));
           const u = uSnap.exists() ? uSnap.data() : {};
 
-          // 🟢 FIXED — ALWAYS prefer email if it exists
-          let name: string =
+          const name =
             (u as any).email?.trim?.() ||
             (u as any).name ||
             (u as any).displayName ||
             d.id;
 
-          list.push({
-            id: d.id, // keep UID
-            name, // show email (or fallback)
-          });
+          list.push({ id: d.id, name });
         }
 
         setTrainees(list);
-
         if (list.length > 0) setSelectedTrainee(list[0].id);
       } catch (err) {
         console.error("Week4 trainee load error:", err);
@@ -137,13 +132,7 @@ export default function SupervisorWeek4Page() {
             (b.order ?? b.sort_order ?? 9999)
         );
 
-        const filtered = list.filter(
-          (t) =>
-            !t.title?.toLowerCase().includes("tia basic") &&
-            !t.id?.toLowerCase().includes("t01")
-        );
-
-        setTasks(filtered);
+        setTasks(list);
       } finally {
         setLoading(false);
       }
@@ -151,20 +140,13 @@ export default function SupervisorWeek4Page() {
   }, []);
 
   if (loading) return <main className="p-6">Loading…</main>;
-
   if (trainees.length === 0) {
     return (
       <main className="p-6 text-sm">
-        <Link
-          href="/supervisor"
-          className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 bg-white text-sm mb-4"
-        >
+        <Link href="/supervisor" className="rounded-full border px-3 py-1.5">
           ← Back
         </Link>
-
-        <p className="text-red-600">
-          No trainees assigned. Ensure your manager assigns a trainee to you.
-        </p>
+        <p className="text-red-600 mt-4">No trainees assigned.</p>
       </main>
     );
   }
@@ -173,34 +155,23 @@ export default function SupervisorWeek4Page() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/supervisor"
-        className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1.5 text-sm"
-      >
+      <Link href="/supervisor" className="rounded-full border px-3 py-1.5 bg-white text-sm">
         ← Back to Dashboard
       </Link>
 
       <h2 className="text-xl font-semibold">Week 4 — Timers</h2>
 
-      {/* Trainee Selector */}
-      <div className="flex gap-2 items-center">
-        <span className="text-sm">Trainee:</span>
-        <select
-          value={traineeId}
-          onChange={(e) => setSelectedTrainee(e.target.value)}
-          className="border px-2 py-1 rounded-md text-sm"
-        >
-          {trainees.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <p className="text-sm text-muted-foreground">
-        Start/stop timers while observing the trainee. Results save automatically.
-      </p>
+      <select
+        value={traineeId}
+        onChange={(e) => setSelectedTrainee(e.target.value)}
+        className="border px-2 py-1 rounded-md text-sm"
+      >
+        {trainees.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
 
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
         {tasks.map((t) => (
@@ -215,24 +186,7 @@ export default function SupervisorWeek4Page() {
 /* TimerCard Component                    */
 /* -------------------------------------- */
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border p-2 bg-slate-50">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function TimerCard({
-  task,
-  uid,
-  storeId,
-}: {
-  task: any;
-  uid: string;
-  storeId: string;
-}) {
+function TimerCard({ task, uid, storeId }: any) {
   const { aggRef, sessionsCol } = useMemo(
     () => timerRefs(uid, task.id),
     [uid, task.id]
@@ -241,8 +195,6 @@ function TimerCard({
   const [sessions, setSessions] = useState<any[]>([]);
   const [running, setRunning] = useState(false);
   const startRef = useRef<number | null>(null);
-  const tickRef = useRef<number | null>(null);
-  const [, setNow] = useState(0);
 
   useEffect(() => {
     const qy = query(sessionsCol, orderBy("createdAt", "asc"));
@@ -256,47 +208,14 @@ function TimerCard({
   const bestMs = count ? Math.min(...sessions.map((s) => s.ms)) : undefined;
   const avgMs = count ? avg(sessions.map((s) => s.ms)) : undefined;
 
-  function start() {
-    if (running) return;
-    startRef.current = Date.now();
-    setRunning(true);
-    tickRef.current = window.setInterval(() => setNow(Date.now()), 200);
-  }
-
   async function stop() {
-    if (!running || !startRef.current) return;
-
+    if (!startRef.current) return;
     const elapsed = Date.now() - startRef.current;
-    clearInterval(tickRef.current!);
-
     startRef.current = null;
-    tickRef.current = null;
     setRunning(false);
 
-    await addDoc(sessionsCol, {
-      ms: elapsed,
-      createdAt: serverTimestamp(),
-    });
+    await addDoc(sessionsCol, { ms: elapsed, createdAt: serverTimestamp() });
 
-    const newCount = count + 1;
-    const newBest = bestMs !== undefined ? Math.min(bestMs, elapsed) : elapsed;
-    const newAvg =
-      count > 0 ? Math.round((avgMs! * count + elapsed) / newCount) : elapsed;
-
-    await setDoc(
-      aggRef,
-      {
-        lastMs: elapsed,
-        bestMs: newBest,
-        avgMs: newAvg,
-        count: newCount,
-        updatedAt: serverTimestamp(),
-        title: task.title ?? task.id,
-      },
-      { merge: true }
-    );
-
-    // Write progress doc for gating
     const key = `modules__week4__tasks__${task.id}`;
 
     await setDoc(
@@ -306,94 +225,56 @@ function TimerCard({
         week: "week4",
         storeId,
         traineeId: uid,
-        title: task.title ?? task.id,
         done: true,
-        lastMs: elapsed,
-        bestMs: newBest,
-        avgMs: newAvg,
-        count: newCount,
         completedAt: serverTimestamp(),
       },
       { merge: true }
     );
-
-    const allSnap = await getDocs(
-      query(
-        collection(db, "users", uid, "progress"),
-        where("week", "==", "week4"),
-        where("done", "==", true)
-      )
-    );
-
-    const all = allSnap.docs.map((d) => d.data());
-    const allDone = all.length > 0 && all.every((t) => (t as any).done === true);
-
-    const sectionRef = doc(db, "users", uid, "sections", "week4");
-
-    await setDoc(
-      sectionRef,
-      {
-        approved: allDone,
-        approvedAt: allDone ? serverTimestamp() : undefined,
-      },
-      { merge: true }
-    );
   }
 
-  function resetLocal() {
-    setRunning(false);
-    if (tickRef.current) clearInterval(tickRef.current);
-    tickRef.current = null;
-    startRef.current = null;
-  }
+  /* 🔒 AUTHORITATIVE WEEK-4 ENFORCEMENT */
+  useEffect(() => {
+    const q = query(
+      collection(db, "users", uid, "progress"),
+      where("week", "==", "week4")
+    );
 
-  const elapsedDisplay =
-    running && startRef.current
-      ? msToClock(Date.now() - startRef.current)
-      : "00:00";
+    return onSnapshot(q, (snap) => {
+      const docs = snap.docs.map((d) => d.data());
+      const allDone = docs.length > 0 && docs.every((d) => d.done === true);
+
+      setDoc(
+        doc(db, "users", uid, "sections", "week4"),
+        {
+          approved: allDone,
+          approvedAt: allDone ? serverTimestamp() : deleteField(),
+        },
+        { merge: true }
+      );
+    });
+  }, [uid]);
 
   return (
     <div className="border rounded-lg p-4 bg-white">
-      <div className="mb-1 text-sm text-muted-foreground">
-        {task.title ?? task.id}
+      <div className="text-sm mb-2">{task.title ?? task.id}</div>
+      <button
+        onClick={() => {
+          if (!running) {
+            startRef.current = Date.now();
+            setRunning(true);
+          } else {
+            stop();
+          }
+        }}
+        className="px-3 py-1.5 rounded-md bg-primary text-white text-sm"
+      >
+        {running ? "Stop & Save" : "Start"}
+      </button>
+
+      <div className="mt-3 text-xs text-muted-foreground">
+        Sessions {count} · Last {lastMs ? msToClock(lastMs) : "—"}
       </div>
-
-      <div className="text-4xl font-bold tracking-widest mb-3">
-        {elapsedDisplay}
-      </div>
-
-      <div className="flex items-center gap-2 mb-4">
-        {!running ? (
-          <button
-            onClick={start}
-            className="px-3 py-1.5 rounded-md bg-primary text-white text-sm"
-          >
-            Start
-          </button>
-        ) : (
-          <button
-            onClick={stop}
-            className="px-3 py-1.5 rounded-md bg-green-600 text-white text-sm"
-          >
-            Stop &amp; Save
-          </button>
-        )}
-
-        <button
-          onClick={resetLocal}
-          className="px-3 py-1.5 rounded-md border text-sm"
-        >
-          Reset
-        </button>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3 text-sm">
-        <Stat label="Last" value={lastMs ? msToClock(lastMs) : "—"} />
-        <Stat label="Best" value={bestMs ? msToClock(bestMs) : "—"} />
-        <Stat label="Average" value={avgMs ? msToClock(avgMs) : "—"} />
-      </div>
-
-      <div className="mt-2 text-xs text-muted-foreground">Sessions {count}</div>
     </div>
   );
 }
+
