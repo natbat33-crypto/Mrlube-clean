@@ -3,7 +3,11 @@
 import { Suspense } from "react";
 import { useState, FormEvent, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signInWithEmailAndPassword, signOut } from "firebase/auth";
+import {
+  signInWithEmailAndPassword,
+  signOut,
+  sendPasswordResetEmail,
+} from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
@@ -31,8 +35,13 @@ function LoginContent() {
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // 🔑 Password reset state
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [sendingReset, setSendingReset] = useState(false);
+
   /* ----------------------------------------------------------
-     🔥 NEW: Redirect invite links to signup first
+     🔥 Redirect invite links to signup
   ---------------------------------------------------------- */
   useEffect(() => {
     const invite = qs?.get("invite");
@@ -47,7 +56,10 @@ function LoginContent() {
     }
   }, [qs]);
 
-  async function ensureUserDoc(uid: string, emailForDoc: string): Promise<UserProfile | undefined> {
+  async function ensureUserDoc(
+    uid: string,
+    emailForDoc: string
+  ): Promise<UserProfile | undefined> {
     const ref = doc(db, "users", uid);
     const snap = await getDoc(ref);
 
@@ -79,25 +91,11 @@ function LoginContent() {
       ((data as any)?.storeid as string | null | undefined) ??
       null;
 
-    if (role === "admin") {
-      router.replace("/admin");
-      return;
-    }
-
-    if (role === "manager") {
-      router.replace("/manager");
-      return;
-    }
-
-    if (role === "supervisor") {
-      router.replace("/supervisor");
-      return;
-    }
-
-    if (role === "trainee" || role === "employee") {
-      router.replace("/dashboard");
-      return;
-    }
+    if (role === "admin") return router.replace("/admin");
+    if (role === "manager") return router.replace("/manager");
+    if (role === "supervisor") return router.replace("/supervisor");
+    if (role === "trainee" || role === "employee")
+      return router.replace("/dashboard");
 
     router.replace("/dashboard");
   }
@@ -105,21 +103,28 @@ function LoginContent() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setMsg(null);
+    setResetMsg(null);
+    setResetError(null);
     setLoading(true);
 
     try {
-      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
       const u = cred.user;
 
       await u.reload();
       if (!u.emailVerified) {
-        setMsg("❌ Please verify your email first. We just need that one-time confirmation.");
+        setMsg(
+          "❌ Please verify your email first. We just need that one-time confirmation."
+        );
         await signOut(auth);
         return;
       }
 
       await u.getIdToken(true);
-
       await routeByProfile(u.uid, u.email || email);
     } catch (err: any) {
       const text =
@@ -129,6 +134,36 @@ function LoginContent() {
       setMsg(text);
     } finally {
       setLoading(false);
+    }
+  }
+
+  /* ----------------------------------------------------------
+     🔐 PASSWORD RESET
+  ---------------------------------------------------------- */
+  async function handlePasswordReset() {
+    if (!email) {
+      setResetError("Please enter your email address first.");
+      return;
+    }
+
+    try {
+      setSendingReset(true);
+      setResetError(null);
+      setResetMsg(null);
+
+      await sendPasswordResetEmail(auth, email.trim());
+
+      setResetMsg("Password reset email sent. Check your inbox.");
+    } catch (err: any) {
+      console.error("Password reset error:", err);
+
+      if (err.code === "auth/user-not-found") {
+        setResetError("No account found with that email.");
+      } else {
+        setResetError("Unable to send reset email. Try again.");
+      }
+    } finally {
+      setSendingReset(false);
     }
   }
 
@@ -153,27 +188,43 @@ function LoginContent() {
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Email
+            </label>
             <input
               type="email"
               required
               placeholder="Your email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#0b3d91] focus:border-transparent bg-slate-50"
+              className="block w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#0b3d91] bg-slate-50"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Password
+            </label>
             <input
               type="password"
               required
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#0b3d91] focus:border-transparent bg-slate-50"
+              className="block w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#0b3d91] bg-slate-50"
             />
+          </div>
+
+          {/* 🔐 Forgot password */}
+          <div className="text-right">
+            <button
+              type="button"
+              onClick={handlePasswordReset}
+              disabled={sendingReset}
+              className="text-sm font-semibold text-[#0b3d91] hover:underline disabled:opacity-60"
+            >
+              Forgot password?
+            </button>
           </div>
 
           <button
@@ -185,8 +236,18 @@ function LoginContent() {
           </button>
 
           {msg && (
-            <p className="text-sm mt-2 text-center text-red-600" role="alert">
-              {msg}
+            <p className="text-sm mt-2 text-center text-red-600">{msg}</p>
+          )}
+
+          {resetMsg && (
+            <p className="text-sm mt-2 text-center text-green-600">
+              {resetMsg}
+            </p>
+          )}
+
+          {resetError && (
+            <p className="text-sm mt-2 text-center text-red-600">
+              {resetError}
             </p>
           )}
         </form>

@@ -1,12 +1,15 @@
+// app/dashboard/week1/page.tsx
 "use client";
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { db, auth } from "@/lib/firebase";
+import { getStoreId } from "@/lib/getStoreId";
 import {
   collection,
   getDocs,
+  orderBy,
   query,
   setDoc,
   doc,
@@ -29,27 +32,32 @@ type Task = {
   done?: boolean;
 };
 
+type Approvals = Record<string, boolean>;
+
 const YELLOW = "#FFC20E";
 const NAVY = "#0b3d91";
 const GREEN = "#2e7d32";
 const GRAY = "#e9e9ee";
 
 /* ----------------------------------
-   MAIN
+   MAIN COMPONENT
 ---------------------------------- */
 export default function Week1Page() {
   const [uid, setUid] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [approvedById, setApprovedById] = useState<Approvals>({});
+  const [weekApproved, setWeekApproved] = useState<boolean>(false);
 
-  // 🔒 AUTHORITY
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // ✅ NEW: Day 1 authority (live)
   const [day1Approved, setDay1Approved] = useState<boolean | null>(null);
 
   /* ----------------------------------
-     AUTH
+     1. LISTEN FOR AUTH
   ---------------------------------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -60,7 +68,8 @@ export default function Week1Page() {
   }, []);
 
   /* ----------------------------------
-     🔒 DAY 1 AUTHORITY (LIVE)
+     ✅ 1b. DAY 1 AUTHORITY (LIVE)
+     Current approval state overrides history
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
@@ -74,7 +83,7 @@ export default function Week1Page() {
   }, [uid]);
 
   /* ----------------------------------
-     LOAD TASK DEFINITIONS
+     2. LOAD TASKS
   ---------------------------------- */
   useEffect(() => {
     let alive = true;
@@ -82,24 +91,50 @@ export default function Week1Page() {
     (async () => {
       try {
         const col = collection(db, "modules", "week1", "tasks");
-        const snap = await getDocs(query(col));
 
-        const list: Task[] = snap.docs
-          .map((d) => ({ id: d.id, ...(d.data() as Partial<Task>) }))
-          .sort((a, b) => {
-            const ao = a.order ?? a.sort_order ?? 9999;
-            const bo = b.order ?? b.sort_order ?? 9999;
-            return ao - bo;
-          });
+        // keep your existing ordering behavior
+        const q = query(col, orderBy("order", "asc"));
+        const snap = await getDocs(q);
+
+        const list: Task[] = snap.docs.map((d) => {
+          const data = d.data() as Partial<Task>;
+          return {
+            id: d.id,
+            title: data.title,
+            order: data.order,
+            sort_order: data.sort_order,
+            required: data.required,
+            done: false,
+          };
+        });
 
         if (alive) {
           setTasks(list);
           setErr(null);
         }
       } catch (e: any) {
-        if (alive) {
-          setErr(e?.message ?? String(e));
-          setTasks([]);
+        // if orderBy fails for any reason, fallback to unsorted fetch then sort locally
+        try {
+          const col = collection(db, "modules", "week1", "tasks");
+          const snap = await getDocs(query(col));
+          const list: Task[] = snap.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Partial<Task>), done: false }))
+            .sort((a, b) => {
+              const ao = a.order ?? a.sort_order ?? 9999;
+              const bo = b.order ?? b.sort_order ?? 9999;
+              return ao - bo;
+            });
+
+          if (alive) {
+            setTasks(list);
+            setErr(null);
+          }
+        } catch (e2: any) {
+          if (alive) {
+            console.error("[Week1] fetch error:", e2);
+            setErr(e2?.message ?? String(e2));
+            setTasks([]);
+          }
         }
       } finally {
         if (alive) setLoading(false);
@@ -112,10 +147,48 @@ export default function Week1Page() {
   }, []);
 
   /* ----------------------------------
-     LOAD USER PROGRESS
+     3. LISTEN FOR WHOLE-WEEK APPROVAL
+  ---------------------------------- */
+  useEffect(() => {
+    if (!uid) return;
+
+    const ref = doc(db, "users", uid, "sections", "week1");
+    const unsub = onSnapshot(ref, (snap) => {
+      setWeekApproved(snap.data()?.approved === true);
+    });
+
+    return unsub;
+  }, [uid]);
+
+  /* ----------------------------------
+     4. LISTEN FOR PER-TASK APPROVALS
   ---------------------------------- */
   useEffect(() => {
     if (!uid || tasks.length === 0) return;
+
+    const unsubs = tasks.map((task: Task) => {
+      const key = `modules__week1__tasks__${task.id}`;
+      const ref = doc(db, "users", uid, "progress", key);
+
+      return onSnapshot(ref, (snap) => {
+        const approved = !!snap.data()?.approved;
+        setApprovedById((prev) => ({
+          ...prev,
+          [task.id]: approved,
+        }));
+      });
+    });
+
+    return () => unsubs.forEach((u) => u && u());
+  }, [uid, tasks]);
+
+  /* ----------------------------------
+     5. LOAD DONE FLAGS
+  ---------------------------------- */
+  useEffect(() => {
+    if (!uid || tasks.length === 0) return;
+
+    let stopped = false;
 
     (async () => {
       try {
@@ -124,30 +197,42 @@ export default function Week1Page() {
         const snap = await getDocs(q);
 
         const doneMap: Record<string, boolean> = {};
+
         snap.forEach((d) => {
           const data = d.data() as any;
           if (!data.done) return;
+
           const parts = d.id.split("__");
-          doneMap[parts[parts.length - 1]] = true;
+          const taskId = parts[parts.length - 1];
+          doneMap[taskId] = true;
         });
 
+        if (stopped) return;
+
         setTasks((prev) =>
-          prev.map((t) => ({ ...t, done: !!doneMap[t.id] }))
+          prev.map((t) => ({
+            ...t,
+            done: !!doneMap[t.id],
+          }))
         );
-      } catch {}
+      } catch (e) {
+        console.error("[Week1] load done flags error:", e);
+      }
     })();
+
+    return () => {
+      stopped = true;
+    };
   }, [uid, tasks.length]);
 
   /* ----------------------------------
-     ✅ AUTO-CREATE SECTION DOC (FIX)
+     ✅ AUTO-CREATE SECTION DOC (COMPLETE ONLY)
      Trainee NEVER writes approved
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
 
-    const allComplete =
-      tasks.length > 0 && tasks.every((t) => t.done === true);
-
+    const allComplete = tasks.length > 0 && tasks.every((t) => t.done === true);
     if (!allComplete) return;
 
     setDoc(
@@ -161,15 +246,52 @@ export default function Week1Page() {
   }, [uid, tasks]);
 
   /* ----------------------------------
+     6. TOGGLE TASK DONE
+  ---------------------------------- */
+  async function toggleTask(id: string, next: boolean) {
+    if (!uid) {
+      alert("Please log in.");
+      return;
+    }
+
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, done: next } : t))
+    );
+
+    try {
+      const key = `modules__week1__tasks__${id}`;
+      const storeId = await getStoreId();
+      const task = tasks.find((t) => t.id === id);
+
+      await setDoc(
+        doc(db, "users", uid, "progress", key),
+        {
+          storeId: storeId || "",
+          traineeId: uid,
+          createdBy: uid,
+          week: "week1",
+          title: task?.title ?? id,
+          done: next,
+          completedAt: next ? serverTimestamp() : deleteField(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.error("toggle error:", e);
+      setTasks((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, done: !next } : t))
+      );
+      alert("Save failed — try again.");
+    }
+  }
+
+  /* ----------------------------------
      DERIVED
   ---------------------------------- */
   const locked = day1Approved === false;
 
-  const doneCount = useMemo(
-    () => tasks.filter((t) => t.done).length,
-    [tasks]
-  );
-
+  const doneCount = useMemo(() => tasks.filter((t) => t.done).length, [tasks]);
   const pct = useMemo(
     () => (tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0),
     [doneCount, tasks.length]
@@ -180,7 +302,7 @@ export default function Week1Page() {
   }
 
   /* ----------------------------------
-     UI
+     UI (UNCHANGED)
   ---------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
@@ -204,6 +326,7 @@ export default function Week1Page() {
         </Link>
       </div>
 
+      {/* ✅ NEW: Day 1 lock banner (only shows when locked) */}
       {locked && (
         <div
           style={{
@@ -220,10 +343,10 @@ export default function Week1Page() {
         </div>
       )}
 
-      <h2 style={{ opacity: locked ? 0.6 : 1 }}>
+
+      <h2 style={{ marginBottom: 6, opacity: locked ? 0.6 : 1 }}>
         Week 1 — Steps to a Perfect Service
       </h2>
-
       <div style={{ fontSize: 14, marginBottom: 6, opacity: locked ? 0.6 : 1 }}>
         {doneCount}/{tasks.length} completed ({pct}%)
       </div>
@@ -243,33 +366,123 @@ export default function Week1Page() {
             height: "100%",
             width: `${pct}%`,
             background: YELLOW,
+            transition: "width 200ms",
           }}
         />
       </div>
 
       {err && <p style={{ color: "crimson" }}>{err}</p>}
 
-      <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 10 }}>
-        {tasks.map((t, i) => (
-          <li
-            key={t.id}
-            style={{
-              padding: "12px 14px",
-              borderRadius: 12,
-              background: locked ? "#f5f5f5" : "#fff",
-              border: `1px solid ${t.done ? "#d6ead8" : GRAY}`,
-              opacity: locked ? 0.6 : 1,
-              pointerEvents: locked ? "none" : "auto",
-            }}
-          >
-            <strong>
-              {(t.order ?? t.sort_order ?? i + 1)}. {t.title}
-            </strong>
-          </li>
-        ))}
+      <ul
+        style={{
+          listStyle: "none",
+          padding: 0,
+          margin: 0,
+          display: "grid",
+          gap: 10,
+          opacity: locked ? 0.6 : 1,
+          pointerEvents: locked ? "none" : "auto",
+        }}
+      >
+        {tasks.map((t: Task, index: number) => {
+          const order = t.order ?? t.sort_order ?? index + 1;
+          const done = !!t.done;
+          const approved = !!approvedById[t.id];
+
+          return (
+            <li
+              key={t.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "#fff",
+                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
+                position: "relative",
+              }}
+            >
+              <span
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 5,
+                  background: done ? GREEN : "transparent",
+                  borderTopLeftRadius: 12,
+                  borderBottomLeftRadius: 12,
+                }}
+              />
+
+              <button
+                onClick={() => toggleTask(t.id, !done)}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
+                  background: done ? GREEN : "#fff",
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  stroke={done ? "#fff" : "transparent"}
+                  strokeWidth="3"
+                  fill="none"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>
+                  {order}. {t.title ?? t.id}
+                </div>
+
+                {approved && (
+                  <span
+                    style={{
+                      fontSize: 12,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: "#e7f6ec",
+                      border: "1px solid #c7e8d3",
+                      color: "#1b5e20",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Approved ✓
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </main>
   );
+}
+
+/* ----------------------------------
+   HELPERS
+---------------------------------- */
+function num(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
 

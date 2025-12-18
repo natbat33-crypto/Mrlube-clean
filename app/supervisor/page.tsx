@@ -30,9 +30,9 @@ import {
 
 import { useStoreCtx } from "@/app/providers/StoreProvider";
 
-// ========================================
-// TYPES
-// ========================================
+/* ========================================
+   TYPES
+======================================== */
 type WeekSummary = {
   week: 1 | 2 | 3 | 4;
   waiting: number;
@@ -72,9 +72,9 @@ async function resolveStoreId(): Promise<string> {
   return "";
 }
 
-// ========================================
-// COMPONENT
-// ========================================
+/* ========================================
+   COMPONENT
+======================================== */
 export default function SupervisorPage() {
   const [uid, setUid] = useState<string | null>(() => pickReviewUid());
 
@@ -101,9 +101,9 @@ export default function SupervisorPage() {
   const storeOverride = searchParams.get("store");
   const asUid = searchParams.get("as");
 
-  // =========================================================
-  // HANDLE ?as=
-  // =========================================================
+  /* ================================
+     ?as= handling
+  ================================= */
   useEffect(() => {
     if (asUid && asUid !== uid) setUid(asUid);
   }, [asUid, uid]);
@@ -118,9 +118,9 @@ export default function SupervisorPage() {
     }
   }, [uid]);
 
-  // =========================================================
-  // STORE OVERRIDES
-  // =========================================================
+  /* ================================
+     STORE RESOLUTION
+  ================================= */
   useEffect(() => {
     if (storeOverride) setStoreId(storeOverride);
   }, [storeOverride]);
@@ -140,9 +140,9 @@ export default function SupervisorPage() {
     }
   }, [resolvedStoreId, storeOverride, asUid]);
 
-  // =========================================================
-  // FALLBACK STORE DETECTION
-  // =========================================================
+  /* ================================
+     FALLBACK STORE DETECTION
+  ================================= */
   useEffect(() => {
     if (storeOverride || asUid || resolvedStoreId) return;
 
@@ -203,9 +203,9 @@ export default function SupervisorPage() {
     };
   }, [storeOverride, asUid, resolvedStoreId]);
 
-  // =========================================================
-  // WEEK SUMMARY TALLY
-  // =========================================================
+  /* ================================
+     WEEK SUMMARY — FIXED
+  ================================= */
   useEffect(() => {
     let alive = true;
 
@@ -220,7 +220,6 @@ export default function SupervisorPage() {
       }
 
       if (!sid) {
-        if (!alive) return;
         setLoading(false);
         return;
       }
@@ -233,12 +232,9 @@ export default function SupervisorPage() {
       };
 
       try {
-        const traineesSnap = await getDocs(
-          collection(db, "stores", String(sid), "trainees")
-        );
+        for (const t of trainees) {
+          const traineeId = t.traineeId;
 
-        for (const t of traineesSnap.docs) {
-          const traineeId = t.id;
           const progSnap = await getDocs(
             collection(db, "users", traineeId, "progress")
           );
@@ -283,26 +279,21 @@ export default function SupervisorPage() {
     return () => {
       alive = false;
     };
-  }, [storeId]);
+  }, [storeId, trainees]);
 
-  // =========================================================
-  // ⭐ DAY-1 SUMMARY — FIXED HERE ⭐
-  // =========================================================
+  /* ================================
+     DAY-1 SUMMARY — FIXED
+  ================================= */
   useEffect(() => {
     if (!storeId) return;
-
     let alive = true;
 
     async function tallyDay1() {
       const summary = { waiting: 0, reviewed: 0, approved: 0 };
 
       try {
-        const traineesSnap = await getDocs(
-          collection(db, "stores", String(storeId), "trainees")
-        );
-
-        for (const t of traineesSnap.docs) {
-          const traineeId = t.id;
+        for (const t of trainees) {
+          const traineeId = t.traineeId;
 
           const progSnap = await getDocs(
             collection(db, "users", traineeId, "progress")
@@ -312,12 +303,6 @@ export default function SupervisorPage() {
             const data: any = d.data();
             if (!data?.done) continue;
             if (data.week !== "day-1") continue;
-
-            // ⭐ FIX: Day-1 progress often lacks storeId, so skip store check ONLY for day-1
-            if (data.week !== "day-1" &&
-                String(data.storeId) !== String(storeId)) {
-              continue;
-            }
 
             summary.reviewed += 1;
             if (data.approved) summary.approved += 1;
@@ -335,11 +320,11 @@ export default function SupervisorPage() {
     return () => {
       alive = false;
     };
-  }, [storeId]);
+  }, [storeId, trainees]);
 
-  // =========================================================
-  // UI
-  // =========================================================
+  /* ================================
+     UI
+  ================================= */
   const day1Href = uid ? `/supervisor/day1?as=${uid}` : "/supervisor/day1";
   const weekHref = (week: number) =>
     uid ? `/supervisor/week${week}?as=${uid}` : `/supervisor/week${week}`;
@@ -353,9 +338,7 @@ export default function SupervisorPage() {
         </p>
       </header>
 
-      {/* DAY-1 CARD WITH FIXED COUNTS */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-
         <Link href={day1Href}>
           <Card className="border-primary/20 hover:shadow-md cursor-pointer">
             <CardHeader className="pb-2">
@@ -370,7 +353,6 @@ export default function SupervisorPage() {
           </Card>
         </Link>
 
-        {/* WEEK CARDS unchanged */}
         {weeks.map((w) => (
           <Link key={w.week} href={weekHref(w.week)}>
             <Card className="border-primary/20 hover:shadow-md cursor-pointer">
@@ -387,46 +369,6 @@ export default function SupervisorPage() {
           </Link>
         ))}
       </div>
-
-      {/* TRAINEES */}
-      {storeId && (
-        <div className="space-y-2">
-          <h2 className="text-lg font-semibold">Your Trainees</h2>
-
-          {trainees.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No trainees assigned yet.</p>
-          ) : (
-            <div className="grid gap-2">
-              {trainees.map((t) => (
-                <Link
-                  key={t.id}
-                  href={`/supervisor/day1?as=${t.traineeId}`}
-                  className="block border p-3 rounded-lg bg-white hover:bg-primary/5 transition"
-                >
-                  <div className="font-medium">
-                    {t.email || t.traineeEmail || t.userEmail || t.traineeId}
-                  </div>
-                  <div className="text-xs text-muted-foreground">Tap to review</div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* NOTES LINK */}
-      {storeId && (
-        <Link href={`/supervisor/notes?store=${storeId}`}>
-          <Card className="border-primary/30 hover:bg-primary/5 cursor-pointer">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base text-primary">Notes</CardTitle>
-            </CardHeader>
-            <CardContent className="text-xs text-muted-foreground">
-              Open your notes
-            </CardContent>
-          </Card>
-        </Link>
-      )}
     </div>
   );
 }
