@@ -31,39 +31,48 @@ export default function RoleGate({ allow, children }: Props) {
       }
 
       try {
-        // 🔥 Refresh token (prevents unauthorized)
+        // Force fresh token (prevents stale role issues)
         await user.getIdToken(true);
 
-        // Load user role
         const snap = await getDoc(doc(db, "users", user.uid));
 
-        // ⚠️ If Firestore doc missing → ALLOW TEMPORARILY
+        // ⚠️ Missing user doc → allow temporarily (prevents lockouts)
         if (!snap.exists()) {
-          console.warn("User doc missing, allowing temporarily");
+          console.warn("RoleGate: user doc missing, allowing temporarily");
           setPhase("allowed");
           return;
         }
 
-        const role = snap.data()?.role;
+        const rawRole = snap.data()?.role;
+        const storeId = snap.data()?.storeId;
 
-        // If role matches → ALLOW
-        if (allow.includes(role)) {
+        const role = typeof rawRole === "string"
+          ? (rawRole.toLowerCase() as AllowedRole)
+          : undefined;
+
+        // ✅ Fallback ONLY for unassigned employees
+        if (role === "employee" && !storeId) {
+          router.replace("/employee/pending");
+          return;
+        }
+
+        // ✅ Allowed roles (manager + gm work identically)
+        if (role && allow.includes(role)) {
           setPhase("allowed");
           return;
         }
 
-        // ⚠️ If role undefined or slow to load → ALLOW TEMPORARILY
+        // ⚠️ Role undefined / slow write → allow temporarily
         if (!role) {
-          console.warn("Role undefined, allowing temporarily");
+          console.warn("RoleGate: role undefined, allowing temporarily");
           setPhase("allowed");
           return;
         }
 
-        // 🚫 Finally deny only if role definitely wrong
+        // 🚫 Truly unauthorized
         router.replace("/unauthorized");
       } catch (err) {
-        // ⚠️ Firestore slow / token refresh delay → ALLOW
-        console.warn("RoleGate temporary allow due to error:", err);
+        console.warn("RoleGate: temporary allow due to error", err);
         setPhase("allowed");
       }
     });

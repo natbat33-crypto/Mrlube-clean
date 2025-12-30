@@ -20,8 +20,8 @@ type StoreDoc = {
 type AnyDoc = Record<string, any>;
 
 type Trainee = {
-  id: string;   // store trainee doc id
-  uid: string;  // actual user uid
+  id: string;
+  uid: string;
   name: string;
   pct: number;
 };
@@ -30,7 +30,7 @@ function clamp(n: number) {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-async function resolveUserLabel(uid?: string | null) {
+async function resolveUserLabel(uid?: string | null): Promise<string | null> {
   if (!uid) return null;
   const snap = await adminDb.collection("users").doc(uid).get();
   const u = snap.exists ? (snap.data() as AnyDoc) : null;
@@ -40,214 +40,133 @@ async function resolveUserLabel(uid?: string | null) {
 async function getProgramTotalTasks(): Promise<number> {
   let total = 0;
 
-  try {
-    const modulesSnap = await adminDb.collection("modules").get();
-    for (const modDoc of modulesSnap.docs) {
-      const tasksSnap = await modDoc.ref.collection("tasks").get();
-      tasksSnap.forEach((t) => {
-        const td = t.data() as AnyDoc;
-        if (td.active === false) return;
-        total += 1;
-      });
-    }
-  } catch {}
+  const modulesSnap = await adminDb.collection("modules").get();
+  for (const mod of modulesSnap.docs) {
+    const tasksSnap = await mod.ref.collection("tasks").get();
+    tasksSnap.forEach((t) => {
+      const d = t.data() as AnyDoc;
+      if (d.active !== false) total += 1;
+    });
+  }
 
-  try {
-    const daysSnap = await adminDb.collection("days").get();
-    for (const dayDoc of daysSnap.docs) {
-      const tasksSnap = await dayDoc.ref.collection("tasks").get();
-      tasksSnap.forEach((t) => {
-        const td = t.data() as AnyDoc;
-        if (td.active === false) return;
-        total += 1;
-      });
-    }
-  } catch {}
+  const daysSnap = await adminDb.collection("days").get();
+  for (const day of daysSnap.docs) {
+    const tasksSnap = await day.ref.collection("tasks").get();
+    tasksSnap.forEach((t) => {
+      const d = t.data() as AnyDoc;
+      if (d.active !== false) total += 1;
+    });
+  }
 
   return total;
 }
 
 async function getTraineeCompletedTasks(uid: string): Promise<number> {
-  try {
-    const snaps = await adminDb
-      .collection("users")
-      .doc(uid)
-      .collection("progress")
-      .get();
+  const snaps = await adminDb
+    .collection("users")
+    .doc(uid)
+    .collection("progress")
+    .get();
 
-    if (snaps.empty) return 0;
+  let completed = 0;
+  snaps.forEach((doc) => {
+    const d = doc.data() as AnyDoc;
+    if (d.done || d.approved || d.completed) completed += 1;
+  });
 
-    let completed = 0;
-    snaps.forEach((doc) => {
-      const d = doc.data() as AnyDoc;
-      if (d.done === true || d.approved === true || d.completed === true) {
-        completed += 1;
-      }
-    });
-
-    return completed;
-  } catch {
-    return 0;
-  }
+  return completed;
 }
 
-async function getTraineePercent(uid: string, programTotalTasks: number) {
-  if (programTotalTasks <= 0) return 0;
+async function getTraineePercent(uid: string, total: number): Promise<number> {
+  if (!total) return 0;
   const completed = await getTraineeCompletedTasks(uid);
-  return clamp((completed / programTotalTasks) * 100);
+  return clamp((completed / total) * 100);
 }
 
 export default async function StorePage({ params }: StorePageProps) {
-  const storeId = String(params.id);
+  const storeId = params.id;
   const storeRef = adminDb.collection("stores").doc(storeId);
 
   const storeSnap = await storeRef.get();
-  const store = storeSnap.exists ? (storeSnap.data() as StoreDoc) : undefined;
-  if (!store) return <main className="p-6">Store not found</main>;
-
-  // ---------------------------
-  // Manager lookup
-  // ---------------------------
-  let managerLabel: string | null = null;
-
-  const employeesSnap = await storeRef
-    .collection("employees")
-    .where("role", "==", "manager")
-    .get();
-
-  if (!employeesSnap.empty) {
-    const mgr = employeesSnap.docs[0].data() as AnyDoc;
-    managerLabel =
-      mgr.displayName ||
-      mgr.name ||
-      mgr.email ||
-      null;
+  if (!storeSnap.exists) {
+    return <main className="p-6">Store not found</main>;
   }
 
-  // ---------------------------
-  // Trainers (supervisors)
-  // ---------------------------
-  const trainersSnap = await storeRef
-    .collection("employees")
-    .where("role", "in", ["trainer", "supervisor"])
-    .get();
+  const store = storeSnap.data() as StoreDoc;
 
-  const trainers: string[] = await Promise.all(
-    trainersSnap.docs.map(async (doc) => {
-      const d = doc.data() as AnyDoc;
-      const label =
-        d.displayName ||
-        d.name ||
-        d.email ||
-        (await resolveUserLabel(d.uid)) ||
-        null;
-      return label;
-    })
-  );
-
-  trainers.sort((a, b) => a.localeCompare(b));
-
-  // ---------------------------
-  // Trainees
-  // ---------------------------
+  /* ================= Trainees ================= */
   const traineesSnap = await storeRef.collection("trainees").get();
-  const programTotalTasks = await getProgramTotalTasks();
+  const totalTasks = await getProgramTotalTasks();
 
   const trainees: Trainee[] = await Promise.all(
     traineesSnap.docs.map(async (row, i) => {
       const data = row.data() as AnyDoc;
-      const uid: string = (data.traineeId as string) || row.id;
+      const uid: string = data.traineeId || row.id;
 
       const name =
-        (typeof data.displayName === "string" && data.displayName.trim()) ||
+        data.displayName ||
         (await resolveUserLabel(uid)) ||
         `Trainee ${i + 1}`;
 
-      let pct = 0;
-      if (uid) {
-        pct = await getTraineePercent(uid, programTotalTasks);
-      }
+      const pct = uid ? await getTraineePercent(uid, totalTasks) : 0;
 
-      return {
-        id: row.id,
-        uid,
-        name,
-        pct: clamp(pct || 0),
-      };
+      return { id: row.id, uid, name, pct };
     })
   );
 
   trainees.sort((a, b) => a.name.localeCompare(b.name));
 
+  /* ================= UI ================= */
   return (
     <main className="mx-auto max-w-4xl p-4 lg:p-6 space-y-6">
-      <div className="rounded-xl border border-[var(--line,#eaecef)] bg-white p-5">
+      {/* Store Header */}
+      <div className="rounded-xl border bg-white p-5">
         <h1 className="text-xl font-semibold">Store #{store.number}</h1>
         <p className="text-sm text-muted-foreground">{store.name}</p>
         <p className="mt-1 text-sm">{store.address}</p>
 
-        {/* Manager */}
-        <section className="mt-5">
-          <h2 className="text-sm font-semibold">Manager</h2>
-          {managerLabel ? (
-            <div className="mt-1">
-              <span className="inline-flex items-center rounded-full border border-[var(--line,#eaecef)] bg-white px-2 py-0.5 text-[12px]">
-                {managerLabel}
-              </span>
-            </div>
-          ) : (
-            <p className="mt-1 text-sm text-muted-foreground">Unassigned</p>
-          )}
-        </section>
-
-        {/* Trainers */}
+        {/* Store Users */}
         <section className="mt-6">
-          <h2 className="text-sm font-semibold">Trainers</h2>
-
-          {!trainers.length ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              No trainers found for this store.
-            </p>
-          ) : (
-            <ul className="mt-2 space-y-1">
-              {trainers.map((t, i) => (
-                <li
-                  key={i}
-                  className="inline-flex items-center rounded-full border border-[var(--line,#eaecef)] bg-white px-2 py-0.5 text-[12px]"
-                >
-                  {t}
-                </li>
-              ))}
-            </ul>
-          )}
+          <h2 className="text-sm font-semibold">Store Users</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Manage roles and access for this store.
+          </p>
+          <Link
+            href={`/admin/stores/${storeId}/users`}
+            className="inline-flex mt-3 rounded-full border px-3 py-1.5 text-sm hover:bg-gray-50"
+          >
+            Manage users →
+          </Link>
         </section>
 
         {/* Trainees */}
         <section className="mt-6">
           <h2 className="text-sm font-semibold">Trainees</h2>
+
           {!trainees.length ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              No trainees found for this store yet.
+            <p className="text-sm text-muted-foreground mt-1">
+              No trainees found.
             </p>
           ) : (
-            <ul className="mt-2 grid gap-3 grid-cols-1 sm:grid-cols-2">
+            <ul className="mt-3 space-y-3">
               {trainees.map((t) => (
                 <li key={t.id}>
                   <Link
                     href={`/admin/trainees/${t.uid}?store=${storeId}`}
-                    className="block rounded-lg border border-[var(--line,#eaecef)] bg-white p-3 hover:bg-[var(--muted,#f8f9fb)]"
+                    className="block rounded-lg border p-4 hover:bg-gray-50 transition"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="font-medium text-sm truncate">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium truncate">
                         {t.name}
-                      </div>
-                      <div className="ml-3 text-xs text-muted-foreground tabular-nums">
+                      </span>
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">
                         {t.pct}%
-                      </div>
+                      </span>
                     </div>
-                    <div className="mt-2 h-2 w-full rounded-full bg-gray-100 overflow-hidden">
+
+                    <div className="mt-3 h-2 w-full bg-gray-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full rounded-full bg-blue-500"
+                        className="h-full bg-blue-500 rounded-full"
                         style={{ width: `${t.pct}%` }}
                       />
                     </div>
@@ -260,31 +179,26 @@ export default async function StorePage({ params }: StorePageProps) {
       </div>
 
       {/* Notes */}
-      <div className="rounded-xl border border-[var(--line,#eaecef)] bg-white p-5">
+      <div className="rounded-xl border bg-white p-5">
         <h2 className="text-sm font-semibold">Notes</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground mt-1">
           View messages from the manager and reply.
         </p>
-        <div className="mt-3">
-          <Link
-            href={`/admin/stores/notes?store=${storeId}`}
-            className="inline-flex items-center rounded-full border px-3 py-1.5 text-sm hover:bg-[var(--muted,#f8f9fb)]"
-          >
-            Open notes →
-          </Link>
-        </div>
-      </div>
-
-      <div>
         <Link
-          href="/admin"
-          className="inline-flex items-center rounded-full border px-3 py-1.5 text-sm hover:bg-[var(--muted,#f8f9fb)]"
+          href={`/admin/stores/notes?store=${storeId}`}
+          className="inline-flex mt-3 rounded-full border px-3 py-1.5 text-sm hover:bg-gray-50"
         >
-          ← Back to Dashboard
+          Open notes →
         </Link>
       </div>
+
+      {/* Back */}
+      <Link
+        href="/admin/stores"
+        className="inline-flex rounded-full border px-3 py-1.5 text-sm hover:bg-gray-50"
+      >
+        ← Back to Stores
+      </Link>
     </main>
   );
 }
-
-

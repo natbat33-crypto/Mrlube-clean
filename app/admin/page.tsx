@@ -10,7 +10,7 @@ export default function AdminHome() {
         <header>
           <h1 className="text-2xl font-bold text-primary">Admin Dashboard</h1>
           <p className="text-muted-foreground mt-1">
-            Oversee all stores, managers, and trainee progress.
+            Oversee all stores, managers, trainers, and trainee progress.
           </p>
         </header>
 
@@ -18,7 +18,7 @@ export default function AdminHome() {
         <div className="rounded-xl border bg-white/50 p-6">
           <h2 className="text-xl font-semibold mb-2">Stores</h2>
           <p className="text-sm text-gray-600 mb-3">
-            View employees, supervisors, trainees and progress for every store.
+            View employees, trainers, trainees, and progress for every store.
           </p>
           <Link
             href="/admin/stores"
@@ -28,7 +28,19 @@ export default function AdminHome() {
           </Link>
         </div>
 
-        {/* Notes removed (no card here anymore) */}
+        {/* Users */}
+        <div className="rounded-xl border bg-white/50 p-6">
+          <h2 className="text-xl font-semibold mb-2">New Users</h2>
+          <p className="text-sm text-gray-600 mb-3">
+            Assign newusers to stores and roles, or manage access.
+          </p>
+          <Link
+            href="/admin/users"
+            className="inline-flex items-center text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
+          >
+            Manage New users →
+          </Link>
+        </div>
       </main>
     </RoleGate>
   );

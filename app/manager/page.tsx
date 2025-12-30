@@ -12,7 +12,6 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { assignTrainee } from "@/lib/assignments";
 
 /* ---------------- types ---------------- */
 type Emp = {
@@ -21,8 +20,8 @@ type Emp = {
   name?: string;
   email?: string;
   active?: boolean;
-  supervisor?: string; // Firestore field (still exists)
-  trainer?: string;    // Future-proof field if added
+  supervisor?: string; // legacy DB field
+  trainer?: string;
 };
 
 type Store = {
@@ -31,17 +30,14 @@ type Store = {
   address: string;
 };
 
-/* -----------------------------------------------------------
-   REAL TASK IDS
------------------------------------------------------------ */
+/* ---------------- task helpers ---------------- */
 async function loadAllRealTasks(): Promise<string[]> {
   const result: string[] = [];
 
   async function addTasks(parent: string, week: string, sub: string) {
     const snap = await getDocs(collection(db, parent, week, sub));
     snap.forEach((d) => {
-      const progId = `${parent}__${week}__${sub}__${d.id}`;
-      result.push(progId);
+      result.push(`${parent}__${week}__${sub}__${d.id}`);
     });
   }
 
@@ -55,27 +51,17 @@ async function loadAllRealTasks(): Promise<string[]> {
 }
 
 /* ===========================================================
-   MANAGER DASHBOARD
+   MANAGER DASHBOARD (CLEAN)
 =========================================================== */
 export default function ManagerDashboard() {
   const [uid, setUid] = useState<string | null>(null);
   const [storeId, setStoreId] = useState<string | null>(null);
   const [store, setStore] = useState<Store | null>(null);
 
-  // SUPERVISORS → TRAINERS
-  const [trainers, setTrainers] = useState<Emp[]>([]);
   const [trainees, setTrainees] = useState<Emp[]>([]);
-  const [everyone, setEveryone] = useState<Emp[]>([]);
-  const [openStaff, setOpenStaff] = useState(false);
-
-  const [selTrainee, setSelTrainee] = useState("");
-  const [selTrainer, setSelTrainer] = useState("");
-  const [status, setStatus] = useState("");
-
+  const [employees, setEmployees] = useState<Emp[]>([]);
+  const [progressMap, setProgressMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
-
-  const [progressMap, setProgressMap] =
-    useState<Record<string, number>>({});
 
   /* ---------- auth ---------- */
   useEffect(() => {
@@ -90,20 +76,10 @@ export default function ManagerDashboard() {
 
       setUid(u.uid);
 
-      let sid: string | null = null;
       const userSnap = await getDoc(doc(db, "users", u.uid));
       if (userSnap.exists()) {
         const d: any = userSnap.data();
-        if (d.storeId) sid = String(d.storeId);
-      }
-
-      setStoreId(sid);
-
-      if (sid) {
-        const storeSnap = await getDoc(doc(db, "stores", sid));
-        if (storeSnap.exists()) {
-          setStore(storeSnap.data() as Store);
-        }
+        setStoreId(d.storeId || null);
       }
 
       setLoading(false);
@@ -112,344 +88,153 @@ export default function ManagerDashboard() {
     return () => unsub();
   }, []);
 
-  /* ---------- load staff ---------- */
-  async function loadRole(role: string): Promise<Emp[]> {
-    const coll = collection(db, "stores", storeId!, "employees");
-    try {
-      const s = await getDocs(
-        query(coll, where("active", "==", true), where("role", "==", role))
-      );
-      return s.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
-    } catch {
-      return [];
-    }
-  }
-
+  /* ---------- load store ---------- */
   useEffect(() => {
-    if (!uid || !storeId) return;
+    if (!storeId) return;
 
-    let alive = true;
     (async () => {
-      try {
-        // Load trainers (old role: supervisor)
-        const supList = await loadRole("supervisor");
-
-        // Load trainees
-        const trnList = await loadRole("trainee");
-
-        // Load all employees
-        const all = await (async () => {
-          const s = await getDocs(
-            query(
-              collection(db, "stores", storeId, "employees"),
-              where("active", "==", true)
-            )
-          );
-          return s.docs.map((d) => ({ uid: d.id, ...(d.data() as any) }));
-        })();
-
-        if (!alive) return;
-
-        setTrainers(supList); // STILL "supervisor" in DB but shown as trainer
-        setTrainees(trnList);
-        setEveryone(all);
-      } catch {
-        // ignore
-      }
+      const snap = await getDoc(doc(db, "stores", storeId));
+      if (snap.exists()) setStore(snap.data() as Store);
     })();
+  }, [storeId]);
 
-    return () => {
-      alive = false;
-    };
-  }, [uid, storeId]);
+  /* ---------- load staff ---------- */
+  useEffect(() => {
+    if (!storeId) return;
 
-  /* ---------- progress calculation ---------- */
+    (async () => {
+      const snap = await getDocs(
+        query(
+          collection(db, "stores", storeId, "employees"),
+          where("active", "==", true)
+        )
+      );
+
+      const list = snap.docs.map((d) => ({
+        uid: d.id,
+        ...(d.data() as any),
+      }));
+
+      setTrainees(list.filter((e) => e.role === "trainee"));
+      setEmployees(list.filter((e) => e.role !== "trainee"));
+    })();
+  }, [storeId]);
+
+  /* ---------- progress ---------- */
   useEffect(() => {
     if (!trainees.length) return;
-
-    let alive = true;
 
     (async () => {
       const realTasks = await loadAllRealTasks();
       const total = realTasks.length;
-
       const map: Record<string, number> = {};
 
       for (const t of trainees) {
         const snap = await getDocs(collection(db, "users", t.uid, "progress"));
-
         let done = 0;
+
         snap.forEach((d) => {
-          const taskId = d.id;
-          if (!realTasks.includes(taskId)) return;
-
+          if (!realTasks.includes(d.id)) return;
           const v: any = d.data();
-          const isDone =
-            v.done === true ||
-            v.completed === true ||
-            v.status === "done" ||
-            v.approved === true ||
-            !!v.approvedBy;
-
-          if (isDone) done++;
+          if (v.done || v.completed || v.approved) done++;
         });
 
-        const percent = total > 0 ? Math.round((done / total) * 100) : 0;
-        map[t.uid] = percent;
+        map[t.uid] = total ? Math.round((done / total) * 100) : 0;
       }
 
-      if (alive) setProgressMap(map);
+      setProgressMap(map);
     })();
-
-    return () => {
-      alive = false;
-    };
   }, [trainees]);
 
-  /* ---------- assign trainee → trainer ---------- */
-  async function doAssign() {
-    if (!uid || !storeId || !selTrainee || !selTrainer) return;
+  /* ---------- helpers ---------- */
+  function getTrainerName(traineeId: string): string | null {
+    const emp = employees.find(
+      (e) => e.uid === traineeId
+    );
+    if (!emp) return null;
 
-    try {
-      setStatus("Assigning…");
-      await assignTrainee(storeId, selTrainee, selTrainer);
-      setStatus("Assigned ✓");
-      setTimeout(() => setStatus(""), 1200);
-    } catch {
-      setStatus("Failed");
-    }
-  }
-
-  /* ---------- helper: find trainer for trainee ---------- */
-  function getTrainerLabelForTrainee(traineeId: string): string | null {
-    const empDoc = everyone.find((e) => e.uid === traineeId);
-    if (!empDoc) return null;
-
-    const trainerUid =
-      empDoc.trainer ||
-      empDoc.supervisor; // DB still uses supervisor until new schema
-
+    const trainerUid = emp.trainer || emp.supervisor;
     if (!trainerUid) return null;
 
-    const trainerEmp =
-      everyone.find((e) => e.uid === trainerUid) ||
-      trainers.find((s) => s.uid === trainerUid);
-
-    if (!trainerEmp) return null;
-
-    return trainerEmp.name || trainerEmp.email || null;
+    const trainer = employees.find((e) => e.uid === trainerUid);
+    return trainer?.name || trainer?.email || null;
   }
 
-  /* ---------- render ---------- */
-  if (!uid) return <main className="p-8">Please sign in.</main>;
-  if (loading) return <main className="p-8">Loading…</main>;
-  if (!storeId) return <main className="p-8">No store assigned.</main>;
-
-  const nonTraineeEmployees = everyone.filter(
-    (e) => e.active && String(e.role || "").toLowerCase() !== "trainee"
-  );
+  /* ---------- guards ---------- */
+  if (!uid) return <main className="p-6">Please sign in.</main>;
+  if (loading) return <main className="p-6">Loading…</main>;
+  if (!storeId) return <main className="p-6">No store assigned.</main>;
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
+    <main className="max-w-xl mx-auto p-4 space-y-6">
+      {/* Store */}
       {store && (
-        <section className="rounded-2xl border bg-white p-5">
-          <div className="text-lg font-semibold">Store #{store.number}</div>
+        <section className="rounded-xl border bg-white p-4">
+          <div className="font-semibold">Store #{store.number}</div>
           <div className="text-sm">{store.name}</div>
           <div className="text-sm">{store.address}</div>
         </section>
       )}
 
-      {/* NOTES */}
-      <section className="rounded-2xl border bg-white p-5">
-        <Link
-          href={`/manager/notes?store=${storeId}`}
-          className="flex items-center gap-3"
-        >
-          <div className="h-10 w-10 flex items-center justify-center rounded-xl border bg-white">
-            💬
-          </div>
-          <div>
-            <div className="font-semibold">Notes & Messages</div>
-            <div className="text-sm text-gray-600">
-              Tap to view and send messages
-            </div>
-          </div>
-        </Link>
-      </section>
+      {/* Trainees */}
+      <section className="rounded-xl border bg-white p-4">
+        <h2 className="font-semibold mb-3">Trainees</h2>
 
-      {/* STAFF */}
-      <section className="rounded-2xl border bg-white p-5">
-        <button
-          className="w-full flex justify-between items-center"
-          onClick={() => setOpenStaff(!openStaff)}
-        >
-          <div className="font-semibold text-gray-900">Store Staff</div>
-          <span className="text-gray-500">
-            {openStaff ? "▲" : "▼"}
-          </span>
-        </button>
+        {trainees.length === 0 ? (
+          <p className="text-sm text-gray-500">No trainees yet.</p>
+        ) : (
+          <div className="space-y-4">
+            {trainees.map((t) => (
+              <Link
+                key={t.uid}
+                href={`/manager/employees/${t.uid}`}
+                className="block rounded-lg border p-3 hover:bg-gray-50"
+              >
+                <div className="font-medium break-words">
+                  {t.name || t.email}
+                </div>
 
-        {openStaff && (
-          <div className="mt-5 space-y-6">
-            
-            {/* TRAINERS */}
-            <Block title="Trainers">
-              {trainers.length === 0
-                ? "No trainers yet."
-                : trainers.map((s) => (
-                    <div
-                      key={s.uid}
-                      className="text-xs sm:text-sm break-words whitespace-normal"
-                    >
-                      {s.name || s.email}
-                    </div>
-                  ))}
-            </Block>
-
-            {/* TRAINEES */}
-            <Block title="Trainees">
-              {trainees.length === 0
-                ? "No trainees yet."
-                : trainees.map((t) => {
-                    const trainerLabel = getTrainerLabelForTrainee(t.uid);
-
-                    return (
-                      <Link
-                        href={`/manager/employees/${t.uid}`}
-                        key={t.uid}
-                        className="mb-4 block cursor-pointer rounded-xl p-2 hover:bg-gray-50"
-                      >
-                        <div className="break-words whitespace-normal text-sm font-medium">
-                          {t.name || t.email}
-                        </div>
-
-                        {t.email && (
-                          <div className="text-xs text-gray-600 break-words whitespace-normal">
-                            {t.email}
-                          </div>
-                        )}
-
-                        {trainerLabel && (
-                          <div className="mt-1 text-[11px] text-gray-700">
-                            Trainer: {trainerLabel}
-                          </div>
-                        )}
-
-                        <div className="w-full bg-gray-200 rounded-full h-3 mt-2 overflow-hidden">
-                          <div
-                            className="h-3 rounded-full"
-                            style={{
-                              width: `${progressMap[t.uid] ?? 0}%`,
-                              backgroundColor: "#f2b705",
-                            }}
-                          />
-                        </div>
-
-                        <div className="text-xs text-gray-600 mt-1">
-                          {progressMap[t.uid] ?? 0}% complete
-                        </div>
-                      </Link>
-                    );
-                  })}
-            </Block>
-
-            {/* EMPLOYEES */}
-            <Block title="Employees">
-              {nonTraineeEmployees.length === 0
-                ? "No employees yet."
-                : nonTraineeEmployees.map((e) => (
-                    <div
-                      key={e.uid}
-                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs sm:text-sm break-words whitespace-normal"
-                    >
-                      <div className="break-words whitespace-normal">
-                        {e.name || e.email}
-                        {e.email && e.name && (
-                          <span className="text-gray-500"> • {e.email}</span>
-                        )}
-                      </div>
-                      <div className="text-[11px] sm:text-xs text-gray-600">
-                        {String(e.role || "").toLowerCase()}
-                      </div>
-                    </div>
-                  ))}
-            </Block>
-
-            {/* ASSIGN TRAINEE TO TRAINER */}
-            <section className="border rounded-2xl bg-white p-5">
-              <h3 className="font-semibold mb-3">
-                Assign Trainee → Trainer
-              </h3>
-
-              <div className="grid md:grid-cols-2 gap-3">
-                <label className="text-sm">
-                  Trainee
-                  <select
-                    value={selTrainee}
-                    onChange={(e) => setSelTrainee(e.target.value)}
-                    className="mt-1 w-full border rounded-md p-2 text-sm"
-                  >
-                    <option value="">Select trainee…</option>
-                    {trainees.map((t) => (
-                      <option key={t.uid} value={t.uid}>
-                        {t.name || t.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="text-sm">
-                  Trainer
-                  <select
-                    value={selTrainer}
-                    onChange={(e) => setSelTrainer(e.target.value)}
-                    className="mt-1 w-full border rounded-md p-2 text-sm"
-                  >
-                    <option value="">Select trainer…</option>
-                    {trainers.map((s) => (
-                      <option key={s.uid} value={s.uid}>
-                        {s.name || s.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="mt-3 flex items-center gap-3">
-                <button
-                  onClick={doAssign}
-                  disabled={!selTrainee || !selTrainer}
-                  className="border px-3 py-1 rounded text-sm hover:bg-gray-50 disabled:opacity-60"
-                >
-                  Assign
-                </button>
-
-                {status && (
-                  <span className="text-sm text-gray-600">{status}</span>
+                {getTrainerName(t.uid) && (
+                  <div className="text-xs text-gray-600 mt-1">
+                    Trainer: {getTrainerName(t.uid)}
+                  </div>
                 )}
-              </div>
-            </section>
+
+                <div className="mt-2 h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-yellow-500"
+                    style={{ width: `${progressMap[t.uid] ?? 0}%` }}
+                  />
+                </div>
+
+                <div className="text-xs text-gray-600 mt-1">
+                  {progressMap[t.uid] ?? 0}% complete
+                </div>
+              </Link>
+            ))}
           </div>
         )}
       </section>
-    </main>
-  );
-}
 
-/* ---------------- Block Component ---------------- */
-function Block({
-  title,
-  children,
-}: {
-  title: string;
-  children: any;
-}) {
-  return (
-    <div className="rounded-2xl bg-white p-5">
-      <div className="font-semibold mb-2">{title}</div>
-      <div className="text-sm break-words whitespace-normal">
-        {children}
-      </div>
-    </div>
+      {/* Store Users */}
+      <section className="rounded-xl border bg-white p-4">
+        <Link
+          href="/manager/users"
+          className="inline-flex items-center text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
+        >
+          Manage Store Users →
+        </Link>
+      </section>
+
+      {/* Notes */}
+      <section className="rounded-xl border bg-white p-4">
+        <Link
+          href={`/manager/notes?store=${storeId}`}
+          className="text-sm font-medium hover:underline"
+        >
+          Notes
+        </Link>
+      </section>
+    </main>
   );
 }

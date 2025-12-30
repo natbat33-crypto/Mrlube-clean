@@ -98,7 +98,7 @@ function ManagerShell({ children }: { children: ReactNode }) {
 
           <NavItem
             href="/manager"
-            label="Manager Dashboard"
+            label="Dashboard"
             icon={<Building className="h-5 w-5 lg:h-4 lg:w-4" />}
           />
 

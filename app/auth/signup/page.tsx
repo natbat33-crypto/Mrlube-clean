@@ -27,6 +27,12 @@ type Invite = {
   uses?: number;
 };
 
+/* 🔥 NEW — ADMIN DOMAIN CHECK */
+function isAdminDomain(email?: string | null) {
+  if (!email) return false;
+  return email.toLowerCase().endsWith("@mrlubemb.com");
+}
+
 export default function SignupPage() {
   return (
     <Suspense fallback={<div className="p-10 text-center">Loading…</div>}>
@@ -37,8 +43,6 @@ export default function SignupPage() {
 
 function SignupContent() {
   const search = useSearchParams();
-
-  // 🔥 NEW — supports BOTH ?invite=XYZ and ?code=XYZ
   const inviteParam = search.get("invite") || search.get("code") || "";
   const code = inviteParam.trim().toUpperCase();
 
@@ -48,7 +52,7 @@ function SignupContent() {
   const [loading, setLoading] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
-  // ------------------ VALIDATE INVITE ------------------
+  /* ------------------ VALIDATE INVITE ------------------ */
   useEffect(() => {
     let cancel = false;
 
@@ -85,7 +89,7 @@ function SignupContent() {
     };
   }, [code]);
 
-  // ------------------ SUBMIT ------------------
+  /* ------------------ SUBMIT ------------------ */
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus(null);
@@ -113,14 +117,20 @@ function SignupContent() {
       );
       const uid = cred.user.uid;
 
-      // Defaults
+      /* ---------- DEFAULTS ---------- */
       let role: Invite["role"] = "employee";
       let storeId: string | null = null;
       let managerId: string | null = null;
 
       const batch = writeBatch(db);
 
-      // ---------- APPLY INVITE CLAIM ----------
+      /* 🔥 AUTO-ADMIN (NO INVITE REQUIRED) */
+      if (!code && isAdminDomain(email)) {
+        role = "admin";
+        storeId = null;
+      }
+
+      /* ---------- APPLY INVITE ---------- */
       if (code) {
         const inviteRef = doc(db, "invites", code);
         const invSnap = await getDoc(inviteRef);
@@ -138,7 +148,6 @@ function SignupContent() {
         storeId = role === "admin" ? null : inv.storeId ?? null;
         managerId = inv.managerId ?? null;
 
-        // Update invite usage
         batch.set(
           inviteRef,
           typeof inv.maxUses === "number"
@@ -147,7 +156,7 @@ function SignupContent() {
                 usedByLast: uid,
                 usedAtLast: serverTimestamp(),
                 disabled:
-                  ((inv.uses || 0) + 1) >= inv.maxUses
+                  (inv.uses || 0) + 1 >= inv.maxUses
                     ? true
                     : inv.disabled ?? false,
               }
@@ -156,25 +165,14 @@ function SignupContent() {
         );
       }
 
-      // If no manager specified, fetch store's manager
-      if (!managerId && storeId && (role === "trainee" || role === "supervisor")) {
-        const sid = String(storeId);
-        const storeRef = doc(db, "stores", sid);
-        const storeSnap = await getDoc(storeRef);
-        if (storeSnap.exists()) {
-          const s = storeSnap.data() as any;
-          managerId =
-            s.managerUid ??
-            (Array.isArray(s.managerUids) && s.managerUids.length > 0
-              ? String(s.managerUids[0])
-              : null);
-        }
-      }
-
+      /* ---------- ACTIVE RULE ---------- */
       const shouldBeActive =
-        role === "manager" || role === "supervisor" || role === "trainee";
+        role === "admin" ||
+        role === "manager" ||
+        role === "supervisor" ||
+        role === "trainee";
 
-      // ---------- CREATE USER DOC ----------
+      /* ---------- USER DOC ---------- */
       batch.set(
         doc(db, "users", uid),
         {
@@ -182,241 +180,83 @@ function SignupContent() {
           role,
           storeId: storeId ?? null,
           managerId: managerId ?? null,
-          active: shouldBeActive ? true : false,
-          startDate: serverTimestamp(),
+          active: shouldBeActive,
           createdAt: serverTimestamp(),
         },
         { merge: true }
       );
 
-      // ---------- STORE EMPLOYEE RECORDS ----------
-      if (storeId) {
-        const sid = String(storeId);
-
-        // employees subcollection
-        if (role === "manager" || role === "supervisor" || role === "trainee") {
-          batch.set(
-            doc(db, `stores/${sid}/employees/${uid}`),
-            {
-              uid,
-              email: cred.user.email ?? null,
-              role,
-              storeId: sid,
-              active: true,
-              createdAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
-        }
-
-        // trainees subcollection
-        if (role === "trainee") {
-          batch.set(
-            doc(db, `stores/${sid}/trainees/${uid}`),
-            {
-              traineeId: uid,
-              traineeEmail: cred.user.email ?? null,
-              storeId: sid,
-              active: true,
-              createdAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
-        }
+      /* ---------- STORE EMPLOYEE ---------- */
+      if (storeId && role !== "admin") {
+        batch.set(
+          doc(db, `stores/${storeId}/employees/${uid}`),
+          {
+            uid,
+            email: cred.user.email ?? null,
+            role,
+            storeId,
+            active: shouldBeActive,
+            createdAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
       }
 
-      // ---------- SAVE ----------
       await batch.commit();
       await sendEmailVerification(cred.user);
       await signOut(auth);
 
       window.location.assign("/auth/login?verify=1");
     } catch (err: any) {
-      const c = String(err?.code || "");
-      let msg = err?.message || "❌ Something went wrong. Please try again.";
-      if (c.includes("email-already-in-use"))
+      let msg = err?.message || "❌ Something went wrong.";
+      if (String(err?.code).includes("email-already-in-use"))
         msg = "❌ That email is already in use.";
-      else if (c.includes("invalid-email"))
-        msg = "❌ Please enter a valid email.";
-      else if (c.includes("weak-password"))
-        msg = "❌ Weak password.";
       setStatus(msg);
     } finally {
       setLoading(false);
     }
   }
 
-  // ------------------ UI ------------------
-  const blue = "#0b53a6";
-  const blueHover = "#094a92";
-  const border = "#e5e7eb";
-  const textMuted = "#556070";
-
+  /* ------------------ UI ------------------ */
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        background: "#f6f8fb",
-      }}
-    >
-      <div
-        style={{
-          width: "min(440px, 92vw)",
-          background: "#fff",
-          borderRadius: 16,
-          boxShadow: "0 12px 36px rgba(0,0,0,0.08)",
-          padding: 24,
-        }}
-      >
-        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <span
-            style={{
-              background: blue,
-              color: "#fff",
-              fontWeight: 800,
-              borderRadius: 999,
-              padding: "6px 12px",
-              fontSize: 12,
-              letterSpacing: 0.2,
-            }}
-          >
-            Mr. Lube
-          </span>
-          <span
-            style={{
-              background: "#f2b705",
-              color: "#1b1b1b",
-              fontWeight: 800,
-              borderRadius: 999,
-              padding: "6px 12px",
-              fontSize: 12,
-              letterSpacing: 0.2,
-            }}
-          >
-            Training
-          </span>
-        </div>
-
-        <h1
-          style={{
-            fontSize: 26,
-            fontWeight: 800,
-            margin: "6px 0 4px",
-            color: "#111827",
-          }}
-        >
-          Employee Signup
-        </h1>
-        <p style={{ color: textMuted, marginBottom: 18 }}>
+    <main className="min-h-screen grid place-items-center bg-gray-50">
+      <div className="w-[min(440px,92vw)] bg-white rounded-xl shadow-xl p-6">
+        <h1 className="text-2xl font-bold mb-2">Employee Signup</h1>
+        <p className="text-gray-600 mb-4">
           Create your Mr. Lube training account
         </p>
 
-        <form onSubmit={onSubmit} style={{ display: "grid", gap: 14 }}>
-          <label
-            style={{
-              fontWeight: 600,
-              fontSize: 14,
-              color: "#111827",
-            }}
-          >
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Your email"
-              required
-              autoComplete="email"
-              style={{
-                width: "100%",
-                marginTop: 6,
-                padding: "12px 14px",
-                borderRadius: 10,
-                border: `1px solid ${border}`,
-                outline: "none",
-              }}
-            />
-          </label>
+        <form onSubmit={onSubmit} className="grid gap-4">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            required
+            className="border rounded-lg p-3"
+          />
 
-          <label
-            style={{
-              fontWeight: 600,
-              fontSize: 14,
-              color: "#111827",
-            }}
-          >
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Create a strong password"
-              required
-              autoComplete="new-password"
-              style={{
-                width: "100%",
-                marginTop: 6,
-                padding: "12px 14px",
-                borderRadius: 10,
-                border: `1px solid ${border}`,
-                outline: "none",
-              }}
-            />
-          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            required
+            className="border rounded-lg p-3"
+          />
 
           <button
             type="submit"
             disabled={loading}
-            style={{
-              marginTop: 8,
-              background: blue,
-              color: "#fff",
-              fontWeight: 800,
-              border: "none",
-              borderRadius: 10,
-              padding: "12px 18px",
-              cursor: loading ? "not-allowed" : "pointer",
-              opacity: loading ? 0.75 : 1,
-            }}
-            onMouseOver={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background =
-                blueHover;
-            }}
-            onMouseOut={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background = blue;
-            }}
+            className="bg-blue-700 text-white rounded-lg py-3 font-bold"
           >
             {loading ? "Creating…" : "Sign Up"}
           </button>
         </form>
 
         {status && (
-          <p
-            style={{
-              marginTop: 12,
-              color: status.startsWith("❌") ? "#b00020" : "#137333",
-              fontSize: 14,
-            }}
-          >
-            {status}
-          </p>
+          <p className="mt-3 text-sm text-red-600">{status}</p>
         )}
-
-        <p
-          style={{
-            marginTop: 16,
-            color: textMuted,
-            fontSize: 14,
-            textAlign: "center",
-          }}
-        >
-          Already have an account?{" "}
-          <a href="/auth/login" style={{ color: blue, fontWeight: 700 }}>
-            Log in
-          </a>
-        </p>
       </div>
     </main>
   );
