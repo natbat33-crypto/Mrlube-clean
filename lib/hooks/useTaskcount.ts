@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { db } from "../../../lib/firebase";
+import { db } from "@/lib/firebase";
+
 import { collection, getCountFromServer } from "firebase/firestore";
 
 export function useTaskCount(weekId: string) {

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Mr Lube Training</string>
+    <string name="title_activity_main">Mr Lube Training</string>
+    <string name="package_name">com.mrlube.training</string>
+    <string name="custom_url_scheme">com.mrlube.training</string>
+</resources>
