@@ -36,12 +36,7 @@ export default function RootLayout({
           w-full
           overflow-x-hidden
           bg-[var(--background,#f8f9fb)]
-
-          /* iOS SAFE AREA FIXES */
-          pt-[env(safe-area-inset-top)]
-          pb-[env(safe-area-inset-bottom)]
-          pl-[env(safe-area-inset-left)]
-          pr-[env(safe-area-inset-right)]
+          safe-area
         `}
       >
         {/* GLOBAL NAME POPUP (unchanged) */}

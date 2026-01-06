@@ -16,6 +16,7 @@ export default function HomeRedirect() {
     return () => unsub();
   }, [router]);
 
-  return null;
+  // Safe-area wrapper prevents iOS first-render hitbox issues
+  return <div className="safe-area" />;
 }
 

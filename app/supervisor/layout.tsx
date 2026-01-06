@@ -21,11 +21,9 @@ import { doc, getDoc } from "firebase/firestore";
 export default function SupervisorLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
-  // FORCE SIDEBAR CLOSED unless user opens it
   const [open, setOpen] = React.useState(false);
   const [storeId, setStoreId] = React.useState<string | null>(null);
 
-  // Load storeId
   React.useEffect(() => {
     async function load() {
       const u = auth.currentUser;
@@ -49,9 +47,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
     }
     load();
   }, []);
-
-  // 🔥 WE REMOVE THE DESKTOP AUTO-OPEN ENTIRELY
-  // This is WHY it wouldn't close before.
 
   const NavLink = ({
     href,
@@ -101,10 +96,21 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
 
   return (
     <RoleGate allow={["supervisor", "admin"]}>
-      <div className="min-h-screen bg-[#f7f7f7]">
-        
+      {/* SAFE AREA WRAPPER */}
+      <div className="safe-area min-h-screen bg-[#f7f7f7]">
+
         {/* TOP BAR */}
-        <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">
+        <div
+          className="
+            h-14
+            bg-[#0b53a6]
+            text-white
+            sticky
+            top-[env(safe-area-inset-top)]
+            z-50
+            shadow
+          "
+        >
           <div className="h-full px-4 flex items-center justify-between">
 
             {/* BRAND */}
@@ -129,18 +135,16 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
 
         {/* SIDEBAR */}
         <aside
-          className={`fixed top-14 bottom-0 left-0 w-72 bg-[#0b53a6] text-white shadow-xl
+          className={`fixed left-0 w-72 bg-[#0b53a6] text-white shadow-xl
             transition-transform duration-300 z-40
+            top-[calc(3.5rem+env(safe-area-inset-top))]
+            bottom-0
             ${
-              open
-                ? "translate-x-0"
-                : "-translate-x-full"
+              open ? "translate-x-0" : "-translate-x-full"
             }
             lg:w-64`}
         >
           <div className="h-full flex flex-col p-4 lg:p-6">
-
-            {/* REMOVED LOGGED IN AS PART */}
 
             <NavLink
               href="/supervisor"
@@ -148,7 +152,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               icon={<Users className="h-5 w-5 lg:h-4 lg:w-4" />}
             />
 
-            {/* REVIEW */}
             <div className="mt-4">
               <div className="px-3 py-2 text-white/70 flex items-center justify-between">
                 <span className="flex items-center gap-2">
@@ -165,7 +168,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </ul>
             </div>
 
-            {/* NOTES */}
             {storeId && (
               <div className="mt-6">
                 <NavLink
@@ -176,7 +178,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
-            {/* SIGN OUT */}
             <button
               onClick={() => signOut(auth)}
               className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-red-100 hover:bg-red-500/20"
@@ -187,7 +188,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
           </div>
         </aside>
 
-        {/* OVERLAY FOR MOBILE */}
         {open && (
           <div
             className="fixed inset-0 bg-black/40 z-30 lg:hidden"

@@ -1,18 +1,18 @@
-// lib/firebase.ts
 "use client";
 
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import {
   getAuth,
   setPersistence,
-  browserLocalPersistence,
+  indexedDBLocalPersistence,
 } from "firebase/auth";
 import {
   initializeFirestore,
   setLogLevel,
 } from "firebase/firestore";
 
-// ---- ENV CONFIG (Vercel injects PROD automatically) ----
+// ---- ENV CONFIG ----
+// Uses NEXT_PUBLIC_* vars (correct for Next + Capacitor)
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN!,
@@ -29,15 +29,18 @@ const app: FirebaseApp =
 // ---- AUTH ----
 const auth = getAuth(app);
 
-// 🔥 MAKE LOGIN STICK FOREVER
-// prevents: unauthorized, token expiry issues, random logouts
-setPersistence(auth, browserLocalPersistence).catch((err) => {
+/**
+ * ✅ CRITICAL FOR iOS / TESTFLIGHT
+ * indexedDBLocalPersistence works in WebViews
+ * browserLocalPersistence does NOT
+ */
+setPersistence(auth, indexedDBLocalPersistence).catch((err) => {
   console.warn("Auth persistence could not be set:", err);
 });
 
 // ---- FIRESTORE ----
 const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true, // Makes Firestore stable in all network environments
+  experimentalForceLongPolling: true, // ✅ required for iOS network stability
 });
 
 // ---- DEV LOGGING ----

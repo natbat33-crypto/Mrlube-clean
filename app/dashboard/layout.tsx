@@ -28,7 +28,6 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
 
-  // redirect if no auth
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) router.replace("/auth/login");
@@ -55,9 +54,20 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#f7f7f7]">
+    /* SAFE AREA WRAPPER */
+    <div className="safe-area min-h-screen bg-[#f7f7f7]">
       {/* ----------------- TOP BAR ----------------- */}
-      <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">
+      <div
+        className="
+          h-14
+          bg-[#0b53a6]
+          text-white
+          sticky
+          top-[env(safe-area-inset-top)]
+          z-50
+          shadow
+        "
+      >
         <div className="h-full px-4 flex items-center justify-between">
           {/* Branding */}
           <div className="flex items-center gap-2">
@@ -81,19 +91,16 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
       {/* ----------------- SIDEBAR ----------------- */}
       <aside
-        className={`fixed top-14 bottom-0 left-0 w-72 bg-[#0b53a6] text-white shadow-xl
+        className={`fixed left-0 w-72 bg-[#0b53a6] text-white shadow-xl
           transition-transform duration-300 z-40
+          top-[calc(3.5rem+env(safe-area-inset-top))]
+          bottom-0
           ${open ? "translate-x-0" : "-translate-x-full"}
           lg:w-64`}
       >
         <div className="h-full flex flex-col p-4 lg:p-6">
-          {/* Dashboard Home */}
           <NavLink href="/dashboard" label="Dashboard Home" />
 
-          {/* --------- REMOVED MODULES SECTION --------- */}
-          {/* NOTHING ELSE REMOVED */}
-
-          {/* Sign Out */}
           <button
             onClick={async () => {
               try {
@@ -109,7 +116,6 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Overlay (mobile) */}
       {open && (
         <div
           className="fixed inset-0 bg-black/40 z-30 lg:hidden"
@@ -118,7 +124,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       )}
 
       {/* ----------------- MAIN CONTENT ----------------- */}
-      <main className={`transition-all duration-300 p-4 lg:p-6`}>
+      <main className="transition-all duration-300 p-4 lg:p-6">
         {children}
 
         <footer className="mt-6 pt-4 text-center text-xs text-gray-500 border-t">

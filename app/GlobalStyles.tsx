@@ -18,7 +18,26 @@ export default function GlobalStyles() {
         --shadow-md: 0 2px 6px rgba(0,0,0,.12);
       }
 
-      html, body { background: var(--bg); color: var(--fg); margin: 0; }
+      html, body {
+        background: var(--bg);
+        color: var(--fg);
+        margin: 0;
+      }
+
+      /* ============================= */
+      /* iOS SAFE AREA (DO NOT REMOVE) */
+      /* ============================= */
+
+      .safe-area {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+
+      .pt-safe {
+        padding-top: env(safe-area-inset-top);
+      }
 
       /* ===== Common utilities used across dashboards ===== */
 
@@ -87,21 +106,38 @@ export default function GlobalStyles() {
       .bg-background{background:var(--bg)}
       .bg-white{background:#fff}
 
-      /* progress bars (works with your <Progress className="h-2 [&>div]:bg-yellow-400">) */
+      /* progress bars */
       .h-2{height:.5rem;background:#e5e7eb;border-radius:9999px;overflow:hidden}
       .h-2 > div{height:100%;background:var(--yellow)}
 
-      /* yellow pill badge like your "Training" chip */
-      .badge { display:inline-flex; align-items:center; gap:.375rem; padding:.25rem .5rem;
-               border-radius:9999px; background:var(--yellow); color:#111; font-weight:600; font-size:.875rem; }
+      /* yellow pill badge */
+      .badge {
+        display:inline-flex;
+        align-items:center;
+        gap:.375rem;
+        padding:.25rem .5rem;
+        border-radius:9999px;
+        background:var(--yellow);
+        color:#111;
+        font-weight:600;
+        font-size:.875rem;
+      }
 
-      /* simple sidebar base (if your pages use bg-primary for the left rail) */
+      /* sidebar helpers */
       .sidebar-base { background: var(--blue); color:#fff; }
-      .sidebar-link { display:flex; align-items:center; gap:.5rem; padding:.5rem .75rem; border-radius:8px; color:#fff; text-decoration:none; }
+      .sidebar-link {
+        display:flex;
+        align-items:center;
+        gap:.5rem;
+        padding:.5rem .75rem;
+        border-radius:8px;
+        color:#fff;
+        text-decoration:none;
+      }
       .sidebar-link:hover { background: rgba(255,255,255,.10); }
       .sidebar-muted { color: rgba(255,255,255,.85); }
-      
-      /* lucide icon sizes (used in your JSX) */
+
+      /* lucide icon sizes */
       .h-5{height:20px}.w-5{width:20px}
       .h-6{height:24px}.w-6{width:24px}
       .h-8{height:32px}.w-8{width:32px}
