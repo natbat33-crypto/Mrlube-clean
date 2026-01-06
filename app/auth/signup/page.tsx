@@ -206,7 +206,7 @@ function SignupContent() {
       await sendEmailVerification(cred.user);
       await signOut(auth);
 
-      window.location.assign("/auth/login?verify=1");
+      window.location.assign("/login?verify=1");
     } catch (err: any) {
       let msg = err?.message || "❌ Something went wrong.";
       if (String(err?.code).includes("email-already-in-use"))
