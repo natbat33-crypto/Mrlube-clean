@@ -25,20 +25,22 @@ export default function RoleGate({ allow, children }: Props) {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
+      // ✅ CRITICAL FIX:
+      // If NOT logged in → ALWAYS go to login
       if (!user) {
-        router.replace("/auth/login");
+        router.replace("/login");
         return;
       }
 
       try {
-        // Force fresh token (prevents stale role issues)
+        // Ensure fresh auth state
         await user.getIdToken(true);
 
         const snap = await getDoc(doc(db, "users", user.uid));
 
-        // ⚠️ Missing user doc → allow temporarily (prevents lockouts)
+        // ✅ Safety: missing profile should NEVER block login
         if (!snap.exists()) {
-          console.warn("RoleGate: user doc missing, allowing temporarily");
+          console.warn("RoleGate: missing user doc, allowing access");
           setPhase("allowed");
           return;
         }
@@ -46,33 +48,38 @@ export default function RoleGate({ allow, children }: Props) {
         const rawRole = snap.data()?.role;
         const storeId = snap.data()?.storeId;
 
-        const role = typeof rawRole === "string"
-          ? (rawRole.toLowerCase() as AllowedRole)
-          : undefined;
+        const role =
+          typeof rawRole === "string"
+            ? (rawRole.toLowerCase() as AllowedRole)
+            : undefined;
 
-        // ✅ Fallback ONLY for unassigned employees
+        // ✅ Employees without store → pending page
         if (role === "employee" && !storeId) {
           router.replace("/employee/pending");
           return;
         }
 
-        // ✅ Allowed roles (manager + gm work identically)
+        // ✅ Valid role access
         if (role && allow.includes(role)) {
           setPhase("allowed");
           return;
         }
 
-        // ⚠️ Role undefined / slow write → allow temporarily
+        // ✅ If role not yet written, DO NOT block
         if (!role) {
           console.warn("RoleGate: role undefined, allowing temporarily");
           setPhase("allowed");
           return;
         }
 
-        // 🚫 Truly unauthorized
+        // 🚫 Only reach unauthorized if:
+        // - logged in
+        // - role exists
+        // - role is explicitly disallowed
         router.replace("/unauthorized");
       } catch (err) {
-        console.warn("RoleGate: temporary allow due to error", err);
+        // ✅ Fail open instead of locking users
+        console.warn("RoleGate: error, allowing temporarily", err);
         setPhase("allowed");
       }
     });
