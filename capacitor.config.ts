@@ -7,6 +7,9 @@ const config: CapacitorConfig = {
   server: {
     url: 'https://mrlube-clean.vercel.app',
     cleartext: true
+  },
+  ios: {
+    contentInset: 'automatic'
   }
 };
 

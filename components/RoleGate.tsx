@@ -96,7 +96,7 @@ export default function RoleGate({ allow, children }: Props) {
 
   if (phase === "checking") {
     return (
-      <div className="min-h-screen flex items-center justify-center text-gray-500">
+      <div className="min-h-[100svh] flex items-center justify-center text-gray-500">
         Loading…
       </div>
     );

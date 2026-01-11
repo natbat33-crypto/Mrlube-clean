@@ -52,7 +52,7 @@ export function SimpleLayout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-[100svh] bg-background">
       {/* Top bar with hamburger */}
       <div className="bg-primary text-primary-foreground p-3 flex items-center justify-between sticky top-0 z-50 shadow-sm">
         <MrLubeLogo className="h-7" />
@@ -70,7 +70,7 @@ export function SimpleLayout({ children }: { children: React.ReactNode }) {
       <div className="flex">
         {/* Slide-in sidebar */}
         <aside
-          className={`fixed left-0 top-0 h-screen w-72 z-50 bg-primary text-primary-foreground transform transition-transform duration-300 ease-in-out
+          className={`fixed left-0 top-0 min-h-[100svh] w-72 z-50 bg-primary text-primary-foreground transform transition-transform duration-300 ease-in-out
                       ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}
         >
           <div className="flex h-full flex-col">
@@ -173,7 +173,7 @@ export function SimpleLayout({ children }: { children: React.ReactNode }) {
 
         {/* Content area */}
         <div className="flex-1">
-          <main className="p-4 lg:p-6 min-h-screen flex flex-col">
+          <main className="p-4 lg:p-6 min-h-[100svh] flex flex-col">
             <div className="flex-1">{children}</div>
 
             <footer>

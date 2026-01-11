@@ -168,7 +168,7 @@ function LoginContent() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+    <main className="min-h-[100svh] bg-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-md p-6 sm:p-8">
         <div className="flex items-center justify-center gap-2">
           <span className="inline-flex items-center rounded-full bg-[#0b3d91] px-3 py-1 text-white font-semibold">

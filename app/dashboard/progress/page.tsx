@@ -88,7 +88,7 @@ export default function ProgressPage() {
 
   if (!authChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-sm text-gray-600">
+      <div className="min-h-[100svh] flex items-center justify-center text-sm text-gray-600">
         Loading your account…
       </div>
     );

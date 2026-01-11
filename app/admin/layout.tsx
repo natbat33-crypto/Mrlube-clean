@@ -64,7 +64,7 @@ function AdminShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#f7f7f7]">
+    <div className="min-h-[100svh] bg-[#f7f7f7]">
 
       {/* ---------------- TOP BAR ---------------- */}
       <div className="h-14 bg-[#0b53a6] text-white sticky top-0 z-50 shadow">

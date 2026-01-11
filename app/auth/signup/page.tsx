@@ -219,7 +219,7 @@ function SignupContent() {
 
   /* ------------------ UI ------------------ */
   return (
-    <main className="min-h-screen grid place-items-center bg-gray-50">
+    <main className="min-h-[100svh] grid place-items-center bg-gray-50">
       <div className="w-[min(440px,92vw)] bg-white rounded-xl shadow-xl p-6">
         <h1 className="text-2xl font-bold mb-2">Employee Signup</h1>
         <p className="text-gray-600 mb-4">

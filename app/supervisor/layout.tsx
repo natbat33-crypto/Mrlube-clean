@@ -97,7 +97,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
   return (
     <RoleGate allow={["supervisor", "admin"]}>
       {/* SAFE AREA WRAPPER */}
-      <div className="safe-area min-h-screen bg-[#f7f7f7]">
+      <div className="safe-area min-h-[100svh] bg-[#f7f7f7]">
 
         {/* TOP BAR */}
         <div

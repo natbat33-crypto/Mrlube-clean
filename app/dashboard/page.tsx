@@ -322,7 +322,7 @@ export default function DashboardPage() {
 
   if (isResolving && !storeId) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-[100svh] flex items-center justify-center bg-slate-50">
         <p className="text-slate-600 text-sm">
           Loading your trainee dashboard…
         </p>
@@ -332,7 +332,7 @@ export default function DashboardPage() {
 
   if (!isResolving && storeError && !storeId) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-[100svh] flex items-center justify-center bg-slate-50">
         <div className="max-w-md text-center space-y-2">
           <h1 className="text-xl font-semibold text-primary">
             Trainee Dashboard

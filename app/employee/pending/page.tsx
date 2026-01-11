@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 export default function EmployeePendingPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center px-6">
+    <div className="flex min-h-[100svh] items-center justify-center px-6">
       <div className="max-w-md text-center space-y-4">
         <h1 className="text-xl font-semibold">
           Waiting for assignment
