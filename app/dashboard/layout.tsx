@@ -28,9 +28,14 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
 
+  /* --------------------------------------------- */
+  /*  AUTH CHECK: if signed out → go to login      */
+  /* --------------------------------------------- */
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
-      if (!u) router.replace("/auth/login");
+      if (!u) {
+        router.replace("/auth/login");
+      }
     });
     return () => unsub();
   }, [router]);
@@ -55,12 +60,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-[100svh] bg-[#f7f7f7] w-full">
-
       {/* ================= HEADER ================= */}
-      {/* safe-area ONLY lives here */}
       <div className="fixed top-0 left-0 right-0 z-50 safe-pad bg-[#0b53a6] shadow">
         <div className="h-[var(--header-h)] px-4 flex items-center justify-between text-white">
-
           {/* Branding */}
           <div className="flex items-center gap-2">
             <span className="px-3 py-1 rounded-full bg-[#0b3d91] text-white font-extrabold">
@@ -92,12 +94,14 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         <div className="h-full flex flex-col p-4 lg:p-6">
           <NavLink href="/dashboard" label="Dashboard Home" />
 
+          {/* ---------- FIXED LOGOUT ---------- */}
           <button
             onClick={async () => {
               try {
                 await signOut(auth);
               } finally {
-                window.location.assign("/auth/login");
+                // Use only router.replace to prevent 404
+                router.replace("/auth/login");
               }
             }}
             className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-red-200 hover:bg-red-500/20"
@@ -116,7 +120,6 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       )}
 
       {/* ================= CONTENT ================= */}
-      {/* pushed down by header + safe-area */}
       <main className="content-under-header p-4 lg:p-6">
         {children}
 
