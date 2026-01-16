@@ -42,7 +42,12 @@ type ProgressItem = {
 
 type ProgressMap = Record<string, ProgressItem>;
 
-function num(v: unknown): number {
+function getTaskKey(id: string) {
+  const parts = id.split("__");
+  return parts[parts.length - 1];
+}
+
+function num(v: any): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 9999;
 }
@@ -54,6 +59,7 @@ export default function Day1SupervisorPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [supervisorUid, setSupervisorUid] = useState<string | null>(null);
 
+  const [tasksById, setTasksById] = useState<Record<string, Task>>({});
   const [tasks, setTasks] = useState<Task[]>([]);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [loadingTasks, setLoadingTasks] = useState(true);
@@ -104,15 +110,25 @@ export default function Day1SupervisorPage() {
         setLoadingTasks(true);
 
         const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
-        const list: Task[] = snap.docs
-          .map((d) => ({ id: d.id, ...(d.data() as any) }))
-          .sort(
-            (a, b) =>
-              num(a.order ?? a.sort_order) - num(b.order ?? b.sort_order)
-          );
+        const byId: Record<string, Task> = {};
+        const list: Task[] = [];
+
+        snap.docs.forEach((d) => {
+          const meta = { id: d.id, ...(d.data() as any) };
+          byId[d.id] = meta;
+          list.push(meta);
+        });
+
+        // SAME SORTING AS WEEK 1
+        list.sort((a, b) => {
+          const oa = a.order ?? a.sort_order ?? 9999;
+          const ob = b.order ?? b.sort_order ?? 9999;
+          return oa - ob;
+        });
 
         if (!alive) return;
         setTasks(list);
+        setTasksById(byId);
       } catch (e: any) {
         if (!alive) return;
         setError(e?.message ?? "Failed to load tasks");
@@ -155,7 +171,7 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* ---------------- AUTO-SET section approval ---------------- */
+  /* ---------------- AUTO-SET SECTION APPROVAL ---------------- */
   useEffect(() => {
     if (!selectedTraineeId || tasks.length === 0) return;
 
@@ -218,7 +234,6 @@ export default function Day1SupervisorPage() {
 
   return (
     <div className="space-y-6">
-      {/* Back Button */}
       <Link
         href="/supervisor"
         className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
@@ -226,42 +241,20 @@ export default function Day1SupervisorPage() {
         ← Back to Dashboard
       </Link>
 
-      {/* Trainee Selector */}
-      {storeId && trainees.length > 0 && (
-        <div className="space-y-1">
-          <label className="text-sm text-muted-foreground">
-            Reviewing trainee:
-          </label>
-
-          <select
-            value={selectedTraineeId ?? ""}
-            onChange={(e) => setSelectedTraineeId(e.target.value || null)}
-            className="border rounded-md p-2 text-sm"
-          >
-            <option value="" disabled>
-              Select trainee…
-            </option>
-            {trainees.map((t) => (
-              <option key={t.id} value={t.traineeId}>
-                {t.email || t.traineeEmail || t.userEmail || t.traineeId}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* --- Day 1 Review Card (same UI style as Week 1) --- */}
       <Card className="border-primary/20">
         <CardHeader>
           <CardTitle>Review — Day 1</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {/* Summary row */}
+
+          {/* Summary row — EXACT as Week 1 */}
           <div className="flex flex-wrap items-end gap-6">
             <div className="text-sm text-muted-foreground">
               <span className="font-medium">{approvedCount}</span> approved •{" "}
-              <span className="font-medium">{tasks.length - approvedCount}</span>{" "}
+              <span className="font-medium">
+                {tasks.length - approvedCount}
+              </span>{" "}
               waiting • <span className="font-medium">{pct}%</span> approved
             </div>
 
@@ -274,36 +267,39 @@ export default function Day1SupervisorPage() {
             </div>
           </div>
 
-          {/* Task list */}
-          {tasks.map((t, idx) => {
-            const meta = t;
-            const done = progress[t.id]?.done ?? false;
-            const isApproved = progress[t.id]?.approved ?? false;
+          {/* Task list — EXACT same UI as Week 1 */}
+          <ul className="space-y-2">
+            {tasks.map((t) => {
+              const meta = t;
+              const done = progress[t.id]?.done ?? false;
+              const approved = progress[t.id]?.approved ?? false;
 
-            return (
-              <li
-                key={t.id}
-                className="list-none flex items-center justify-between gap-3 border rounded-md p-3 bg-white"
-              >
-                <div className="font-semibold text-sm break-words">
-                  {meta.order ? `${meta.order}. ` : ""}
-                  {meta.title}
-                </div>
-
-                <button
-                  onClick={() => toggleApprove(t.id, !isApproved)}
-                  className={`px-3 py-1.5 rounded-md text-sm border transition ${
-                    isApproved
-                      ? "bg-green-600 text-white border-green-700 hover:bg-green-700"
-                      : "bg-white border-gray-300 hover:bg-gray-50"
-                  } ${!done ? "opacity-50 cursor-not-allowed" : ""}`}
-                  disabled={!done}
+              return (
+                <li
+                  key={t.id}
+                  className="flex items-center justify-between gap-3 border rounded-md p-3 bg-white"
                 >
-                  {isApproved ? "Unapprove" : "Approve"}
-                </button>
-              </li>
-            );
-          })}
+                  <div className="font-semibold text-sm break-words">
+                    {meta.order ? `${meta.order}. ` : ""}
+                    {meta.title}
+                  </div>
+
+                  <button
+                    onClick={() => toggleApprove(t.id, !approved)}
+                    disabled={!done}
+                    className={`px-3 py-1.5 rounded-md text-sm border transition ${
+                      approved
+                        ? "bg-green-600 text-white border-green-700 hover:bg-green-700"
+                        : "bg-white border-gray-300 hover:bg-gray-50"
+                    } ${!done ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    {approved ? "Unapprove" : "Approve"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
         </CardContent>
       </Card>
     </div>

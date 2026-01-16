@@ -25,17 +25,19 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
   const [storeId, setStoreId] = React.useState<string | null>(null);
 
   /* -------------------------------------------------------
-     AUTH LISTENER → redirect if not logged in
+     AUTH LISTENER → redirect immediately if logged out
   -------------------------------------------------------- */
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
-      if (!u) window.location.assign("/auth/login");
+      if (!u) {
+        window.location.assign("/auth/login");
+      }
     });
     return unsub;
   }, []);
 
   /* -------------------------------------------------------
-     FETCH STORE ID
+     FETCH STORE ID FOR NOTES LINK
   -------------------------------------------------------- */
   React.useEffect(() => {
     async function load() {
@@ -61,6 +63,9 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
     load();
   }, []);
 
+  /* -------------------------------------------------------
+     NAV LINK HELPERS
+  -------------------------------------------------------- */
   const NavLink = ({
     href,
     icon,
@@ -107,6 +112,9 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
     );
   };
 
+  /* -------------------------------------------------------
+     LAYOUT
+  -------------------------------------------------------- */
   return (
     <RoleGate allow={["supervisor", "admin"]}>
       <div className="safe-area min-h-[100svh] bg-[#f7f7f7]">
@@ -150,9 +158,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
             transition-transform duration-300 z-40
             top-[calc(3.5rem+env(safe-area-inset-top))]
             bottom-0
-            ${
-              open ? "translate-x-0" : "-translate-x-full"
-            }
+            ${open ? "translate-x-0" : "-translate-x-full"}
             lg:w-64`}
         >
           <div className="h-full flex flex-col p-4 lg:p-6">
@@ -189,7 +195,9 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
-            {/* FIXED SIGN-OUT */}
+            {/* -------------------------------------------------------
+                FIXED SIGN OUT (NO MORE 404)
+            -------------------------------------------------------- */}
             <button
               onClick={async () => {
                 try {
