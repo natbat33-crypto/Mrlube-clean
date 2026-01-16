@@ -14,7 +14,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { auth, db } from "@/lib/firebase";
-import { signOut } from "firebase/auth";
+import { signOut, onAuthStateChanged } from "firebase/auth";
 import RoleGate from "@/components/RoleGate";
 import { doc, getDoc } from "firebase/firestore";
 
@@ -24,6 +24,19 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
   const [open, setOpen] = React.useState(false);
   const [storeId, setStoreId] = React.useState<string | null>(null);
 
+  /* -------------------------------------------------------
+     AUTH LISTENER → redirect if not logged in
+  -------------------------------------------------------- */
+  React.useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (!u) window.location.assign("/auth/login");
+    });
+    return unsub;
+  }, []);
+
+  /* -------------------------------------------------------
+     FETCH STORE ID
+  -------------------------------------------------------- */
   React.useEffect(() => {
     async function load() {
       const u = auth.currentUser;
@@ -96,7 +109,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
 
   return (
     <RoleGate allow={["supervisor", "admin"]}>
-      {/* SAFE AREA WRAPPER */}
       <div className="safe-area min-h-[100svh] bg-[#f7f7f7]">
 
         {/* TOP BAR */}
@@ -112,7 +124,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
           "
         >
           <div className="h-full px-4 flex items-center justify-between">
-
             {/* BRAND */}
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 rounded-full bg-[#0b53a6] text-white font-extrabold">
@@ -178,8 +189,15 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
+            {/* FIXED SIGN-OUT */}
             <button
-              onClick={() => signOut(auth)}
+              onClick={async () => {
+                try {
+                  await signOut(auth);
+                } finally {
+                  window.location.assign("/auth/login");
+                }
+              }}
               className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-red-100 hover:bg-red-500/20"
             >
               <LogOut className="h-5 w-5" /> Sign out
@@ -195,7 +213,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
           />
         )}
 
-        {/* MAIN CONTENT */}
+        {/* MAIN */}
         <main
           className={`transition-all duration-300 p-4 lg:p-6 ${
             open ? "lg:ml-64" : ""
