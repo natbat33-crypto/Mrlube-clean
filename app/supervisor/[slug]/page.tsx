@@ -22,6 +22,9 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+
 /* ----------------------------------
    TYPES & CONSTANTS
 ---------------------------------- */
@@ -269,194 +272,120 @@ export default function Day1SupervisorPage() {
   }
 
   /* ----------------------------------
-     UI
+     UI (MATCHES WEEK 1)
   ---------------------------------- */
   return (
-    <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      {/* Back (MATCH WEEK 1 TEXT) */}
-      <div style={{ marginBottom: 16 }}>
-        <Link
-          href="/supervisor"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            background: "#fff",
-            border: `1px solid ${GRAY}`,
-            borderRadius: 999,
-            padding: "8px 14px",
-            fontWeight: 600,
-            textDecoration: "none",
-            color: NAVY,
-          }}
-        >
-          ← Back to Dashboard
-        </Link>
-      </div>
-
-      {/* HEADER + SMALL BAR ON RIGHT (MIRROR WEEK 1) */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 16,
-          marginBottom: 18,
-        }}
+    <main className="space-y-6 max-w-3xl mx-auto p-6">
+      {/* Back (MATCH WEEK 1 TEXT & STYLE) */}
+      <Link
+        href="/supervisor"
+        className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
       >
-        {/* LEFT: title + counts */}
-        <div>
-          <h2 style={{ marginBottom: 4 }}>Day 1 — Orientation Review</h2>
-          <div style={{ fontSize: 14, color: "#4b5563" }}>
-            {waitingCount} waiting • {approvedCount} approved • {pct}% approved
-          </div>
+        ← Back to Dashboard
+      </Link>
+
+      {/* Trainee selector (kept) */}
+      {storeId && trainees.length > 0 && (
+        <div className="space-y-1">
+          <label className="text-sm text-muted-foreground">
+            Reviewing trainee:
+          </label>
+
+          <select
+            value={selectedTraineeId ?? ""}
+            onChange={(e) => setSelectedTraineeId(e.target.value || null)}
+            className="border rounded-md p-2 text-sm min-w-[260px]"
+          >
+            <option value="" disabled>
+              Select trainee…
+            </option>
+
+            {trainees.map((t) => (
+              <option key={t.id} value={t.traineeId}>
+                {t.email || t.traineeEmail || t.userEmail || t.traineeId}
+              </option>
+            ))}
+          </select>
         </div>
-
-        {/* RIGHT: "Approved" + tiny yellow bar + % */}
-        <div
-          style={{
-            textAlign: "right",
-            minWidth: 80,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 12,
-              color: "#6b7280",
-              marginBottom: 4,
-            }}
-          >
-            Approved
-          </div>
-
-          <div
-            style={{
-              height: 4,
-              width: 40,
-              background: "#e5e7eb",
-              borderRadius: 999,
-              overflow: "hidden",
-              marginLeft: "auto",
-            }}
-          >
-            <div
-              style={{
-                height: "100%",
-                width: `${pct}%`,
-                background: YELLOW,
-                transition: "width 200ms",
-              }}
-            />
-          </div>
-
-          <div
-            style={{
-              fontSize: 12,
-              color: "#6b7280",
-              marginTop: 4,
-            }}
-          >
-            {pct}%
-          </div>
-        </div>
-      </div>
-
-      {error && <p style={{ color: "crimson" }}>Error: {error}</p>}
-
-      {!selectedTraineeId && (
-        <p style={{ fontSize: 14, color: "#666" }}>
-          Select a trainee to review their Day 1 progress.
-        </p>
       )}
 
-      {/* TASK LIST – UI MATCHES WEEK 1 ROWS */}
-      {selectedTraineeId && (
-        <ul
-          style={{
-            listStyle: "none",
-            padding: 0,
-            margin: 0,
-            display: "grid",
-            gap: 10,
-          }}
-        >
-          {tasks
-            .filter((t) => progressById[t.id]?.done === true)
-            .map((t, idx) => {
-              const order = num(t.order ?? t.sort_order ?? idx + 1);
-              const prog = progressById[t.id] || {
-                done: false,
-                approved: false,
-              };
-              const done = prog.done;
-              const approved = prog.approved;
+      <Card className="border-primary/20">
+        <CardHeader>
+          <CardTitle>Review — Day 1</CardTitle>
+        </CardHeader>
 
-              return (
-                <li
-                  key={t.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 14,
-                    padding: "12px 14px",
-                    borderRadius: 12,
-                    background: "#fff",
-                    border: `1px solid ${GRAY}`,
-                  }}
-                >
-                  {/* Text on the left */}
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 4,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontWeight: 600,
-                        fontSize: 14,
-                      }}
+        <CardContent className="space-y-4">
+          {/* HEADER ROW (MATCH WEEK 1) */}
+          <div className="flex flex-wrap items-end gap-6">
+            <div className="text-sm text-muted-foreground">
+              <span className="font-medium">{waitingCount}</span> waiting •{" "}
+              <span className="font-medium">{approvedCount}</span> approved •{" "}
+              <span className="font-medium">{pct}%</span> approved
+            </div>
+
+            <div className="ml-auto min-w-[220px]">
+              <div className="flex justify-between text-xs mb-1">
+                <span>Approved</span>
+                <span className="text-black">{pct}%</span>
+              </div>
+              <Progress value={pct} className="h-2 [&>div]:bg-yellow-400" />
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-sm text-red-600">
+              Error: {error}
+            </p>
+          )}
+
+          {!selectedTraineeId ? (
+            <p className="text-sm text-muted-foreground">
+              Select a trainee to review their Day 1 progress.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {tasks
+                .filter((t) => progressById[t.id]?.done === true)
+                .map((t, idx) => {
+                  const order = num(t.order ?? t.sort_order ?? idx + 1);
+                  const prog = progressById[t.id] || {
+                    done: false,
+                    approved: false,
+                  };
+                  const done = prog.done;
+                  const approved = prog.approved;
+
+                  return (
+                    <li
+                      key={t.id}
+                      className="flex items-center justify-between gap-3 border rounded-md p-3 bg-white"
                     >
-                      {order}. {t.title ?? t.id}
-                    </div>
+                      <div className="font-semibold text-sm break-words">
+                        {order ? `${order}. ` : ""}
+                        {t.title ?? t.id}
+                      </div>
 
-                    <span
-                      style={{
-                        fontSize: 12,
-                        color: "#6b7280",
-                      }}
-                    >
-                      {done ? "Completed" : "Not completed"}
-                    </span>
-                  </div>
-
-                  {/* Approve / Unapprove button on the right */}
-                  <button
-                    onClick={() => toggleApproved(t.id, !approved)}
-                    disabled={!done}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: 6,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      border: `1px solid ${
-                        approved ? "#10b981" : "#d1d5db"
-                      }`,
-                      backgroundColor: approved ? "#10b981" : "#f9fafb",
-                      color: approved ? "#ffffff" : "#374151",
-                      cursor: done ? "pointer" : "not-allowed",
-                      opacity: done ? 1 : 0.5,
-                    }}
-                  >
-                    {approved ? "Unapprove" : "Approve"}
-                  </button>
-                </li>
-              );
-            })}
-        </ul>
-      )}
+                      <button
+                        onClick={() => toggleApproved(t.id, !approved)}
+                        disabled={!done}
+                        className={`px-3 py-1.5 rounded-md text-sm border transition
+                          ${
+                            approved
+                              ? "bg-green-600 text-white border-green-700 hover:bg-green-700"
+                              : "bg-white border-gray-300 hover:bg-gray-50"
+                          }
+                          ${!done ? "opacity-50 cursor-not-allowed" : ""}
+                        `}
+                      >
+                        {approved ? "Unapprove" : "Approve"}
+                      </button>
+                    </li>
+                  );
+                })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </main>
   );
 }
