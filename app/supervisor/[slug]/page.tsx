@@ -44,7 +44,6 @@ const NAVY = "#0b3d91";
 const GREEN = "#2e7d32";
 const GRAY = "#e9e9ee";
 
-/* Helper to normalize order */
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -75,9 +74,7 @@ export default function Day1SupervisorPage() {
     asParam
   );
 
-  /* ----------------------------------
-     1. AUTH LISTENER (supervisor)
-  ---------------------------------- */
+  /* ------------ AUTH LISTENER ------------ */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setSupervisorUid(u?.uid ?? null);
@@ -86,16 +83,12 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, []);
 
-  /* ----------------------------------
-     2. SYNC storeId
-  ---------------------------------- */
+  /* ------------ SYNC STORE ID ------------ */
   useEffect(() => {
     if (ctxStoreId) setStoreId(ctxStoreId);
   }, [ctxStoreId]);
 
-  /* ----------------------------------
-     3. DEFAULT selected trainee
-  ---------------------------------- */
+  /* ------------ DEFAULT SELECTED TRAINEE ------------ */
   useEffect(() => {
     if (asParam) {
       setSelectedTraineeId(asParam);
@@ -106,9 +99,7 @@ export default function Day1SupervisorPage() {
     }
   }, [asParam, trainees, selectedTraineeId]);
 
-  /* ----------------------------------
-     4. LOAD day-1 TASK DEFINITIONS
-  ---------------------------------- */
+  /* ------------ LOAD TASK DEFINITIONS ------------ */
   useEffect(() => {
     let alive = true;
 
@@ -131,7 +122,6 @@ export default function Day1SupervisorPage() {
         setError(null);
       } catch (e: any) {
         if (!alive) return;
-        console.error("[Day1 supervisor] load tasks error:", e);
         setError(e?.message ?? String(e));
         setTasks([]);
       } finally {
@@ -144,9 +134,7 @@ export default function Day1SupervisorPage() {
     };
   }, []);
 
-  /* ----------------------------------
-     5. LISTEN FOR TRAINEE PROGRESS
-  ---------------------------------- */
+  /* ------------ LISTEN FOR PROGRESS ------------ */
   useEffect(() => {
     if (!selectedTraineeId) return;
 
@@ -174,9 +162,7 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* ----------------------------------
-     6. LISTEN FOR /sections/day1
-  ---------------------------------- */
+  /* ------------ LISTEN FOR SECTION APPROVAL ------------ */
   useEffect(() => {
     if (!selectedTraineeId) return;
 
@@ -188,9 +174,7 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* ----------------------------------
-     7. AUTO WRITE SECTION APPROVAL
-  ---------------------------------- */
+  /* ------------ AUTO WRITE SECTION APPROVAL ------------ */
   useEffect(() => {
     if (!selectedTraineeId || tasks.length === 0) return;
 
@@ -205,14 +189,10 @@ export default function Day1SupervisorPage() {
         approvedAt: allApproved ? serverTimestamp() : deleteField(),
       },
       { merge: true }
-    ).catch((e) =>
-      console.error("[Day1 supervisor] section approval write error:", e)
     );
   }, [selectedTraineeId, tasks, progressById]);
 
-  /* ----------------------------------
-     8. APPROVE TOGGLE
-  ---------------------------------- */
+  /* ------------ APPROVE TOGGLE ------------ */
   async function toggleApproved(taskId: string, next: boolean) {
     if (!selectedTraineeId) {
       alert("Select a trainee first.");
@@ -232,14 +212,11 @@ export default function Day1SupervisorPage() {
         { merge: true }
       );
     } catch (e) {
-      console.error("[Day1 supervisor] toggle approved error:", e);
-      alert("Failed to save approval. Try again.");
+      alert("Failed to save approval.");
     }
   }
 
-  /* ----------------------------------
-     DERIVED COUNTS
-  ---------------------------------- */
+  /* ------------ COUNTS ------------ */
   const doneCount = useMemo(
     () =>
       tasks.filter((t) => progressById[t.id]?.done === true).length,
@@ -263,54 +240,31 @@ export default function Day1SupervisorPage() {
   }
 
   /* ----------------------------------
-     UI
+        UI (FIXED ONLY)
   ---------------------------------- */
   return (
-    <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      {/* Back */}
-      <div style={{ marginBottom: 16 }}>
+    <main className="p-6 max-w-3xl mx-auto">
+      {/* BACK BUTTON */}
+      <div className="mb-4">
         <Link
           href="/supervisor"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            background: "#fff",
-            border: `1px solid ${GRAY}`,
-            borderRadius: 999,
-            padding: "8px 14px",
-            fontWeight: 600,
-            textDecoration: "none",
-            color: NAVY,
-          }}
+          className="inline-flex items-center gap-2 bg-white border border-gray-300 rounded-full px-4 py-2 font-semibold text-[var(--navy)]"
         >
           ← Back to Trainer Dashboard
         </Link>
       </div>
 
-      {/* Trainee selector */}
+      {/* TRAINEE SELECTOR */}
       {storeId && trainees.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <label
-            style={{
-              display: "block",
-              fontSize: 13,
-              marginBottom: 4,
-              color: "#555",
-            }}
-          >
+        <div className="mb-4">
+          <label className="block text-sm mb-1 text-gray-600">
             Reviewing trainee:
           </label>
 
           <select
             value={selectedTraineeId ?? ""}
             onChange={(e) => setSelectedTraineeId(e.target.value || null)}
-            style={{
-              minWidth: 260,
-              padding: "6px 10px",
-              borderRadius: 8,
-              border: `1px solid ${GRAY}`,
-            }}
+            className="min-w-[260px] px-3 py-2 rounded-lg border border-gray-300"
           >
             <option value="" disabled>
               Select trainee…
@@ -326,54 +280,30 @@ export default function Day1SupervisorPage() {
       )}
 
       {/* HEADER */}
-      <h2 style={{ marginBottom: 6 }}>Day 1 — Orientation Review</h2>
-      <div style={{ fontSize: 14, marginBottom: 6 }}>
-        {doneCount}/{tasks.length} completed ({pct}%)
-        {" · "}
+      <h2 className="text-xl font-bold mb-1">Day 1 — Orientation Review</h2>
+      <div className="text-sm mb-2">
+        {doneCount}/{tasks.length} completed ({pct}%) ·{" "}
         {approvedCount}/{tasks.length} approved
       </div>
 
-      <div
-        style={{
-          height: 12,
-          background: "#d9d9df",
-          borderRadius: 999,
-          overflow: "hidden",
-          marginBottom: 18,
-        }}
-      >
+      <div className="h-3 bg-gray-300 rounded-full overflow-hidden mb-4">
         <div
-          style={{
-            height: "100%",
-            width: `${pct}%`,
-            background: YELLOW,
-            transition: "width 200ms",
-          }}
-        />
+          className="h-full transition-all"
+          style={{ width: `${pct}%`, background: YELLOW }}
+        ></div>
       </div>
 
-      {error && <p style={{ color: "crimson" }}>Error: {error}</p>}
+      {error && <p className="text-red-600">{error}</p>}
 
       {!selectedTraineeId && (
-        <p style={{ fontSize: 14, color: "#666" }}>
+        <p className="text-sm text-gray-600">
           Select a trainee to review their Day 1 progress.
         </p>
       )}
 
-      {/* ----------------------------------
-          FIXED TASK RENDERING
-          ONLY SHOW TASKS trainee has done
-      ---------------------------------- */}
+      {/* TASK LIST (UI FIXED) */}
       {selectedTraineeId && (
-        <ul
-          style={{
-            listStyle: "none",
-            padding: 0,
-            margin: 0,
-            display: "grid",
-            gap: 10,
-          }}
-        >
+        <ul className="flex flex-col gap-3">
           {tasks
             .filter((t) => progressById[t.id]?.done === true)
             .map((t, idx) => {
@@ -388,87 +318,66 @@ export default function Day1SupervisorPage() {
               return (
                 <li
                   key={t.id}
+                  className="relative bg-white rounded-xl p-4 border shadow-sm"
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: "12px 14px",
-                    borderRadius: 12,
-                    background: "#fff",
-                    border: `1px solid ${done ? "#d6ead8" : GRAY}`,
-                    position: "relative",
+                    borderColor: done ? "#d6ead8" : GRAY,
                   }}
                 >
-                  {/* Left bar */}
+                  {/* LEFT STRIPE */}
                   <span
+                    className="absolute left-0 top-0 bottom-0 rounded-l-xl"
                     style={{
-                      position: "absolute",
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
                       width: 5,
                       background: done ? GREEN : "transparent",
-                      borderTopLeftRadius: 12,
-                      borderBottomLeftRadius: 12,
                     }}
-                  />
+                  ></span>
 
-                  {/* APPROVE TOGGLE */}
-                  <button
-                    onClick={() => toggleApproved(t.id, !approved)}
-                    disabled={!done}
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      border: `2px solid ${
-                        approved ? GREEN : done ? "#9aa0a6" : "#ccc"
-                      }`,
-                      background: approved ? GREEN : "#fff",
-                      display: "grid",
-                      placeItems: "center",
-                      cursor: done ? "pointer" : "not-allowed",
-                      opacity: done ? 1 : 0.5,
-                    }}
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="14"
-                      height="14"
-                      stroke={approved ? "#fff" : "transparent"}
-                      strokeWidth="3"
-                      fill="none"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                  </button>
-
-                  {/* TEXT */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div style={{ fontWeight: 600 }}>
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="font-semibold text-base">
                       {order}. {t.title ?? t.id}
                     </div>
 
-                    <span
+                    {/* APPROVE TOGGLE */}
+                    <button
+                      onClick={() => toggleApproved(t.id, !approved)}
+                      disabled={!done}
+                      className="grid place-items-center w-6 h-6 rounded-full border"
                       style={{
-                        fontSize: 12,
-                        padding: "2px 8px",
-                        borderRadius: 999,
+                        borderColor: approved
+                          ? GREEN
+                          : done
+                          ? "#9aa0a6"
+                          : "#ccc",
+                        background: approved ? GREEN : "#fff",
+                        opacity: done ? 1 : 0.5,
+                        cursor: done ? "pointer" : "not-allowed",
+                      }}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        width="14"
+                        height="14"
+                        stroke={approved ? "#fff" : "transparent"}
+                        strokeWidth="3"
+                        fill="none"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* BADGES */}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <span
+                      className="text-xs px-3 py-1 rounded-full font-semibold"
+                      style={{
                         background: done ? "#e7f6ec" : "#f3f4f6",
                         border: `1px solid ${
                           done ? "#c7e8d3" : "rgba(148,163,184,0.5)"
                         }`,
                         color: done ? "#1b5e20" : "#4b5563",
-                        fontWeight: 600,
                       }}
                     >
                       {done ? "Completed" : "Not completed"}
@@ -476,14 +385,11 @@ export default function Day1SupervisorPage() {
 
                     {approved && (
                       <span
+                        className="text-xs px-3 py-1 rounded-full font-semibold"
                         style={{
-                          fontSize: 12,
-                          padding: "2px 8px",
-                          borderRadius: 999,
                           background: "#e7f6ec",
                           border: "1px solid #c7e8d3",
                           color: "#1b5e20",
-                          fontWeight: 600,
                         }}
                       >
                         Approved ✓
@@ -498,7 +404,4 @@ export default function Day1SupervisorPage() {
     </main>
   );
 }
-
-
-
 
