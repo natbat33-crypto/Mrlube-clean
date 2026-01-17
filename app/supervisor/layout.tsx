@@ -3,7 +3,7 @@
 import * as React from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Menu,
   X,
@@ -13,6 +13,7 @@ import {
   ChevronDown,
   MessageSquare,
 } from "lucide-react";
+
 import { auth, db } from "@/lib/firebase";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import RoleGate from "@/components/RoleGate";
@@ -20,21 +21,22 @@ import { doc, getDoc } from "firebase/firestore";
 
 export default function SupervisorLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
 
   const [open, setOpen] = React.useState(false);
   const [storeId, setStoreId] = React.useState<string | null>(null);
 
   /* -------------------------------------------------------
-     AUTH LISTENER → redirect immediately if logged out
+     AUTH LISTENER → redirect if logged out (no 404)
   -------------------------------------------------------- */
   React.useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       if (!u) {
-        window.location.assign("/auth/login");
+        router.replace("/auth/login");
       }
     });
     return unsub;
-  }, []);
+  }, [router]);
 
   /* -------------------------------------------------------
      FETCH STORE ID FOR NOTES LINK
@@ -118,7 +120,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
   return (
     <RoleGate allow={["supervisor", "admin"]}>
       <div className="safe-area min-h-[100svh] bg-[#f7f7f7]">
-
         {/* TOP BAR */}
         <div
           className="
@@ -162,7 +163,6 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
             lg:w-64`}
         >
           <div className="h-full flex flex-col p-4 lg:p-6">
-
             <NavLink
               href="/supervisor"
               label="Dashboard"
@@ -195,22 +195,19 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
-            {/* -------------------------------------------------------
-                FIXED SIGN OUT (NO MORE 404)
-            -------------------------------------------------------- */}
+            {/* SIGN OUT — uses router.replace so no 404 */}
             <button
               onClick={async () => {
                 try {
                   await signOut(auth);
                 } finally {
-                  window.location.assign("/auth/login");
+                  router.replace("/auth/login");
                 }
               }}
               className="mt-auto flex items-center gap-2 px-3 py-2 rounded-lg text-red-100 hover:bg-red-500/20"
             >
               <LogOut className="h-5 w-5" /> Sign out
             </button>
-
           </div>
         </aside>
 
@@ -233,8 +230,8 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
             © {new Date().getFullYear()} Mr. Lube. All rights reserved.
           </footer>
         </main>
-
       </div>
     </RoleGate>
   );
 }
+
