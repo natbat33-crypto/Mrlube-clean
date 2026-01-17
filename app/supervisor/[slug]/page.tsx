@@ -22,9 +22,13 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
-/* ----------------------------------
-   TYPES & CONSTANTS
----------------------------------- */
+/* COLORS */
+const YELLOW = "#FFC20E";
+const NAVY = "#0b3d91";
+const GREEN = "#2e7d32"; // ✔ correct Week-1 dark green
+const GRAY = "#e9e9ee";
+
+/* TYPES */
 type Task = {
   id: string;
   title?: string;
@@ -39,20 +43,15 @@ type Progress = {
 
 type ProgressById = Record<string, Progress>;
 
-const YELLOW = "#FFC20E";
-const NAVY = "#0b3d91";
-const GRAY = "#e9e9ee";
-
-/* Helper to normalize order */
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-/* ----------------------------------
-   MAIN COMPONENT
----------------------------------- */
 export default function Day1SupervisorPage() {
+  /* -----------------------
+     STATE
+  ----------------------- */
   const [supervisorUid, setSupervisorUid] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -74,7 +73,9 @@ export default function Day1SupervisorPage() {
     asParam
   );
 
-  /* 1. AUTH LISTENER */
+  /* -----------------------
+     AUTH
+  ----------------------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setSupervisorUid(u?.uid ?? null);
@@ -83,12 +84,16 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, []);
 
-  /* 2. STORE ID SYNC */
+  /* -----------------------
+     SYNC storeId
+  ----------------------- */
   useEffect(() => {
     if (ctxStoreId) setStoreId(ctxStoreId);
   }, [ctxStoreId]);
 
-  /* 3. DEFAULT TRAINEE */
+  /* -----------------------
+     SELECTED TRAINEE DEFAULT
+  ----------------------- */
   useEffect(() => {
     if (asParam) {
       setSelectedTraineeId(asParam);
@@ -99,13 +104,16 @@ export default function Day1SupervisorPage() {
     }
   }, [asParam, trainees, selectedTraineeId]);
 
-  /* 4. LOAD TASKS */
+  /* -----------------------
+     LOAD DAY-1 TASKS
+  ----------------------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
       try {
         setLoadingTasks(true);
+
         const col = collection(db, "days", "day-1", "tasks");
         const snap = await getDocs(col);
 
@@ -122,6 +130,7 @@ export default function Day1SupervisorPage() {
         setError(null);
       } catch (e: any) {
         if (!alive) return;
+        console.error("[Day1 supervisor] load tasks error:", e);
         setError(e?.message ?? String(e));
         setTasks([]);
       } finally {
@@ -134,7 +143,9 @@ export default function Day1SupervisorPage() {
     };
   }, []);
 
-  /* 5. LISTEN FOR PROGRESS */
+  /* -----------------------
+     LISTEN FOR PROGRESS
+  ----------------------- */
   useEffect(() => {
     if (!selectedTraineeId) return;
 
@@ -161,7 +172,9 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* 6. LISTEN FOR SECTION APPROVAL */
+  /* -----------------------
+     LISTEN FOR SECTION APPROVAL
+  ----------------------- */
   useEffect(() => {
     if (!selectedTraineeId) return;
 
@@ -173,7 +186,9 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* 7. AUTO SECTION APPROVAL WRITE */
+  /* -----------------------
+     AUTO WRITE SECTION APPROVAL
+  ----------------------- */
   useEffect(() => {
     if (!selectedTraineeId || tasks.length === 0) return;
 
@@ -188,10 +203,14 @@ export default function Day1SupervisorPage() {
         approvedAt: allApproved ? serverTimestamp() : deleteField(),
       },
       { merge: true }
+    ).catch((e) =>
+      console.error("[Day1 supervisor] section approval write error:", e)
     );
   }, [selectedTraineeId, tasks, progressById]);
 
-  /* 8. APPROVE TOGGLE */
+  /* -----------------------
+     APPROVE BUTTON TOGGLE
+  ----------------------- */
   async function toggleApproved(taskId: string, next: boolean) {
     if (!selectedTraineeId) {
       alert("Select a trainee first.");
@@ -200,6 +219,7 @@ export default function Day1SupervisorPage() {
 
     try {
       const key = `days__day-1__tasks__${taskId}`;
+
       await setDoc(
         doc(db, "users", selectedTraineeId, "progress", key),
         {
@@ -210,58 +230,88 @@ export default function Day1SupervisorPage() {
         { merge: true }
       );
     } catch (e) {
-      alert("Failed to save approval.");
+      console.error("[Day1 supervisor] toggle approved error:", e);
+      alert("Failed to save approval. Try again.");
     }
   }
 
-  /* 9. COUNTS */
+  /* -----------------------
+     DERIVED COUNTS
+  ----------------------- */
   const doneCount = useMemo(
-    () => tasks.filter((t) => progressById[t.id]?.done === true).length,
+    () =>
+      tasks.filter((t) => progressById[t.id]?.done === true).length,
     [tasks, progressById]
   );
 
   const approvedCount = useMemo(
-    () => tasks.filter((t) => progressById[t.id]?.approved === true).length,
+    () =>
+      tasks.filter((t) => progressById[t.id]?.approved === true).length,
     [tasks, progressById]
   );
 
   const pct = useMemo(
     () =>
-      tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0,
-    [doneCount, tasks.length]
+      tasks.length ? Math.round((approvedCount / tasks.length) * 100) : 0,
+    [approvedCount, tasks.length]
   );
 
+  /* -----------------------
+     LOADING
+  ----------------------- */
   if (authLoading || loadingTasks) {
     return <main style={{ padding: 24 }}>Loading…</main>;
   }
 
-  /* ----------------------------------
-     UI — MATCH WEEK 1 EXACTLY
-  ---------------------------------- */
+  /* -----------------------
+     UI (MATCHES WEEK 1)
+  ----------------------- */
   return (
-    <main className="p-6 max-w-3xl mx-auto">
-      {/* BACK BUTTON */}
-      <div className="mb-4">
+    <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
+      {/* Back */}
+      <div style={{ marginBottom: 16 }}>
         <Link
           href="/supervisor"
-          className="inline-flex items-center gap-2 bg-white border border-gray-300 rounded-full px-4 py-2 font-semibold"
-          style={{ color: NAVY }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#fff",
+            border: `1px solid ${GRAY}`,
+            borderRadius: 999,
+            padding: "8px 14px",
+            fontWeight: 600,
+            textDecoration: "none",
+            color: NAVY,
+          }}
         >
           ← Back to Trainer Dashboard
         </Link>
       </div>
 
-      {/* TRAINEE SELECTOR */}
+      {/* Trainee selector */}
       {storeId && trainees.length > 0 && (
-        <div className="mb-4">
-          <label className="block text-sm mb-1 text-gray-600">
+        <div style={{ marginBottom: 20 }}>
+          <label
+            style={{
+              display: "block",
+              fontSize: 13,
+              marginBottom: 6,
+              color: "#555",
+            }}
+          >
             Reviewing trainee:
           </label>
 
           <select
             value={selectedTraineeId ?? ""}
             onChange={(e) => setSelectedTraineeId(e.target.value || null)}
-            className="min-w-[260px] px-3 py-2 rounded-lg border border-gray-300"
+            style={{
+              minWidth: 260,
+              padding: "6px 10px",
+              borderRadius: 8,
+              border: `1px solid ${GRAY}`,
+            }}
           >
             <option value="" disabled>
               Select trainee…
@@ -277,74 +327,102 @@ export default function Day1SupervisorPage() {
       )}
 
       {/* HEADER */}
-      <h2 className="text-xl font-bold mb-1">Day 1 — Orientation Review</h2>
+      <h2 style={{ marginBottom: 4 }}>Day 1 — Orientation Review</h2>
 
-      {/* WEEK 1 STYLE TOP ROW */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="text-sm text-gray-700">
-          {tasks.length - doneCount} waiting • {approvedCount} approved • {pct}% approved
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{pct}%</span>
-          <div className="w-24 h-2 bg-gray-300 rounded-full overflow-hidden">
-            <div
-              className="h-full"
-              style={{
-                width: `${pct}%`,
-                background: YELLOW,
-                transition: "width .2s ease",
-              }}
-            />
-          </div>
-        </div>
+      <div style={{ fontSize: 14, marginBottom: 10 }}>
+        {approvedCount}/{tasks.length} approved ({pct}%)
       </div>
 
-      {error && <p className="text-red-600">{error}</p>}
+      {/* WEEK 1 STYLE PROGRESS BAR */}
+      <div
+        style={{
+          width: "120px",
+          height: "8px",
+          background: "#ddd",
+          borderRadius: 999,
+          overflow: "hidden",
+          marginBottom: 20,
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: YELLOW,
+            transition: "width 200ms",
+          }}
+        />
+      </div>
+
+      {error && <p style={{ color: "crimson" }}>Error: {error}</p>}
 
       {!selectedTraineeId && (
-        <p className="text-sm text-gray-600">
+        <p style={{ fontSize: 14, color: "#666" }}>
           Select a trainee to review their Day 1 progress.
         </p>
       )}
 
-      {/* TASK LIST — SAME AS WEEK 1 */}
+      {/* TASK LIST — EXACT WEEK 1 UI */}
       {selectedTraineeId && (
-        <ul className="flex flex-col gap-3">
-          {tasks
-            .filter((t) => progressById[t.id]?.done === true)
-            .map((t, idx) => {
-              const order = num(t.order ?? t.sort_order ?? idx + 1);
-              const prog = progressById[t.id] || {
-                done: false,
-                approved: false,
-              };
+        <ul
+          style={{
+            listStyle: "none",
+            padding: 0,
+            margin: 0,
+            display: "grid",
+            gap: 12,
+          }}
+        >
+          {tasks.map((t, idx) => {
+            const order = num(t.order ?? t.sort_order ?? idx + 1);
+            const prog = progressById[t.id] || {
+              done: false,
+              approved: false,
+            };
+            const approved = prog.approved;
 
-              return (
-                <li
-                  key={t.id}
-                  className="bg-white rounded-xl p-4 border border-gray-200 flex items-center justify-between shadow-sm"
+            return (
+              <li
+                key={t.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "14px 16px",
+                  background: "#fff",
+                  borderRadius: 12,
+                  border: `1px solid ${GRAY}`,
+                }}
+              >
+                {/* TEXT LEFT */}
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: 14,
+                  }}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="font-medium">
-                      {order}. {t.title ?? t.id}
-                    </div>
-                  </div>
+                  {order}. {t.title ?? t.id}
+                </div>
 
-                  <button
-                    onClick={() => toggleApproved(t.id, !prog.approved)}
-                    className="px-4 py-1 rounded-md border text-sm font-medium"
-                    style={{
-                      background: prog.approved ? "#e6f4ea" : "#fff",
-                      borderColor: prog.approved ? "#34a853" : "#d1d5db",
-                      color: prog.approved ? "#1b5e20" : "#333",
-                    }}
-                  >
-                    {prog.approved ? "Unapprove" : "Approve"}
-                  </button>
-                </li>
-              );
-            })}
+                {/* BUTTON RIGHT (MATCH WEEK 1) */}
+                <button
+                  onClick={() => toggleApproved(t.id, !approved)}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: `1px solid ${approved ? GREEN : "#d1d5db"}`,
+                    background: approved ? GREEN : "#fff",
+                    color: approved ? "#fff" : "#333",
+                    cursor: "pointer",
+                  }}
+                >
+                  {approved ? "Unapprove" : "Approve"}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
