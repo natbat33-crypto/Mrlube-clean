@@ -40,9 +40,7 @@ type Progress = {
 type ProgressById = Record<string, Progress>;
 
 const YELLOW = "#FFC20E";
-const NAVY = "#0b3d91";
-const GREEN = "#2e7d32";
-const GRAY = "#e9e9ee";
+const GRAY_BORDER = "#e5e7eb";
 
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
@@ -218,14 +216,12 @@ export default function Day1SupervisorPage() {
 
   /* ------------ COUNTS ------------ */
   const doneCount = useMemo(
-    () =>
-      tasks.filter((t) => progressById[t.id]?.done === true).length,
+    () => tasks.filter((t) => progressById[t.id]?.done === true).length,
     [tasks, progressById]
   );
 
   const approvedCount = useMemo(
-    () =>
-      tasks.filter((t) => progressById[t.id]?.approved === true).length,
+    () => tasks.filter((t) => progressById[t.id]?.approved === true).length,
     [tasks, progressById]
   );
 
@@ -240,7 +236,7 @@ export default function Day1SupervisorPage() {
   }
 
   /* ----------------------------------
-        UI (FIXED ONLY)
+        FIXED UI (MATCHES WEEK 1)
   ---------------------------------- */
   return (
     <main className="p-6 max-w-3xl mx-auto">
@@ -279,21 +275,27 @@ export default function Day1SupervisorPage() {
         </div>
       )}
 
-      {/* HEADER */}
-      <h2 className="text-xl font-bold mb-1">Day 1 — Orientation Review</h2>
-      <div className="text-sm mb-2">
-        {doneCount}/{tasks.length} completed ({pct}%) ·{" "}
-        {approvedCount}/{tasks.length} approved
+      {/* CLEAN WEEK-1 HEADER */}
+      <h2 className="text-xl font-bold mb-2">Day 1 — Orientation Review</h2>
+
+      <div className="flex justify-between items-center text-sm text-gray-600 mb-4">
+        <span>
+          {tasks.length - approvedCount} waiting • {approvedCount} approved •{" "}
+          {pct}%
+        </span>
+
+        <span className="font-bold">{pct}%</span>
       </div>
 
-      <div className="h-3 bg-gray-300 rounded-full overflow-hidden mb-4">
+      {/* CLEAN GREY PROGRESS BAR */}
+      <div className="h-2 bg-gray-300 rounded-full overflow-hidden mb-6">
         <div
           className="h-full transition-all"
           style={{ width: `${pct}%`, background: YELLOW }}
-        ></div>
+        />
       </div>
 
-      {error && <p className="text-red-600">{error}</p>}
+      {error && <p className="text-red-600 mb-4">{error}</p>}
 
       {!selectedTraineeId && (
         <p className="text-sm text-gray-600">
@@ -301,107 +303,58 @@ export default function Day1SupervisorPage() {
         </p>
       )}
 
-      {/* TASK LIST (UI FIXED) */}
+      {/* CLEAN TASK LIST — MATCHES WEEK 1 */}
       {selectedTraineeId && (
         <ul className="flex flex-col gap-3">
-          {tasks
-            .filter((t) => progressById[t.id]?.done === true)
-            .map((t, idx) => {
-              const order = num(t.order ?? t.sort_order ?? idx + 1);
-              const prog = progressById[t.id] || {
-                done: false,
-                approved: false,
-              };
-              const done = prog.done;
-              const approved = prog.approved;
+          {tasks.map((t, idx) => {
+            const order = num(t.order ?? t.sort_order ?? idx + 1);
+            const prog = progressById[t.id] || {
+              done: false,
+              approved: false,
+            };
 
-              return (
-                <li
-                  key={t.id}
-                  className="relative bg-white rounded-xl p-4 border shadow-sm"
+            const done = prog.done;
+            const approved = prog.approved;
+
+            return (
+              <li
+                key={t.id}
+                className="bg-white rounded-lg border p-4 flex justify-between items-center"
+                style={{
+                  borderColor: GRAY_BORDER,
+                }}
+              >
+                {/* LEFT SIDE TITLE */}
+                <div className="flex flex-col">
+                  <span className="font-semibold text-sm">
+                    {order}. {t.title ?? t.id}
+                  </span>
+
+                  <span className="text-xs text-gray-500 mt-1">
+                    {done ? "Completed" : "Not completed"}
+                  </span>
+                </div>
+
+                {/* RIGHT SIDE APPROVE BUTTON */}
+                <button
+                  onClick={() => toggleApproved(t.id, !approved)}
+                  disabled={!done}
+                  className="px-4 py-1 rounded-md border text-sm font-semibold"
                   style={{
-                    borderColor: done ? "#d6ead8" : GRAY,
+                    borderColor: approved ? "#10b981" : "#d1d5db",
+                    background: approved ? "#10b981" : "#f9fafb",
+                    color: approved ? "#ffffff" : "#374151",
+                    cursor: done ? "pointer" : "not-allowed",
+                    opacity: done ? 1 : 0.5,
                   }}
                 >
-                  {/* LEFT STRIPE */}
-                  <span
-                    className="absolute left-0 top-0 bottom-0 rounded-l-xl"
-                    style={{
-                      width: 5,
-                      background: done ? GREEN : "transparent",
-                    }}
-                  ></span>
-
-                  <div className="flex items-center justify-between flex-wrap gap-3">
-                    <div className="font-semibold text-base">
-                      {order}. {t.title ?? t.id}
-                    </div>
-
-                    {/* APPROVE TOGGLE */}
-                    <button
-                      onClick={() => toggleApproved(t.id, !approved)}
-                      disabled={!done}
-                      className="grid place-items-center w-6 h-6 rounded-full border"
-                      style={{
-                        borderColor: approved
-                          ? GREEN
-                          : done
-                          ? "#9aa0a6"
-                          : "#ccc",
-                        background: approved ? GREEN : "#fff",
-                        opacity: done ? 1 : 0.5,
-                        cursor: done ? "pointer" : "not-allowed",
-                      }}
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="14"
-                        height="14"
-                        stroke={approved ? "#fff" : "transparent"}
-                        strokeWidth="3"
-                        fill="none"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* BADGES */}
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    <span
-                      className="text-xs px-3 py-1 rounded-full font-semibold"
-                      style={{
-                        background: done ? "#e7f6ec" : "#f3f4f6",
-                        border: `1px solid ${
-                          done ? "#c7e8d3" : "rgba(148,163,184,0.5)"
-                        }`,
-                        color: done ? "#1b5e20" : "#4b5563",
-                      }}
-                    >
-                      {done ? "Completed" : "Not completed"}
-                    </span>
-
-                    {approved && (
-                      <span
-                        className="text-xs px-3 py-1 rounded-full font-semibold"
-                        style={{
-                          background: "#e7f6ec",
-                          border: "1px solid #c7e8d3",
-                          color: "#1b5e20",
-                        }}
-                      >
-                        Approved ✓
-                      </span>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
+                  {approved ? "Unapprove" : "Approve"}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>
   );
 }
-
