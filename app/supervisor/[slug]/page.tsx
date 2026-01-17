@@ -22,13 +22,9 @@ import {
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
-/* COLORS */
-const YELLOW = "#FFC20E";
-const NAVY = "#0b3d91";
-const GREEN = "#2e7d32"; // ✔ correct Week-1 dark green
-const GRAY = "#e9e9ee";
-
-/* TYPES */
+/* ----------------------------------
+   TYPES & CONSTANTS
+---------------------------------- */
 type Task = {
   id: string;
   title?: string;
@@ -43,15 +39,21 @@ type Progress = {
 
 type ProgressById = Record<string, Progress>;
 
+const YELLOW = "#FFC20E";
+const NAVY = "#0b3d91";
+const GREEN = "#2e7d32";
+const GRAY = "#e9e9ee";
+
+/* Helper to normalize order */
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
+/* ----------------------------------
+   MAIN COMPONENT
+---------------------------------- */
 export default function Day1SupervisorPage() {
-  /* -----------------------
-     STATE
-  ----------------------- */
   const [supervisorUid, setSupervisorUid] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -73,9 +75,9 @@ export default function Day1SupervisorPage() {
     asParam
   );
 
-  /* -----------------------
-     AUTH
-  ----------------------- */
+  /* ----------------------------------
+     1. AUTH LISTENER (supervisor)
+  ---------------------------------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setSupervisorUid(u?.uid ?? null);
@@ -84,16 +86,16 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, []);
 
-  /* -----------------------
-     SYNC storeId
-  ----------------------- */
+  /* ----------------------------------
+     2. SYNC storeId
+  ---------------------------------- */
   useEffect(() => {
     if (ctxStoreId) setStoreId(ctxStoreId);
   }, [ctxStoreId]);
 
-  /* -----------------------
-     SELECTED TRAINEE DEFAULT
-  ----------------------- */
+  /* ----------------------------------
+     3. DEFAULT selected trainee
+  ---------------------------------- */
   useEffect(() => {
     if (asParam) {
       setSelectedTraineeId(asParam);
@@ -104,16 +106,15 @@ export default function Day1SupervisorPage() {
     }
   }, [asParam, trainees, selectedTraineeId]);
 
-  /* -----------------------
-     LOAD DAY-1 TASKS
-  ----------------------- */
+  /* ----------------------------------
+     4. LOAD day-1 TASK DEFINITIONS
+  ---------------------------------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
       try {
         setLoadingTasks(true);
-
         const col = collection(db, "days", "day-1", "tasks");
         const snap = await getDocs(col);
 
@@ -143,9 +144,9 @@ export default function Day1SupervisorPage() {
     };
   }, []);
 
-  /* -----------------------
-     LISTEN FOR PROGRESS
-  ----------------------- */
+  /* ----------------------------------
+     5. LISTEN FOR TRAINEE PROGRESS
+  ---------------------------------- */
   useEffect(() => {
     if (!selectedTraineeId) return;
 
@@ -157,6 +158,7 @@ export default function Day1SupervisorPage() {
 
       snap.forEach((d) => {
         const data = d.data() as any;
+
         const parts = d.id.split("__");
         const taskId = parts[parts.length - 1];
 
@@ -172,9 +174,9 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* -----------------------
-     LISTEN FOR SECTION APPROVAL
-  ----------------------- */
+  /* ----------------------------------
+     6. LISTEN FOR /sections/day1
+  ---------------------------------- */
   useEffect(() => {
     if (!selectedTraineeId) return;
 
@@ -186,9 +188,9 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* -----------------------
-     AUTO WRITE SECTION APPROVAL
-  ----------------------- */
+  /* ----------------------------------
+     7. AUTO WRITE SECTION APPROVAL
+  ---------------------------------- */
   useEffect(() => {
     if (!selectedTraineeId || tasks.length === 0) return;
 
@@ -208,9 +210,9 @@ export default function Day1SupervisorPage() {
     );
   }, [selectedTraineeId, tasks, progressById]);
 
-  /* -----------------------
-     APPROVE BUTTON TOGGLE
-  ----------------------- */
+  /* ----------------------------------
+     8. APPROVE TOGGLE
+  ---------------------------------- */
   async function toggleApproved(taskId: string, next: boolean) {
     if (!selectedTraineeId) {
       alert("Select a trainee first.");
@@ -235,9 +237,9 @@ export default function Day1SupervisorPage() {
     }
   }
 
-  /* -----------------------
+  /* ----------------------------------
      DERIVED COUNTS
-  ----------------------- */
+  ---------------------------------- */
   const doneCount = useMemo(
     () =>
       tasks.filter((t) => progressById[t.id]?.done === true).length,
@@ -250,25 +252,28 @@ export default function Day1SupervisorPage() {
     [tasks, progressById]
   );
 
+  // Match Week 1 logic: percent of tasks approved
   const pct = useMemo(
     () =>
       tasks.length ? Math.round((approvedCount / tasks.length) * 100) : 0,
     [approvedCount, tasks.length]
   );
 
-  /* -----------------------
-     LOADING
-  ----------------------- */
+  const waitingCount = useMemo(
+    () => (tasks.length ? tasks.length - approvedCount : 0),
+    [tasks.length, approvedCount]
+  );
+
   if (authLoading || loadingTasks) {
     return <main style={{ padding: 24 }}>Loading…</main>;
   }
 
-  /* -----------------------
-     UI (MATCHES WEEK 1)
-  ----------------------- */
+  /* ----------------------------------
+     UI
+  ---------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      {/* Back */}
+      {/* Back (MATCH WEEK 1 TEXT) */}
       <div style={{ marginBottom: 16 }}>
         <Link
           href="/supervisor"
@@ -285,73 +290,75 @@ export default function Day1SupervisorPage() {
             color: NAVY,
           }}
         >
-          ← Back to Trainer Dashboard
+          ← Back to Dashboard
         </Link>
       </div>
 
-      {/* Trainee selector */}
-      {storeId && trainees.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <label
-            style={{
-              display: "block",
-              fontSize: 13,
-              marginBottom: 6,
-              color: "#555",
-            }}
-          >
-            Reviewing trainee:
-          </label>
-
-          <select
-            value={selectedTraineeId ?? ""}
-            onChange={(e) => setSelectedTraineeId(e.target.value || null)}
-            style={{
-              minWidth: 260,
-              padding: "6px 10px",
-              borderRadius: 8,
-              border: `1px solid ${GRAY}`,
-            }}
-          >
-            <option value="" disabled>
-              Select trainee…
-            </option>
-
-            {trainees.map((t) => (
-              <option key={t.id} value={t.traineeId}>
-                {t.email || t.traineeEmail || t.userEmail || t.traineeId}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* HEADER */}
-      <h2 style={{ marginBottom: 4 }}>Day 1 — Orientation Review</h2>
-
-      <div style={{ fontSize: 14, marginBottom: 10 }}>
-        {approvedCount}/{tasks.length} approved ({pct}%)
-      </div>
-
-      {/* WEEK 1 STYLE PROGRESS BAR */}
+      {/* HEADER + SMALL BAR ON RIGHT (MIRROR WEEK 1) */}
       <div
         style={{
-          width: "120px",
-          height: "8px",
-          background: "#ddd",
-          borderRadius: 999,
-          overflow: "hidden",
-          marginBottom: 20,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          marginBottom: 18,
         }}
       >
+        {/* LEFT: title + counts */}
+        <div>
+          <h2 style={{ marginBottom: 4 }}>Day 1 — Orientation Review</h2>
+          <div style={{ fontSize: 14, color: "#4b5563" }}>
+            {waitingCount} waiting • {approvedCount} approved • {pct}% approved
+          </div>
+        </div>
+
+        {/* RIGHT: "Approved" + tiny yellow bar + % */}
         <div
           style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: YELLOW,
-            transition: "width 200ms",
+            textAlign: "right",
+            minWidth: 80,
           }}
-        />
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "#6b7280",
+              marginBottom: 4,
+            }}
+          >
+            Approved
+          </div>
+
+          <div
+            style={{
+              height: 4,
+              width: 40,
+              background: "#e5e7eb",
+              borderRadius: 999,
+              overflow: "hidden",
+              marginLeft: "auto",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${pct}%`,
+                background: YELLOW,
+                transition: "width 200ms",
+              }}
+            />
+          </div>
+
+          <div
+            style={{
+              fontSize: 12,
+              color: "#6b7280",
+              marginTop: 4,
+            }}
+          >
+            {pct}%
+          </div>
+        </div>
       </div>
 
       {error && <p style={{ color: "crimson" }}>Error: {error}</p>}
@@ -362,7 +369,7 @@ export default function Day1SupervisorPage() {
         </p>
       )}
 
-      {/* TASK LIST — EXACT WEEK 1 UI */}
+      {/* TASK LIST – UI MATCHES WEEK 1 ROWS */}
       {selectedTraineeId && (
         <ul
           style={{
@@ -370,59 +377,84 @@ export default function Day1SupervisorPage() {
             padding: 0,
             margin: 0,
             display: "grid",
-            gap: 12,
+            gap: 10,
           }}
         >
-          {tasks.map((t, idx) => {
-            const order = num(t.order ?? t.sort_order ?? idx + 1);
-            const prog = progressById[t.id] || {
-              done: false,
-              approved: false,
-            };
-            const approved = prog.approved;
+          {tasks
+            .filter((t) => progressById[t.id]?.done === true)
+            .map((t, idx) => {
+              const order = num(t.order ?? t.sort_order ?? idx + 1);
+              const prog = progressById[t.id] || {
+                done: false,
+                approved: false,
+              };
+              const done = prog.done;
+              const approved = prog.approved;
 
-            return (
-              <li
-                key={t.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "14px 16px",
-                  background: "#fff",
-                  borderRadius: 12,
-                  border: `1px solid ${GRAY}`,
-                }}
-              >
-                {/* TEXT LEFT */}
-                <div
+              return (
+                <li
+                  key={t.id}
                   style={{
-                    fontWeight: 600,
-                    fontSize: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 14,
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    background: "#fff",
+                    border: `1px solid ${GRAY}`,
                   }}
                 >
-                  {order}. {t.title ?? t.id}
-                </div>
+                  {/* Text on the left */}
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        fontSize: 14,
+                      }}
+                    >
+                      {order}. {t.title ?? t.id}
+                    </div>
 
-                {/* BUTTON RIGHT (MATCH WEEK 1) */}
-                <button
-                  onClick={() => toggleApproved(t.id, !approved)}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: 6,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    border: `1px solid ${approved ? GREEN : "#d1d5db"}`,
-                    background: approved ? GREEN : "#fff",
-                    color: approved ? "#fff" : "#333",
-                    cursor: "pointer",
-                  }}
-                >
-                  {approved ? "Unapprove" : "Approve"}
-                </button>
-              </li>
-            );
-          })}
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "#6b7280",
+                      }}
+                    >
+                      {done ? "Completed" : "Not completed"}
+                    </span>
+                  </div>
+
+                  {/* Approve / Unapprove button on the right */}
+                  <button
+                    onClick={() => toggleApproved(t.id, !approved)}
+                    disabled={!done}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      border: `1px solid ${
+                        approved ? "#10b981" : "#d1d5db"
+                      }`,
+                      backgroundColor: approved ? "#10b981" : "#f9fafb",
+                      color: approved ? "#ffffff" : "#374151",
+                      cursor: done ? "pointer" : "not-allowed",
+                      opacity: done ? 1 : 0.5,
+                    }}
+                  >
+                    {approved ? "Unapprove" : "Approve"}
+                  </button>
+                </li>
+              );
+            })}
         </ul>
       )}
     </main>
