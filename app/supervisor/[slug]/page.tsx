@@ -40,8 +40,10 @@ type Progress = {
 type ProgressById = Record<string, Progress>;
 
 const YELLOW = "#FFC20E";
-const GRAY_BORDER = "#e5e7eb";
+const NAVY = "#0b3d91";
+const GRAY = "#e9e9ee";
 
+/* Helper to normalize order */
 function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -72,7 +74,7 @@ export default function Day1SupervisorPage() {
     asParam
   );
 
-  /* ------------ AUTH LISTENER ------------ */
+  /* 1. AUTH LISTENER */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setSupervisorUid(u?.uid ?? null);
@@ -81,12 +83,12 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, []);
 
-  /* ------------ SYNC STORE ID ------------ */
+  /* 2. STORE ID SYNC */
   useEffect(() => {
     if (ctxStoreId) setStoreId(ctxStoreId);
   }, [ctxStoreId]);
 
-  /* ------------ DEFAULT SELECTED TRAINEE ------------ */
+  /* 3. DEFAULT TRAINEE */
   useEffect(() => {
     if (asParam) {
       setSelectedTraineeId(asParam);
@@ -97,7 +99,7 @@ export default function Day1SupervisorPage() {
     }
   }, [asParam, trainees, selectedTraineeId]);
 
-  /* ------------ LOAD TASK DEFINITIONS ------------ */
+  /* 4. LOAD TASKS */
   useEffect(() => {
     let alive = true;
 
@@ -132,7 +134,7 @@ export default function Day1SupervisorPage() {
     };
   }, []);
 
-  /* ------------ LISTEN FOR PROGRESS ------------ */
+  /* 5. LISTEN FOR PROGRESS */
   useEffect(() => {
     if (!selectedTraineeId) return;
 
@@ -144,7 +146,6 @@ export default function Day1SupervisorPage() {
 
       snap.forEach((d) => {
         const data = d.data() as any;
-
         const parts = d.id.split("__");
         const taskId = parts[parts.length - 1];
 
@@ -160,7 +161,7 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* ------------ LISTEN FOR SECTION APPROVAL ------------ */
+  /* 6. LISTEN FOR SECTION APPROVAL */
   useEffect(() => {
     if (!selectedTraineeId) return;
 
@@ -172,7 +173,7 @@ export default function Day1SupervisorPage() {
     return unsub;
   }, [selectedTraineeId]);
 
-  /* ------------ AUTO WRITE SECTION APPROVAL ------------ */
+  /* 7. AUTO SECTION APPROVAL WRITE */
   useEffect(() => {
     if (!selectedTraineeId || tasks.length === 0) return;
 
@@ -190,7 +191,7 @@ export default function Day1SupervisorPage() {
     );
   }, [selectedTraineeId, tasks, progressById]);
 
-  /* ------------ APPROVE TOGGLE ------------ */
+  /* 8. APPROVE TOGGLE */
   async function toggleApproved(taskId: string, next: boolean) {
     if (!selectedTraineeId) {
       alert("Select a trainee first.");
@@ -199,7 +200,6 @@ export default function Day1SupervisorPage() {
 
     try {
       const key = `days__day-1__tasks__${taskId}`;
-
       await setDoc(
         doc(db, "users", selectedTraineeId, "progress", key),
         {
@@ -214,7 +214,7 @@ export default function Day1SupervisorPage() {
     }
   }
 
-  /* ------------ COUNTS ------------ */
+  /* 9. COUNTS */
   const doneCount = useMemo(
     () => tasks.filter((t) => progressById[t.id]?.done === true).length,
     [tasks, progressById]
@@ -236,7 +236,7 @@ export default function Day1SupervisorPage() {
   }
 
   /* ----------------------------------
-        FIXED UI (MATCHES WEEK 1)
+     UI — MATCH WEEK 1 EXACTLY
   ---------------------------------- */
   return (
     <main className="p-6 max-w-3xl mx-auto">
@@ -244,7 +244,8 @@ export default function Day1SupervisorPage() {
       <div className="mb-4">
         <Link
           href="/supervisor"
-          className="inline-flex items-center gap-2 bg-white border border-gray-300 rounded-full px-4 py-2 font-semibold text-[var(--navy)]"
+          className="inline-flex items-center gap-2 bg-white border border-gray-300 rounded-full px-4 py-2 font-semibold"
+          style={{ color: NAVY }}
         >
           ← Back to Trainer Dashboard
         </Link>
@@ -275,27 +276,31 @@ export default function Day1SupervisorPage() {
         </div>
       )}
 
-      {/* CLEAN WEEK-1 HEADER */}
-      <h2 className="text-xl font-bold mb-2">Day 1 — Orientation Review</h2>
+      {/* HEADER */}
+      <h2 className="text-xl font-bold mb-1">Day 1 — Orientation Review</h2>
 
-      <div className="flex justify-between items-center text-sm text-gray-600 mb-4">
-        <span>
-          {tasks.length - approvedCount} waiting • {approvedCount} approved •{" "}
-          {pct}%
-        </span>
+      {/* WEEK 1 STYLE TOP ROW */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="text-sm text-gray-700">
+          {tasks.length - doneCount} waiting • {approvedCount} approved • {pct}% approved
+        </div>
 
-        <span className="font-bold">{pct}%</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{pct}%</span>
+          <div className="w-24 h-2 bg-gray-300 rounded-full overflow-hidden">
+            <div
+              className="h-full"
+              style={{
+                width: `${pct}%`,
+                background: YELLOW,
+                transition: "width .2s ease",
+              }}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* CLEAN GREY PROGRESS BAR */}
-      <div className="h-2 bg-gray-300 rounded-full overflow-hidden mb-6">
-        <div
-          className="h-full transition-all"
-          style={{ width: `${pct}%`, background: YELLOW }}
-        />
-      </div>
-
-      {error && <p className="text-red-600 mb-4">{error}</p>}
+      {error && <p className="text-red-600">{error}</p>}
 
       {!selectedTraineeId && (
         <p className="text-sm text-gray-600">
@@ -303,56 +308,43 @@ export default function Day1SupervisorPage() {
         </p>
       )}
 
-      {/* CLEAN TASK LIST — MATCHES WEEK 1 */}
+      {/* TASK LIST — SAME AS WEEK 1 */}
       {selectedTraineeId && (
         <ul className="flex flex-col gap-3">
-          {tasks.map((t, idx) => {
-            const order = num(t.order ?? t.sort_order ?? idx + 1);
-            const prog = progressById[t.id] || {
-              done: false,
-              approved: false,
-            };
+          {tasks
+            .filter((t) => progressById[t.id]?.done === true)
+            .map((t, idx) => {
+              const order = num(t.order ?? t.sort_order ?? idx + 1);
+              const prog = progressById[t.id] || {
+                done: false,
+                approved: false,
+              };
 
-            const done = prog.done;
-            const approved = prog.approved;
-
-            return (
-              <li
-                key={t.id}
-                className="bg-white rounded-lg border p-4 flex justify-between items-center"
-                style={{
-                  borderColor: GRAY_BORDER,
-                }}
-              >
-                {/* LEFT SIDE TITLE */}
-                <div className="flex flex-col">
-                  <span className="font-semibold text-sm">
-                    {order}. {t.title ?? t.id}
-                  </span>
-
-                  <span className="text-xs text-gray-500 mt-1">
-                    {done ? "Completed" : "Not completed"}
-                  </span>
-                </div>
-
-                {/* RIGHT SIDE APPROVE BUTTON */}
-                <button
-                  onClick={() => toggleApproved(t.id, !approved)}
-                  disabled={!done}
-                  className="px-4 py-1 rounded-md border text-sm font-semibold"
-                  style={{
-                    borderColor: approved ? "#10b981" : "#d1d5db",
-                    background: approved ? "#10b981" : "#f9fafb",
-                    color: approved ? "#ffffff" : "#374151",
-                    cursor: done ? "pointer" : "not-allowed",
-                    opacity: done ? 1 : 0.5,
-                  }}
+              return (
+                <li
+                  key={t.id}
+                  className="bg-white rounded-xl p-4 border border-gray-200 flex items-center justify-between shadow-sm"
                 >
-                  {approved ? "Unapprove" : "Approve"}
-                </button>
-              </li>
-            );
-          })}
+                  <div className="flex items-center gap-3">
+                    <div className="font-medium">
+                      {order}. {t.title ?? t.id}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => toggleApproved(t.id, !prog.approved)}
+                    className="px-4 py-1 rounded-md border text-sm font-medium"
+                    style={{
+                      background: prog.approved ? "#e6f4ea" : "#fff",
+                      borderColor: prog.approved ? "#34a853" : "#d1d5db",
+                      color: prog.approved ? "#1b5e20" : "#333",
+                    }}
+                  >
+                    {prog.approved ? "Unapprove" : "Approve"}
+                  </button>
+                </li>
+              );
+            })}
         </ul>
       )}
     </main>
