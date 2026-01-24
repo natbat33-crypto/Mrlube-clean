@@ -35,6 +35,7 @@ function SignupContent() {
 
   const [accessCode, setAccessCode] = useState("");
   const [role, setRole] = useState("");
+
   const [accessCodes, setAccessCodes] = useState<any>(null);
 
   const [stores, setStores] = useState<any[]>([]);
@@ -43,63 +44,78 @@ function SignupContent() {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  /* ---------------- LOAD ACCESS CODES ---------------- */
+  /* ------------------------------------------------
+     LOAD ACCESS CODES ONCE
+  ------------------------------------------------ */
   useEffect(() => {
     async function loadCodes() {
-      const snap = await getDoc(doc(db, "config", "accessCodes"));
-      if (snap.exists()) setAccessCodes(snap.data());
+      try {
+        const snap = await getDoc(doc(db, "config", "accessCodes"));
+        if (snap.exists()) setAccessCodes(snap.data());
+      } catch (e) {
+        console.error("Access code load error:", e);
+      }
     }
     loadCodes();
   }, []);
 
-  /* ---------------- LOAD STORES ---------------- */
+  /* ------------------------------------------------
+     LOAD STORES
+  ------------------------------------------------ */
   useEffect(() => {
     async function loadStores() {
-      const snap = await getDocs(collection(db, "stores"));
-      const arr: any[] = [];
-      snap.forEach((d) => {
-        arr.push({
-          id: d.id,
-          name: d.data().name || d.id,
+      try {
+        const snap = await getDocs(collection(db, "stores"));
+        const arr: any[] = [];
+        snap.forEach((d) => {
+          arr.push({
+            id: d.id,
+            name: d.data().name || d.id,
+          });
         });
-      });
-      setStores(arr);
+        setStores(arr);
+      } catch (e) {
+        console.error("Store load error:", e);
+      }
     }
+
     loadStores();
   }, []);
 
-  /* ---------------- DETECT ROLE FROM ACCESS CODE ---------------- */
+  /* ------------------------------------------------
+     DETECT ROLE FROM ACCESS CODE
+  ------------------------------------------------ */
   useEffect(() => {
     if (!accessCodes) return;
+
     const code = accessCode.trim().toUpperCase();
 
     if (code === accessCodes.admin?.toUpperCase()) setRole("admin");
     else if (code === accessCodes.gm?.toUpperCase()) setRole("gm");
     else if (code === accessCodes.manager?.toUpperCase()) setRole("manager");
     else if (code === accessCodes.employee?.toUpperCase()) setRole("employee");
-    else setRole(""); // invalid or still typing
+    else setRole("");
   }, [accessCode, accessCodes]);
 
-  /* ---------------- SUBMIT ---------------- */
+  /* ------------------------------------------------
+     SUBMIT
+  ------------------------------------------------ */
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus(null);
 
-    if (!name.trim()) return setStatus("❌ Please enter your full name.");
-    if (!email.includes("@")) return setStatus("❌ Invalid email address.");
+    if (!name.trim()) return setStatus("❌ Enter your full name.");
+    if (!email.includes("@")) return setStatus("❌ Invalid email.");
     if (password.length < 6)
       return setStatus("❌ Password must be at least 6 characters.");
-    if (!accessCode.trim()) return setStatus("❌ Enter your access code.");
-
     if (!role) return setStatus("❌ Invalid access code.");
-
     if (role !== "admin" && !storeId)
       return setStatus("❌ Please select your store.");
 
     setLoading(true);
 
     try {
-      /* ---------- CREATE AUTH USER ---------- */
+      /* ---------- AUTH ---------- */
       const cred = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
@@ -148,19 +164,19 @@ function SignupContent() {
 
       window.location.assign("/login?verify=1");
     } catch (err: any) {
-      console.error(err);
-
+      console.error("Signup error:", err);
       let m = err?.message || "❌ Something went wrong.";
       if (String(err?.code).includes("email-already-in-use"))
         m = "❌ Email already in use.";
-
       setStatus(m);
     } finally {
       setLoading(false);
     }
   }
 
-  /* ---------------- UI ---------------- */
+  /* ------------------------------------------------
+     UI
+  ------------------------------------------------ */
   return (
     <main className="min-h-[100svh] grid place-items-center bg-gray-50">
       <div className="w-[min(440px,92vw)] bg-white rounded-xl shadow-xl p-6">
@@ -168,7 +184,6 @@ function SignupContent() {
         <p className="text-gray-600 mb-4">Enter your details to get started</p>
 
         <form onSubmit={onSubmit} className="grid gap-4">
-
           {/* NAME */}
           <input
             type="text"
@@ -240,3 +255,4 @@ function SignupContent() {
     </main>
   );
 }
+
