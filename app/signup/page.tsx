@@ -40,16 +40,18 @@ function SignupContent() {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  /* -------------- LOAD STORES (store numbers) -------------- */
+  /* -------------- LOAD STORES FROM FIRESTORE -------------- */
   useEffect(() => {
     async function loadStores() {
       try {
-        const colRef = collection(db, "stores");
-        const snaps = await getDocs(colRef);
+        const snap = await getDocs(collection(db, "stores"));
         const arr: any[] = [];
 
-        snaps.forEach((d) => {
-          arr.push({ id: d.id, ...d.data() }); // id === store number
+        snap.forEach((d) => {
+          arr.push({
+            id: d.id, // ⚡ store number
+            name: d.data().name || d.id, // readable name fallback
+          });
         });
 
         setStores(arr);
@@ -66,59 +68,35 @@ function SignupContent() {
     e.preventDefault();
     setStatus(null);
 
-    if (!name.trim()) {
-      setStatus("❌ Please enter your full name.");
-      return;
-    }
-
-    if (!email.includes("@")) {
-      setStatus("❌ Please enter a valid email address.");
-      return;
-    }
-
-    if (password.length < 6) {
-      setStatus("❌ Password must be at least 6 characters.");
-      return;
-    }
-
-    if (!accessCode.trim()) {
-      setStatus("❌ Please enter your access code.");
-      return;
-    }
+    if (!name.trim()) return setStatus("❌ Please enter your full name.");
+    if (!email.includes("@")) return setStatus("❌ Please enter a valid email.");
+    if (password.length < 6)
+      return setStatus("❌ Password must be at least 6 characters.");
+    if (!accessCode.trim())
+      return setStatus("❌ Please enter your access code.");
 
     setLoading(true);
 
     try {
       /* ---------- 1. FETCH ACCESS CODES ---------- */
       const accessSnap = await getDoc(doc(db, "config", "accessCodes"));
-      if (!accessSnap.exists()) {
-        setStatus("❌ Server error: no access codes found.");
-        setLoading(false);
-        return;
-      }
-
+      if (!accessSnap.exists())
+        throw new Error("Server error: access codes not found.");
       const codes = accessSnap.data();
 
-      /* ---------- 2. DETERMINE ROLE FROM CODE ---------- */
+      /* ---------- 2. DETERMINE ROLE ---------- */
       let role = "";
       if (accessCode === codes.admin) role = "admin";
       else if (accessCode === codes.gm) role = "gm";
       else if (accessCode === codes.manager) role = "manager";
       else if (accessCode === codes.employee) role = "employee";
-      else {
-        setStatus("❌ Invalid access code.");
-        setLoading(false);
-        return;
-      }
+      else throw new Error("Invalid access code.");
 
-      /* ---------- 3. REQUIRE STORE FOR NON-ADMINS ---------- */
-      if (role !== "admin" && !storeId) {
-        setStatus("❌ Please select your store.");
-        setLoading(false);
-        return;
-      }
+      /* ---------- 3. REQUIRE STORE FOR NON-ADMIN ---------- */
+      if (role !== "admin" && !storeId)
+        return setStatus("❌ Please select your store.");
 
-      /* ---------- 4. CREATE FIREBASE AUTH USER ---------- */
+      /* ---------- 4. CREATE AUTH USER ---------- */
       const cred = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
@@ -160,7 +138,7 @@ function SignupContent() {
         );
       }
 
-      /* ---------- 7. SAVE + SEND VERIFICATION ---------- */
+      /* ---------- 7. COMMIT + VERIFY EMAIL ---------- */
       await batch.commit();
       await sendEmailVerification(cred.user);
       await signOut(auth);
@@ -169,12 +147,11 @@ function SignupContent() {
     } catch (err: any) {
       console.error(err);
 
-      let msg = err?.message || "❌ Something went wrong.";
-
+      let message = err?.message || "❌ Something went wrong.";
       if (String(err?.code).includes("email-already-in-use"))
-        msg = "❌ That email is already in use.";
+        message = "❌ That email is already in use.";
 
-      setStatus(msg);
+      setStatus(message);
     } finally {
       setLoading(false);
     }
@@ -195,8 +172,8 @@ function SignupContent() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Full Name"
-            required
             className="border rounded-lg p-3"
+            required
           />
 
           {/* ACCESS CODE */}
@@ -205,25 +182,28 @@ function SignupContent() {
             value={accessCode}
             onChange={(e) => setAccessCode(e.target.value)}
             placeholder="Access Code"
-            required
             className="border rounded-lg p-3"
+            required
           />
 
-          {/* STORE DROPDOWN — ONLY FOR NON ADMINS */}
-          {accessCode !== "" && accessCode !== "ADMIN-2026" && (
-            <select
-              value={storeId}
-              onChange={(e) => setStoreId(e.target.value)}
-              className="border rounded-lg p-3"
-            >
-              <option value="">Select Your Store</option>
-              {stores.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.id}
-                </option>
-              ))}
-            </select>
-          )}
+          {/* STORE DROPDOWN (ONLY IF ROLE IS NOT ADMIN) */}
+          {accessCode.toUpperCase() !== "" &&
+            accessCode.toUpperCase() !== "ADMIN-2026" && (
+              <select
+                value={storeId}
+                onChange={(e) => setStoreId(e.target.value)}
+                className="border rounded-lg p-3"
+                required
+              >
+                <option value="">Select Your Store</option>
+
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.id} — {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
 
           {/* EMAIL */}
           <input
@@ -231,8 +211,8 @@ function SignupContent() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email"
-            required
             className="border rounded-lg p-3"
+            required
           />
 
           {/* PASSWORD */}
@@ -241,8 +221,8 @@ function SignupContent() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
-            required
             className="border rounded-lg p-3"
+            required
           />
 
           <button
