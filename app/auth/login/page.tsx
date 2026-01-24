@@ -93,6 +93,7 @@ function LoginContent() {
 
     if (role === "admin") return router.replace("/admin");
     if (role === "manager") return router.replace("/manager");
+    if (role === "gm") return router.replace("/gm");
     if (role === "supervisor") return router.replace("/supervisor");
     if (role === "trainee" || role === "employee")
       return router.replace("/dashboard");
