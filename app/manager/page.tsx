@@ -20,7 +20,7 @@ type Emp = {
   name?: string;
   email?: string;
   active?: boolean;
-  supervisor?: string; // legacy DB field
+  supervisor?: string;
   trainer?: string;
 };
 
@@ -51,12 +51,14 @@ async function loadAllRealTasks(): Promise<string[]> {
 }
 
 /* ===========================================================
-   MANAGER DASHBOARD (CLEAN)
+   MANAGER + GM DASHBOARD
 =========================================================== */
 export default function ManagerDashboard() {
   const [uid, setUid] = useState<string | null>(null);
   const [storeId, setStoreId] = useState<string | null>(null);
   const [store, setStore] = useState<Store | null>(null);
+
+  const [role, setRole] = useState<string | null>(null); // ⭐ NEW
 
   const [trainees, setTrainees] = useState<Emp[]>([]);
   const [employees, setEmployees] = useState<Emp[]>([]);
@@ -70,6 +72,7 @@ export default function ManagerDashboard() {
       if (!u) {
         setUid(null);
         setStoreId(null);
+        setRole(null);
         setLoading(false);
         return;
       }
@@ -80,6 +83,7 @@ export default function ManagerDashboard() {
       if (userSnap.exists()) {
         const d: any = userSnap.data();
         setStoreId(d.storeId || null);
+        setRole((d.role || "").toLowerCase()); // ⭐ NEW
       }
 
       setLoading(false);
@@ -148,9 +152,7 @@ export default function ManagerDashboard() {
 
   /* ---------- helpers ---------- */
   function getTrainerName(traineeId: string): string | null {
-    const emp = employees.find(
-      (e) => e.uid === traineeId
-    );
+    const emp = employees.find((e) => e.uid === traineeId);
     if (!emp) return null;
 
     const trainerUid = emp.trainer || emp.supervisor;
@@ -167,6 +169,11 @@ export default function ManagerDashboard() {
 
   return (
     <main className="max-w-xl mx-auto p-4 space-y-6">
+      {/* ⭐ ROLE HEADER */}
+      <h1 className="text-xl font-bold mb-2">
+        {role === "gm" ? "General Manager Dashboard" : "Manager Dashboard"}
+      </h1>
+
       {/* Store */}
       {store && (
         <section className="rounded-xl border bg-white p-4">
