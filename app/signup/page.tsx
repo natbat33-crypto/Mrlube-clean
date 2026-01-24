@@ -153,7 +153,7 @@ function SignupContent() {
       await signOut(auth);
 
       // ✅ FIXED REDIRECT — DO NOT TOUCH
-      window.location.assign("/login?verify=1");
+        window.location.assign("/auth/login?verify=1");
 
     } catch (err: any) {
       console.error("Signup error:", err);
