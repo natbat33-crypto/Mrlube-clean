@@ -34,7 +34,8 @@ function SignupContent() {
   const [password, setPassword] = useState("");
 
   const [accessCode, setAccessCode] = useState("");
-  const [roleFromCode, setRoleFromCode] = useState<null | string>(null);
+  const [role, setRole] = useState("");
+  const [accessCodes, setAccessCodes] = useState<any>(null);
 
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState("");
@@ -42,113 +43,97 @@ function SignupContent() {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  /* -------------- LOAD STORES FROM FIRESTORE -------------- */
+  /* ---------------- LOAD ACCESS CODES ---------------- */
+  useEffect(() => {
+    async function loadCodes() {
+      const snap = await getDoc(doc(db, "config", "accessCodes"));
+      if (snap.exists()) setAccessCodes(snap.data());
+    }
+    loadCodes();
+  }, []);
+
+  /* ---------------- LOAD STORES ---------------- */
   useEffect(() => {
     async function loadStores() {
-      try {
-        const snap = await getDocs(collection(db, "stores"));
-        const arr: any[] = [];
-
-        snap.forEach((d) => {
-          arr.push({
-            id: d.id,
-            name: d.data().name || d.id,
-          });
+      const snap = await getDocs(collection(db, "stores"));
+      const arr: any[] = [];
+      snap.forEach((d) => {
+        arr.push({
+          id: d.id,
+          name: d.data().name || d.id,
         });
-
-        setStores(arr);
-      } catch (err) {
-        console.error("Store load error:", err);
-      }
+      });
+      setStores(arr);
     }
-
     loadStores();
   }, []);
 
-  /* ---------- DYNAMICALLY DETERMINE ROLE WHEN ACCESS CODE CHANGES ---------- */
+  /* ---------------- DETECT ROLE FROM ACCESS CODE ---------------- */
   useEffect(() => {
-    async function checkCode() {
-      if (!accessCode.trim()) {
-        setRoleFromCode(null);
-        return;
-      }
+    if (!accessCodes) return;
+    const code = accessCode.trim().toUpperCase();
 
-      const snap = await getDoc(doc(db, "config", "accessCodes"));
-      if (!snap.exists()) return;
+    if (code === accessCodes.admin?.toUpperCase()) setRole("admin");
+    else if (code === accessCodes.gm?.toUpperCase()) setRole("gm");
+    else if (code === accessCodes.manager?.toUpperCase()) setRole("manager");
+    else if (code === accessCodes.employee?.toUpperCase()) setRole("employee");
+    else setRole(""); // invalid or still typing
+  }, [accessCode, accessCodes]);
 
-      const codes = snap.data();
-
-      const code = accessCode.trim();
-
-      if (code === codes.admin) setRoleFromCode("admin");
-      else if (code === codes.gm) setRoleFromCode("gm");
-      else if (code === codes.manager) setRoleFromCode("manager");
-      else if (code === codes.employee) setRoleFromCode("employee");
-      else setRoleFromCode("invalid");
-    }
-
-    checkCode();
-  }, [accessCode]);
-
-  /* ------------------ SUBMIT ------------------ */
+  /* ---------------- SUBMIT ---------------- */
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus(null);
 
     if (!name.trim()) return setStatus("❌ Please enter your full name.");
-    if (!email.includes("@")) return setStatus("❌ Please enter a valid email.");
+    if (!email.includes("@")) return setStatus("❌ Invalid email address.");
     if (password.length < 6)
       return setStatus("❌ Password must be at least 6 characters.");
+    if (!accessCode.trim()) return setStatus("❌ Enter your access code.");
 
-    if (!accessCode.trim())
-      return setStatus("❌ Please enter your access code.");
+    if (!role) return setStatus("❌ Invalid access code.");
 
-    if (roleFromCode === "invalid")
-      return setStatus("❌ Invalid access code.");
-
-    if (!roleFromCode)
-      return setStatus("❌ Checking access code… please wait.");
-
-    if (roleFromCode !== "admin" && !storeId)
+    if (role !== "admin" && !storeId)
       return setStatus("❌ Please select your store.");
 
     setLoading(true);
 
     try {
-      /* ---------- 1. CREATE AUTH USER ---------- */
+      /* ---------- CREATE AUTH USER ---------- */
       const cred = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
         password
       );
+
       const uid = cred.user.uid;
 
       const batch = writeBatch(db);
 
-      /* ---------- 2. USER DOC ---------- */
+      /* ---------- USER DOC ---------- */
       batch.set(
         doc(db, "users", uid),
         {
           uid,
           name,
           email,
-          role: roleFromCode,
-          storeId: roleFromCode === "admin" ? null : storeId,
+          role,
+          storeId: role === "admin" ? null : storeId,
           active: true,
           createdAt: serverTimestamp(),
         },
         { merge: true }
       );
 
-      /* ---------- 3. STORE EMPLOYEE DOC ---------- */
-      if (roleFromCode !== "admin") {
+      /* ---------- STORE EMPLOYEE DOC ---------- */
+      if (role !== "admin") {
         batch.set(
           doc(db, `stores/${storeId}/employees/${uid}`),
           {
             uid,
             name,
             email,
-            role: roleFromCode,
+            role,
             storeId,
             active: true,
             createdAt: serverTimestamp(),
@@ -165,17 +150,17 @@ function SignupContent() {
     } catch (err: any) {
       console.error(err);
 
-      let msg = err?.message || "❌ Something went wrong.";
+      let m = err?.message || "❌ Something went wrong.";
       if (String(err?.code).includes("email-already-in-use"))
-        msg = "❌ That email is already in use.";
+        m = "❌ Email already in use.";
 
-      setStatus(msg);
+      setStatus(m);
     } finally {
       setLoading(false);
     }
   }
 
-  /* ------------------ UI ------------------ */
+  /* ---------------- UI ---------------- */
   return (
     <main className="min-h-[100svh] grid place-items-center bg-gray-50">
       <div className="w-[min(440px,92vw)] bg-white rounded-xl shadow-xl p-6">
@@ -183,6 +168,7 @@ function SignupContent() {
         <p className="text-gray-600 mb-4">Enter your details to get started</p>
 
         <form onSubmit={onSubmit} className="grid gap-4">
+
           {/* NAME */}
           <input
             type="text"
@@ -203,25 +189,22 @@ function SignupContent() {
             required
           />
 
-          {/* STORE DROPDOWN — SHOW ONLY IF NOT ADMIN */}
-          {roleFromCode &&
-            roleFromCode !== "admin" &&
-            roleFromCode !== "invalid" && (
-              <select
-                value={storeId}
-                onChange={(e) => setStoreId(e.target.value)}
-                className="border rounded-lg p-3"
-                required
-              >
-                <option value="">Select Your Store</option>
-
-                {stores.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.id} — {s.name}
-                  </option>
-                ))}
-              </select>
-            )}
+          {/* STORE DROPDOWN — FOR ALL NON-ADMINS */}
+          {role && role !== "admin" && (
+            <select
+              value={storeId}
+              onChange={(e) => setStoreId(e.target.value)}
+              className="border rounded-lg p-3"
+              required
+            >
+              <option value="">Select Your Store</option>
+              {stores.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.id} — {s.name}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* EMAIL */}
           <input
@@ -252,9 +235,7 @@ function SignupContent() {
           </button>
         </form>
 
-        {status && (
-          <p className="mt-3 text-sm text-red-600">{status}</p>
-        )}
+        {status && <p className="mt-3 text-sm text-red-600">{status}</p>}
       </div>
     </main>
   );
