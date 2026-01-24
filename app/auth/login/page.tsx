@@ -35,14 +35,12 @@ function LoginContent() {
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // 🔑 Password reset state
+  // Password reset state
   const [resetMsg, setResetMsg] = useState<string | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const [sendingReset, setSendingReset] = useState(false);
 
-  /* ----------------------------------------------------------
-     🔥 Redirect invite links to signup (legacy safety)
-  ---------------------------------------------------------- */
+  /* Redirect invite → signup (legacy) */
   useEffect(() => {
     const invite = qs?.get("invite");
     if (invite) {
@@ -50,12 +48,16 @@ function LoginContent() {
     }
   }, [qs, router]);
 
+  /* Show verify message */
   useEffect(() => {
     if (qs?.get("verify") === "1") {
       setMsg("Check your email to verify your account, then sign in.");
     }
   }, [qs]);
 
+  /* ────────────────────────────────────────────────
+        Ensure USER DOC exists
+     ──────────────────────────────────────────────── */
   async function ensureUserDoc(
     uid: string,
     emailForDoc: string
@@ -81,26 +83,38 @@ function LoginContent() {
     return snap.data() as UserProfile | undefined;
   }
 
+  /* ────────────────────────────────────────────────
+        ⭐ FIXED ROLE ROUTING (EMPLOYEE → pending)
+     ──────────────────────────────────────────────── */
   async function routeByProfile(uid: string, emailForDoc: string) {
     const data = await ensureUserDoc(uid, emailForDoc);
 
     const rawRole = (data?.role || "trainee").toString().toLowerCase();
     const role = rawRole.trim();
+
     const storeId =
       (data?.storeId as string | null | undefined) ??
       ((data as any)?.storeid as string | null | undefined) ??
       null;
 
     if (role === "admin") return router.replace("/admin");
-    if (role === "manager") return router.replace("/manager");
     if (role === "gm") return router.replace("/gm");
+    if (role === "manager") return router.replace("/manager");
     if (role === "supervisor") return router.replace("/supervisor");
-    if (role === "trainee" || role === "employee")
-      return router.replace("/dashboard");
 
-    router.replace("/dashboard");
+    // ⭐ EMPLOYEE ALWAYS GOES TO PENDING PAGE
+    if (role === "employee") return router.replace("/employee/pending");
+
+    // ⭐ TRAINEE GOES TO TRAINEE DASHBOARD
+    if (role === "trainee") return router.replace("/dashboard");
+
+    // fallback
+    return router.replace("/dashboard");
   }
 
+  /* ────────────────────────────────────────────────
+        HANDLE LOGIN
+     ──────────────────────────────────────────────── */
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setMsg(null);
@@ -138,9 +152,9 @@ function LoginContent() {
     }
   }
 
-  /* ----------------------------------------------------------
-     🔐 PASSWORD RESET
-  ---------------------------------------------------------- */
+  /* ────────────────────────────────────────────────
+        PASSWORD RESET
+     ──────────────────────────────────────────────── */
   async function handlePasswordReset() {
     if (!email) {
       setResetError("Please enter your email address first.");
@@ -168,6 +182,9 @@ function LoginContent() {
     }
   }
 
+  /* ────────────────────────────────────────────────
+        UI
+     ──────────────────────────────────────────────── */
   return (
     <main className="min-h-[100svh] bg-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-md p-6 sm:p-8">
@@ -198,7 +215,7 @@ function LoginContent() {
               placeholder="Your email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#0b3d91] bg-slate-50"
+              className="block w-full rounded-lg border border-slate-300 px-3 py-2 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#0b3d91]"
             />
           </div>
 
@@ -212,11 +229,10 @@ function LoginContent() {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#0b3d91] bg-slate-50"
+              className="block w-full rounded-lg border border-slate-300 px-3 py-2 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#0b3d91]"
             />
           </div>
 
-          {/* 🔐 Forgot password */}
           <div className="text-right">
             <button
               type="button"
@@ -236,26 +252,20 @@ function LoginContent() {
             {loading ? "Signing in…" : "Sign In"}
           </button>
 
-          {/* 🔥 Login error */}
           {msg && (
             <p className="text-sm mt-2 text-center text-red-600">{msg}</p>
           )}
-
-          {/* 🔥 Password reset success */}
           {resetMsg && (
             <p className="text-sm mt-2 text-center text-green-600">
               {resetMsg}
             </p>
           )}
-
-          {/* 🔥 Password reset error */}
           {resetError && (
             <p className="text-sm mt-2 text-center text-red-600">
               {resetError}
             </p>
           )}
 
-          {/* ⭐ NEW SIGNUP LINK */}
           <div className="mt-4 text-center">
             <p className="text-sm text-slate-600">
               Don’t have an account?{" "}
