@@ -1,37 +1,23 @@
 "use client";
 
 import { Suspense } from "react";
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useState, useEffect } from "react";
 import { auth, db } from "@/lib/firebase";
+
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
   signOut,
 } from "firebase/auth";
+
 import {
   doc,
   serverTimestamp,
   getDoc,
   writeBatch,
+  collection,
+  getDocs,
 } from "firebase/firestore";
-
-type Invite = {
-  role: "admin" | "manager" | "supervisor" | "trainee" | "employee";
-  storeId?: string | null;
-  managerId?: string | null;
-  used?: boolean;
-  disabled?: boolean;
-  expiresAt?: any;
-  maxUses?: number;
-  uses?: number;
-};
-
-/* 🔥 NEW — ADMIN DOMAIN CHECK */
-function isAdminDomain(email?: string | null) {
-  if (!email) return false;
-  return email.toLowerCase().endsWith("@mrlubemb.com");
-}
 
 export default function SignupPage() {
   return (
@@ -42,74 +28,97 @@ export default function SignupPage() {
 }
 
 function SignupContent() {
-  const search = useSearchParams();
-  const inviteParam = search.get("invite") || search.get("code") || "";
-  const code = inviteParam.trim().toUpperCase();
-
+  /* ---------------- STATE ---------------- */
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  const [accessCode, setAccessCode] = useState("");
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState("");
+
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [inviteError, setInviteError] = useState<string | null>(null);
 
-  /* ------------------ VALIDATE INVITE ------------------ */
+  /* -------------- LOAD STORES (store numbers) -------------- */
   useEffect(() => {
-    let cancel = false;
-
-    (async () => {
-      if (!code) return;
-
+    async function loadStores() {
       try {
-        const snap = await getDoc(doc(db, "invites", code));
-        if (!snap.exists())
-          return !cancel && setInviteError("Invalid invite code.");
+        const colRef = collection(db, "stores");
+        const snaps = await getDocs(colRef);
+        const arr: any[] = [];
 
-        const inv = snap.data() as Invite;
+        snaps.forEach((d) => {
+          arr.push({ id: d.id, ...d.data() }); // id === store number
+        });
 
-        if (inv.disabled)
-          return !cancel && setInviteError("Invite disabled.");
-
-        if (inv.expiresAt?.toMillis && inv.expiresAt.toMillis() < Date.now())
-          return !cancel && setInviteError("Invite expired.");
-
-        if (typeof inv.maxUses === "number" && (inv.uses || 0) >= inv.maxUses)
-          return !cancel && setInviteError("Invite quota reached.");
-
-        if (!inv.maxUses && inv.used)
-          return !cancel && setInviteError("Invite already used.");
-
-        if (!cancel) setInviteError(null);
-      } catch {
-        if (!cancel) setInviteError("Could not read invite.");
+        setStores(arr);
+      } catch (err) {
+        console.error("Store load error:", err);
       }
-    })();
+    }
 
-    return () => {
-      cancel = true;
-    };
-  }, [code]);
+    loadStores();
+  }, []);
 
   /* ------------------ SUBMIT ------------------ */
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus(null);
 
+    if (!name.trim()) {
+      setStatus("❌ Please enter your full name.");
+      return;
+    }
+
     if (!email.includes("@")) {
       setStatus("❌ Please enter a valid email address.");
       return;
     }
+
     if (password.length < 6) {
       setStatus("❌ Password must be at least 6 characters.");
       return;
     }
-    if (code && inviteError) {
-      setStatus(`❌ ${inviteError}`);
+
+    if (!accessCode.trim()) {
+      setStatus("❌ Please enter your access code.");
       return;
     }
 
     setLoading(true);
 
     try {
+      /* ---------- 1. FETCH ACCESS CODES ---------- */
+      const accessSnap = await getDoc(doc(db, "config", "accessCodes"));
+      if (!accessSnap.exists()) {
+        setStatus("❌ Server error: no access codes found.");
+        setLoading(false);
+        return;
+      }
+
+      const codes = accessSnap.data();
+
+      /* ---------- 2. DETERMINE ROLE FROM CODE ---------- */
+      let role = "";
+      if (accessCode === codes.admin) role = "admin";
+      else if (accessCode === codes.gm) role = "gm";
+      else if (accessCode === codes.manager) role = "manager";
+      else if (accessCode === codes.employee) role = "employee";
+      else {
+        setStatus("❌ Invalid access code.");
+        setLoading(false);
+        return;
+      }
+
+      /* ---------- 3. REQUIRE STORE FOR NON-ADMINS ---------- */
+      if (role !== "admin" && !storeId) {
+        setStatus("❌ Please select your store.");
+        setLoading(false);
+        return;
+      }
+
+      /* ---------- 4. CREATE FIREBASE AUTH USER ---------- */
       const cred = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
@@ -117,100 +126,54 @@ function SignupContent() {
       );
       const uid = cred.user.uid;
 
-      /* ---------- DEFAULTS ---------- */
-      let role: Invite["role"] = "employee";
-      let storeId: string | null = null;
-      let managerId: string | null = null;
-
       const batch = writeBatch(db);
 
-      /* 🔥 AUTO-ADMIN (NO INVITE REQUIRED) */
-      if (!code && isAdminDomain(email)) {
-        role = "admin";
-        storeId = null;
-      }
-
-      /* ---------- APPLY INVITE ---------- */
-      if (code) {
-        const inviteRef = doc(db, "invites", code);
-        const invSnap = await getDoc(inviteRef);
-        if (!invSnap.exists()) throw new Error("Invalid invite code.");
-        const inv = invSnap.data() as Invite;
-
-        if (inv.disabled) throw new Error("Invite disabled.");
-        if (inv.expiresAt?.toMillis && inv.expiresAt.toMillis() < Date.now())
-          throw new Error("Invite expired.");
-        if (typeof inv.maxUses === "number" && (inv.uses || 0) >= inv.maxUses)
-          throw new Error("Invite quota reached.");
-        if (!inv.maxUses && inv.used) throw new Error("Invite already used.");
-
-        role = inv.role || "employee";
-        storeId = role === "admin" ? null : inv.storeId ?? null;
-        managerId = inv.managerId ?? null;
-
-        batch.set(
-          inviteRef,
-          typeof inv.maxUses === "number"
-            ? {
-                uses: (inv.uses || 0) + 1,
-                usedByLast: uid,
-                usedAtLast: serverTimestamp(),
-                disabled:
-                  (inv.uses || 0) + 1 >= inv.maxUses
-                    ? true
-                    : inv.disabled ?? false,
-              }
-            : { used: true, usedBy: uid, usedAt: serverTimestamp() },
-          { merge: true }
-        );
-      }
-
-      /* ---------- ACTIVE RULE ---------- */
-      const shouldBeActive =
-        role === "admin" ||
-        role === "manager" ||
-        role === "supervisor" ||
-        role === "trainee";
-
-      /* ---------- USER DOC ---------- */
+      /* ---------- 5. USER DOC ---------- */
       batch.set(
         doc(db, "users", uid),
         {
-          email: cred.user.email,
+          uid,
+          name,
+          email,
           role,
-          storeId: storeId ?? null,
-          managerId: managerId ?? null,
-          active: shouldBeActive,
+          storeId: role === "admin" ? null : storeId,
+          active: true,
           createdAt: serverTimestamp(),
         },
         { merge: true }
       );
 
-      /* ---------- STORE EMPLOYEE ---------- */
-      if (storeId && role !== "admin") {
+      /* ---------- 6. STORE EMPLOYEE DOC ---------- */
+      if (role !== "admin") {
         batch.set(
           doc(db, `stores/${storeId}/employees/${uid}`),
           {
             uid,
-            email: cred.user.email ?? null,
+            name,
+            email,
             role,
             storeId,
-            active: shouldBeActive,
+            active: true,
             createdAt: serverTimestamp(),
           },
           { merge: true }
         );
       }
 
+      /* ---------- 7. SAVE + SEND VERIFICATION ---------- */
       await batch.commit();
       await sendEmailVerification(cred.user);
       await signOut(auth);
 
       window.location.assign("/login?verify=1");
     } catch (err: any) {
+      console.error(err);
+
       let msg = err?.message || "❌ Something went wrong.";
+
       if (String(err?.code).includes("email-already-in-use"))
         msg = "❌ That email is already in use.";
+
       setStatus(msg);
     } finally {
       setLoading(false);
@@ -221,12 +184,48 @@ function SignupContent() {
   return (
     <main className="min-h-[100svh] grid place-items-center bg-gray-50">
       <div className="w-[min(440px,92vw)] bg-white rounded-xl shadow-xl p-6">
-        <h1 className="text-2xl font-bold mb-2">Employee Signup</h1>
-        <p className="text-gray-600 mb-4">
-          Create your Mr. Lube training account
-        </p>
+        <h1 className="text-2xl font-bold mb-2">Create Account</h1>
+        <p className="text-gray-600 mb-4">Enter your details to get started</p>
 
         <form onSubmit={onSubmit} className="grid gap-4">
+
+          {/* NAME */}
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Full Name"
+            required
+            className="border rounded-lg p-3"
+          />
+
+          {/* ACCESS CODE */}
+          <input
+            type="text"
+            value={accessCode}
+            onChange={(e) => setAccessCode(e.target.value)}
+            placeholder="Access Code"
+            required
+            className="border rounded-lg p-3"
+          />
+
+          {/* STORE DROPDOWN — ONLY FOR NON ADMINS */}
+          {accessCode !== "" && accessCode !== "ADMIN-2026" && (
+            <select
+              value={storeId}
+              onChange={(e) => setStoreId(e.target.value)}
+              className="border rounded-lg p-3"
+            >
+              <option value="">Select Your Store</option>
+              {stores.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.id}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* EMAIL */}
           <input
             type="email"
             value={email}
@@ -236,6 +235,7 @@ function SignupContent() {
             className="border rounded-lg p-3"
           />
 
+          {/* PASSWORD */}
           <input
             type="password"
             value={password}

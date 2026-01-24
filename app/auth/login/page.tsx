@@ -41,7 +41,7 @@ function LoginContent() {
   const [sendingReset, setSendingReset] = useState(false);
 
   /* ----------------------------------------------------------
-     🔥 Redirect invite links to signup
+     🔥 Redirect invite links to signup (legacy safety)
   ---------------------------------------------------------- */
   useEffect(() => {
     const invite = qs?.get("invite");
@@ -235,21 +235,37 @@ function LoginContent() {
             {loading ? "Signing in…" : "Sign In"}
           </button>
 
+          {/* 🔥 Login error */}
           {msg && (
             <p className="text-sm mt-2 text-center text-red-600">{msg}</p>
           )}
 
+          {/* 🔥 Password reset success */}
           {resetMsg && (
             <p className="text-sm mt-2 text-center text-green-600">
               {resetMsg}
             </p>
           )}
 
+          {/* 🔥 Password reset error */}
           {resetError && (
             <p className="text-sm mt-2 text-center text-red-600">
               {resetError}
             </p>
           )}
+
+          {/* ⭐ NEW SIGNUP LINK */}
+          <div className="mt-4 text-center">
+            <p className="text-sm text-slate-600">
+              Don’t have an account?{" "}
+              <a
+                href="/signup"
+                className="text-[#0b3d91] font-semibold hover:underline"
+              >
+                Sign up
+              </a>
+            </p>
+          </div>
         </form>
       </div>
     </main>
