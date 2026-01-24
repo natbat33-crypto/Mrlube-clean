@@ -28,7 +28,6 @@ export default function SignupPage() {
 }
 
 function SignupContent() {
-  /* ---------------- STATE ---------------- */
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -44,9 +43,7 @@ function SignupContent() {
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  /* ------------------------------------------------
-     LOAD ACCESS CODES ONCE
-  ------------------------------------------------ */
+  // LOAD ACCESS CODES
   useEffect(() => {
     async function loadCodes() {
       try {
@@ -59,9 +56,7 @@ function SignupContent() {
     loadCodes();
   }, []);
 
-  /* ------------------------------------------------
-     LOAD STORES
-  ------------------------------------------------ */
+  // LOAD STORES
   useEffect(() => {
     async function loadStores() {
       try {
@@ -82,9 +77,7 @@ function SignupContent() {
     loadStores();
   }, []);
 
-  /* ------------------------------------------------
-     DETECT ROLE FROM ACCESS CODE
-  ------------------------------------------------ */
+  // DETECT ROLE FROM ACCESS CODE
   useEffect(() => {
     if (!accessCodes) return;
 
@@ -97,9 +90,7 @@ function SignupContent() {
     else setRole("");
   }, [accessCode, accessCodes]);
 
-  /* ------------------------------------------------
-     SUBMIT
-  ------------------------------------------------ */
+  // SUBMIT
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus(null);
@@ -115,7 +106,6 @@ function SignupContent() {
     setLoading(true);
 
     try {
-      /* ---------- AUTH ---------- */
       const cred = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
@@ -126,7 +116,7 @@ function SignupContent() {
 
       const batch = writeBatch(db);
 
-      /* ---------- USER DOC ---------- */
+      // USER DOC
       batch.set(
         doc(db, "users", uid),
         {
@@ -141,7 +131,7 @@ function SignupContent() {
         { merge: true }
       );
 
-      /* ---------- STORE EMPLOYEE DOC ---------- */
+      // STORE EMPLOYEE DOC
       if (role !== "admin") {
         batch.set(
           doc(db, `stores/${storeId}/employees/${uid}`),
@@ -162,7 +152,9 @@ function SignupContent() {
       await sendEmailVerification(cred.user);
       await signOut(auth);
 
+      // ✅ FIXED REDIRECT — DO NOT TOUCH
       window.location.assign("/login?verify=1");
+
     } catch (err: any) {
       console.error("Signup error:", err);
       let m = err?.message || "❌ Something went wrong.";
@@ -174,9 +166,6 @@ function SignupContent() {
     }
   }
 
-  /* ------------------------------------------------
-     UI
-  ------------------------------------------------ */
   return (
     <main className="min-h-[100svh] grid place-items-center bg-gray-50">
       <div className="w-[min(440px,92vw)] bg-white rounded-xl shadow-xl p-6">
@@ -184,7 +173,6 @@ function SignupContent() {
         <p className="text-gray-600 mb-4">Enter your details to get started</p>
 
         <form onSubmit={onSubmit} className="grid gap-4">
-          {/* NAME */}
           <input
             type="text"
             value={name}
@@ -194,7 +182,6 @@ function SignupContent() {
             required
           />
 
-          {/* ACCESS CODE */}
           <input
             type="text"
             value={accessCode}
@@ -204,7 +191,6 @@ function SignupContent() {
             required
           />
 
-          {/* STORE DROPDOWN — FOR ALL NON-ADMINS */}
           {role && role !== "admin" && (
             <select
               value={storeId}
@@ -221,7 +207,6 @@ function SignupContent() {
             </select>
           )}
 
-          {/* EMAIL */}
           <input
             type="email"
             value={email}
@@ -231,7 +216,6 @@ function SignupContent() {
             required
           />
 
-          {/* PASSWORD */}
           <input
             type="password"
             value={password}
@@ -255,4 +239,3 @@ function SignupContent() {
     </main>
   );
 }
-
