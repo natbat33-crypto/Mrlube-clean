@@ -34,6 +34,8 @@ function SignupContent() {
   const [password, setPassword] = useState("");
 
   const [accessCode, setAccessCode] = useState("");
+  const [roleFromCode, setRoleFromCode] = useState<null | string>(null);
+
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState("");
 
@@ -49,8 +51,8 @@ function SignupContent() {
 
         snap.forEach((d) => {
           arr.push({
-            id: d.id, // ⚡ store number
-            name: d.data().name || d.id, // readable name fallback
+            id: d.id,
+            name: d.data().name || d.id,
           });
         });
 
@@ -63,6 +65,31 @@ function SignupContent() {
     loadStores();
   }, []);
 
+  /* ---------- DYNAMICALLY DETERMINE ROLE WHEN ACCESS CODE CHANGES ---------- */
+  useEffect(() => {
+    async function checkCode() {
+      if (!accessCode.trim()) {
+        setRoleFromCode(null);
+        return;
+      }
+
+      const snap = await getDoc(doc(db, "config", "accessCodes"));
+      if (!snap.exists()) return;
+
+      const codes = snap.data();
+
+      const code = accessCode.trim();
+
+      if (code === codes.admin) setRoleFromCode("admin");
+      else if (code === codes.gm) setRoleFromCode("gm");
+      else if (code === codes.manager) setRoleFromCode("manager");
+      else if (code === codes.employee) setRoleFromCode("employee");
+      else setRoleFromCode("invalid");
+    }
+
+    checkCode();
+  }, [accessCode]);
+
   /* ------------------ SUBMIT ------------------ */
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -72,31 +99,23 @@ function SignupContent() {
     if (!email.includes("@")) return setStatus("❌ Please enter a valid email.");
     if (password.length < 6)
       return setStatus("❌ Password must be at least 6 characters.");
+
     if (!accessCode.trim())
       return setStatus("❌ Please enter your access code.");
+
+    if (roleFromCode === "invalid")
+      return setStatus("❌ Invalid access code.");
+
+    if (!roleFromCode)
+      return setStatus("❌ Checking access code… please wait.");
+
+    if (roleFromCode !== "admin" && !storeId)
+      return setStatus("❌ Please select your store.");
 
     setLoading(true);
 
     try {
-      /* ---------- 1. FETCH ACCESS CODES ---------- */
-      const accessSnap = await getDoc(doc(db, "config", "accessCodes"));
-      if (!accessSnap.exists())
-        throw new Error("Server error: access codes not found.");
-      const codes = accessSnap.data();
-
-      /* ---------- 2. DETERMINE ROLE ---------- */
-      let role = "";
-      if (accessCode === codes.admin) role = "admin";
-      else if (accessCode === codes.gm) role = "gm";
-      else if (accessCode === codes.manager) role = "manager";
-      else if (accessCode === codes.employee) role = "employee";
-      else throw new Error("Invalid access code.");
-
-      /* ---------- 3. REQUIRE STORE FOR NON-ADMIN ---------- */
-      if (role !== "admin" && !storeId)
-        return setStatus("❌ Please select your store.");
-
-      /* ---------- 4. CREATE AUTH USER ---------- */
+      /* ---------- 1. CREATE AUTH USER ---------- */
       const cred = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
@@ -106,30 +125,30 @@ function SignupContent() {
 
       const batch = writeBatch(db);
 
-      /* ---------- 5. USER DOC ---------- */
+      /* ---------- 2. USER DOC ---------- */
       batch.set(
         doc(db, "users", uid),
         {
           uid,
           name,
           email,
-          role,
-          storeId: role === "admin" ? null : storeId,
+          role: roleFromCode,
+          storeId: roleFromCode === "admin" ? null : storeId,
           active: true,
           createdAt: serverTimestamp(),
         },
         { merge: true }
       );
 
-      /* ---------- 6. STORE EMPLOYEE DOC ---------- */
-      if (role !== "admin") {
+      /* ---------- 3. STORE EMPLOYEE DOC ---------- */
+      if (roleFromCode !== "admin") {
         batch.set(
           doc(db, `stores/${storeId}/employees/${uid}`),
           {
             uid,
             name,
             email,
-            role,
+            role: roleFromCode,
             storeId,
             active: true,
             createdAt: serverTimestamp(),
@@ -138,7 +157,6 @@ function SignupContent() {
         );
       }
 
-      /* ---------- 7. COMMIT + VERIFY EMAIL ---------- */
       await batch.commit();
       await sendEmailVerification(cred.user);
       await signOut(auth);
@@ -147,11 +165,11 @@ function SignupContent() {
     } catch (err: any) {
       console.error(err);
 
-      let message = err?.message || "❌ Something went wrong.";
+      let msg = err?.message || "❌ Something went wrong.";
       if (String(err?.code).includes("email-already-in-use"))
-        message = "❌ That email is already in use.";
+        msg = "❌ That email is already in use.";
 
-      setStatus(message);
+      setStatus(msg);
     } finally {
       setLoading(false);
     }
@@ -165,7 +183,6 @@ function SignupContent() {
         <p className="text-gray-600 mb-4">Enter your details to get started</p>
 
         <form onSubmit={onSubmit} className="grid gap-4">
-
           {/* NAME */}
           <input
             type="text"
@@ -186,9 +203,10 @@ function SignupContent() {
             required
           />
 
-          {/* STORE DROPDOWN (ONLY IF ROLE IS NOT ADMIN) */}
-          {accessCode.toUpperCase() !== "" &&
-            accessCode.toUpperCase() !== "ADMIN-2026" && (
+          {/* STORE DROPDOWN — SHOW ONLY IF NOT ADMIN */}
+          {roleFromCode &&
+            roleFromCode !== "admin" &&
+            roleFromCode !== "invalid" && (
               <select
                 value={storeId}
                 onChange={(e) => setStoreId(e.target.value)}
