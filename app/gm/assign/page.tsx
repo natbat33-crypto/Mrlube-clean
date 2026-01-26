@@ -1,4 +1,3 @@
-// app/gm/assign/page.tsx
 "use client";
 export const dynamic = "force-dynamic";
 
@@ -15,49 +14,9 @@ import {
   getDocs,
 } from "firebase/firestore";
 
-/* ------------------------- Debug Badge ------------------------- */
-function DebugBanner({ storeId }: { storeId: string }) {
-  const [uid, setUid] = useState("");
-  const [tokenStore, setTokenStore] = useState("");
-  const [empOk, setEmpOk] = useState<null | boolean>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const u = auth.currentUser;
-        setUid(u?.uid ?? "");
-        const token = await u?.getIdTokenResult(true);
-        setTokenStore(String(token?.claims?.storeId ?? ""));
-        if (u?.uid && storeId) {
-          const snap = await getDoc(doc(db, "stores", storeId, "employees", u.uid));
-          setEmpOk(snap.exists());
-        }
-      } catch (e: any) {
-        setErr(e?.message ?? String(e));
-      }
-    })();
-  }, [storeId]);
-
-  return (
-    <div style={{
-      position: "fixed", right: 12, top: 12,
-      background: "rgba(0,0,0,0.7)", color: "#fff",
-      padding: "8px 10px", borderRadius: 8, fontSize: 12, zIndex: 50
-    }}>
-      <div><b>Debug</b></div>
-      <div>uid: {uid || "—"}</div>
-      <div>token store: {tokenStore || "—"}</div>
-      <div>query store: {storeId || "—"}</div>
-      <div>
-        employee doc: {empOk === null ? "…" : empOk ? "FOUND ✅" : "MISSING ❌"}
-      </div>
-      {err && <div style={{ color: "#ffd966" }}>err: {err}</div>}
-    </div>
-  );
-}
-
-/* ----------------------------- Component ----------------------------- */
+/* ---------------------------------------------------------
+   TYPES
+--------------------------------------------------------- */
 type Employee = {
   uid: string;
   role?: string;
@@ -65,24 +24,35 @@ type Employee = {
   name?: string;
 };
 
+/* ---------------------------------------------------------
+   PAGE
+--------------------------------------------------------- */
 export default function GMAssignPage() {
   const sp = useSearchParams();
   const storeFromQuery = sp.get("store") || "";
   const [storeId, setStoreId] = useState(storeFromQuery);
+
   const [meOk, setMeOk] = useState<boolean | null>(null);
 
-  /* -------- Load storeId from token if not in ?store= -------- */
+  /* ----------------------------------------
+     1. Load storeId from token if not in URL
+  ---------------------------------------- */
   useEffect(() => {
     (async () => {
       if (storeFromQuery) return;
       const u = auth.currentUser;
-      const tok = await u?.getIdTokenResult(true);
-      const claimStore = String(tok?.claims?.storeId ?? "");
+      if (!u) return;
+
+      const tok = await u.getIdTokenResult(true);
+      const claimStore = String(tok.claims?.storeId ?? "");
+
       if (claimStore) setStoreId(claimStore);
     })();
   }, [storeFromQuery]);
 
-  /* -------- Check GM is employee of store -------- */
+  /* ----------------------------------------
+     2. Verify GM is an employee of the store
+  ---------------------------------------- */
   useEffect(() => {
     (async () => {
       try {
@@ -99,7 +69,9 @@ export default function GMAssignPage() {
     })();
   }, [storeId]);
 
-  /* -------- Load supervisors + trainees -------- */
+  /* ----------------------------------------
+     3. Load employees for dropdowns
+  ---------------------------------------- */
   const [supervisors, setSupervisors] = useState<Employee[]>([]);
   const [trainees, setTrainees] = useState<Employee[]>([]);
 
@@ -109,18 +81,27 @@ export default function GMAssignPage() {
     (async () => {
       const base = collection(db, "stores", storeId, "employees");
       const qs = await getDocs(base);
+
       const all = qs.docs.map((d) => ({
         uid: d.id,
         ...(d.data() as any),
       })) as Employee[];
 
-      setSupervisors(all.filter((e) => e.active !== false && e.role === "supervisor"));
-      setTrainees(all.filter((e) =>
-        e.active !== false && (e.role === "trainee" || !e.role)
-      ));
+      setSupervisors(
+        all.filter((e) => e.active !== false && e.role === "supervisor")
+      );
+
+      setTrainees(
+        all.filter((e) =>
+          e.active !== false && (e.role === "trainee" || !e.role)
+        )
+      );
     })();
   }, [storeId]);
 
+  /* ----------------------------------------
+     4. Form state
+  ---------------------------------------- */
   const [traineeUid, setTraineeUid] = useState("");
   const [supervisorUid, setSupervisorUid] = useState("");
   const [status, setStatus] = useState("");
@@ -130,7 +111,9 @@ export default function GMAssignPage() {
     [storeId, traineeUid, supervisorUid, meOk]
   );
 
-  /* --------------------- ASSIGN ACTION --------------------- */
+  /* ----------------------------------------
+     5. ASSIGN
+  ---------------------------------------- */
   async function assign() {
     if (!canSubmit) return;
 
@@ -143,6 +126,7 @@ export default function GMAssignPage() {
     setStatus("Assigning…");
 
     try {
+      // Write to trainees path
       await setDoc(
         doc(db, "stores", storeId, "trainees", traineeUid),
         {
@@ -157,28 +141,39 @@ export default function GMAssignPage() {
         { merge: true }
       );
 
-      await setDoc(doc(db, "users", traineeUid), {
-        storeId,
-        supervisorUid,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      // Update users
+      await setDoc(
+        doc(db, "users", traineeUid),
+        {
+          storeId,
+          supervisorUid,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
-      await setDoc(doc(db, "users", supervisorUid), {
-        storeId,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      await setDoc(
+        doc(db, "users", supervisorUid),
+        {
+          storeId,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
       setStatus("✅ Assigned");
     } catch (e: any) {
-      setStatus(`❌ ${e.message ?? "Failed"}`);
+      setStatus(`❌ ${e?.message ?? "Failed"}`);
     }
   }
 
+  /* ---------------------------------------------------------
+     RENDER
+  --------------------------------------------------------- */
   return (
     <main className="max-w-3xl mx-auto p-4 lg:p-6 space-y-6">
-      <DebugBanner storeId={storeId} />
 
-      {/* ⭐ NEW: Correct Back link */}
+      {/* Clean Back Link */}
       <Link
         href="/gm"
         className="inline-block text-sm px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200"
@@ -198,7 +193,7 @@ export default function GMAssignPage() {
         </p>
       ) : (
         <>
-          {/* Supervisor Pick */}
+          {/* Supervisor Picker */}
           <section className="space-y-2">
             <label className="text-sm font-medium">Supervisor</label>
             <select
@@ -216,7 +211,7 @@ export default function GMAssignPage() {
             </select>
           </section>
 
-          {/* Trainee Pick */}
+          {/* Trainee Picker */}
           <section className="space-y-2">
             <label className="text-sm font-medium">Trainee</label>
             <select
