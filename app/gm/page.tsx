@@ -209,16 +209,6 @@ export default function GmDashboard() {
         </Link>
       </section>
 
-      {/* Assign Trainee */}
-      <section className="rounded-xl border bg-white p-4">
-        <Link
-          href="/gm/assign"
-          className="text-sm font-medium hover:underline"
-        >
-          Assign Trainees
-        </Link>
-      </section>
-
       {/* Notes */}
       <section className="rounded-xl border bg-white p-4">
         <Link
