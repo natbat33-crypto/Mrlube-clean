@@ -1,4 +1,3 @@
-// app/manager/trainees/[id]/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -49,8 +48,7 @@ const blockSynonyms = (k: string) =>
       })();
 
 /** ---------------- component ---------------- **/
-export default function ManagerTraineePage({ params }: { params: { id: string } }) {
-  // Treat route param as auth UID used under users/{uid}/progress/*
+export default function GMTraineePage({ params }: { params: { id: string } }) {
   const progressUid = params.id;
 
   const [traineeName, setTraineeName] = useState("Trainee");
@@ -61,7 +59,7 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
   const [loading, setLoading] = useState(true);
   const [openKey, setOpenKey] = useState<string | null>("week-1");
 
-  /** ---------- display name (unchanged) ---------- **/
+  /** ---------- display name ---------- **/
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -83,7 +81,7 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
     };
   }, [progressUid]);
 
-  /** ---------- live progress listener (unchanged) ---------- **/
+  /** ---------- live progress listener ---------- **/
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "users", progressUid, "progress"), (snap) => {
       const idx: Record<string, { done: boolean; approved: boolean }> = {};
@@ -105,11 +103,11 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
     return () => unsub();
   }, [progressUid]);
 
-  /** ---------- catalog fetchers (unchanged except tiny TS fix) ---------- **/
+  /** ---------- Catalog Fetchers ----------- **/
   async function getFirstNonEmpty(paths: string[][]): Promise<TaskRow[]> {
     for (const path of paths) {
       try {
-        if (path.length === 0) continue; // TS-safe guard
+        if (path.length === 0) continue;
         const [p0, ...rest] = path;
         const snap = await getDocs(collection(db, p0, ...rest));
         if (!snap.empty) {
@@ -154,6 +152,7 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
         return rows;
       }
     } catch {}
+
     return getFirstNonEmpty([
       ["modules", `week-${n}`, "tasks"],
       ["modules", `week${n}`, "tasks"],
@@ -194,7 +193,6 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
     (async () => {
       setLoading(true);
       try {
-        // If you’re hiding Day 1 for now, comment out these two lines:
         const d1Rows = await fetchDay1Rows();
         const d1Marked = markBlock("day-1", d1Rows);
         const day1: Block = {
@@ -232,40 +230,21 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
     };
   }, [progressIndex]);
 
-  /** ---------------- view-only helpers (styling only) ---------------- **/
-  const Pill = ({ on, children }: { on: boolean; children: React.ReactNode }) => (
-    <span
-      className={[
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs",
-        on ? "bg-green-100 text-green-700 border-green-200" : "bg-gray-100 text-gray-600 border-gray-200",
-      ].join(" ")}
-    >
-      {children}
-    </span>
-  );
-
-  const StatusDot = ({ done }: { done: boolean }) => (
-    <span
-      className={[
-        "inline-flex h-4 w-4 items-center justify-center rounded-full border",
-        done ? "bg-green-600 border-green-600 text-white" : "border-gray-300 bg-white text-transparent",
-      ].join(" ")}
-      aria-hidden="true"
-    >
-      ✓
-    </span>
-  );
-
-  /** ---------------- render (styling updated only) ---------------- **/
+  /** ---------------- render ---------------- **/
   return (
     <main className="p-6 space-y-6">
+      {/* HEADER */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{traineeName}</h1>
+        <div>
+          <h1 className="text-2xl font-bold">{traineeName}</h1>
+          <p className="text-xs text-gray-500">General Manager — Trainee Progress</p>
+        </div>
+
         <Link
-          href={`/manager/stores/${encodeURIComponent((new URLSearchParams(typeof window !== "undefined" ? window.location.search : "")).get("store") ?? "")}`}
+          href="/gm"
           className="inline-flex items-center text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
         >
-          ← Back to Store
+          ← Back to GM Dashboard
         </Link>
       </div>
 
@@ -279,7 +258,7 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
 
             return (
               <div key={b.key} className="rounded-xl border bg-white/50 overflow-hidden">
-                {/* header matches trainee look/feel */}
+                {/* HEADER */}
                 <div className="p-4 flex items-center justify-between">
                   <div className="w-full">
                     <div className="flex items-center justify-between mb-2">
@@ -293,7 +272,10 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="flex-1 h-2 bg-gray-200 rounded overflow-hidden">
-                        <div className="h-full" style={{ width: `${pct}%`, backgroundColor: YELLOW }} />
+                        <div
+                          className="h-full"
+                          style={{ width: `${pct}%`, backgroundColor: YELLOW }}
+                        />
                       </div>
                       <div className="text-xs text-gray-600 shrink-0">
                         {b.done}/{b.total}
@@ -302,6 +284,7 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
                   </div>
                 </div>
 
+                {/* TASKS */}
                 {open && (
                   <div className="px-4 pb-4">
                     {b.tasks.length === 0 ? (
@@ -314,16 +297,45 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
                             className="flex items-center justify-between rounded border bg-white px-3 py-2"
                           >
                             <div className="flex items-center gap-3 min-w-0">
-                              <StatusDot done={t.done} />
+                              <span
+                                className={[
+                                  "inline-flex h-4 w-4 items-center justify-center rounded-full border",
+                                  t.done
+                                    ? "bg-green-600 border-green-600 text-white"
+                                    : "border-gray-300 bg-white text-transparent",
+                                ].join(" ")}
+                              >
+                                ✓
+                              </span>
+
                               <span className="text-gray-700 truncate">
-                                {/* optional numbering to match trainee rows */}
                                 <span className="text-gray-500">{i + 1}. </span>
                                 {t.title}
                               </span>
                             </div>
+
                             <div className="flex items-center gap-2 shrink-0">
-                              <Pill on={t.done}>{t.done ? "Done" : "Pending"}</Pill>
-                              <Pill on={t.approved}>{t.approved ? "Approved" : "Not approved"}</Pill>
+                              <span
+                                className={[
+                                  "inline-flex items-center rounded-full border px-2 py-0.5 text-xs",
+                                  t.done
+                                    ? "bg-green-100 text-green-700 border-green-200"
+                                    : "bg-gray-100 text-gray-600 border-gray-200",
+                                ].join(" ")}
+                              >
+                                {t.done ? "Done" : "Pending"}
+                              </span>
+
+                              <span
+                                className={[
+                                  "inline-flex items-center rounded-full border px-2 py-0.5 text-xs",
+                                  t.approved
+                                    ? "bg-green-100 text-green-700 border-green-200"
+                                    : "bg-gray-100 text-gray-600 border-gray-200",
+                                ].join(" ")}
+                              >
+                                {t.approved ? "Approved" : "Not approved"}
+                              </span>
                             </div>
                           </li>
                         ))}
@@ -339,5 +351,3 @@ export default function ManagerTraineePage({ params }: { params: { id: string } 
     </main>
   );
 }
-
-

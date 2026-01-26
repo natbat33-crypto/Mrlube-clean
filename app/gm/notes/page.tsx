@@ -45,9 +45,9 @@ type SimpleUser = {
 type RecipientType = "admin" | "trainer" | "trainee";
 
 /* ---------------------------------------------------------
-   PAGE START
+   PAGE (GM VERSION)
 --------------------------------------------------------- */
-export default function ManagerNotesPage() {
+export default function GMNotesPage() {
   const [storeId, setStoreId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -65,7 +65,7 @@ export default function ManagerNotesPage() {
   const [saving, setSaving] = useState(false);
 
   /* ---------------------------------------------------------
-     DETECT STORE (Bulletproof)
+     DETECT STORE
   --------------------------------------------------------- */
   useEffect(() => {
     const stop = onIdTokenChanged(auth, async (u) => {
@@ -81,7 +81,7 @@ export default function ManagerNotesPage() {
       const token = await u.getIdTokenResult(true);
       sid = (token.claims?.storeId as string) || null;
 
-      // 2. store via managerUid
+      // 2. Try managerUid field
       if (!sid) {
         const snap = await getDocs(
           query(collection(db!, "stores"), where("managerUid", "==", u.uid))
@@ -89,7 +89,7 @@ export default function ManagerNotesPage() {
         if (!snap.empty) sid = snap.docs[0].id;
       }
 
-      // 3. find via employees
+      // 3. Try employees role match
       if (!sid) {
         const storesSnap = await getDocs(collection(db!, "stores"));
         for (const s of storesSnap.docs) {
@@ -99,7 +99,8 @@ export default function ManagerNotesPage() {
           const found = empSnap.docs.find(
             (d) =>
               (d.data() as any).uid === u.uid &&
-              (d.data() as any).role === "manager"
+              ((d.data() as any).role === "gm" ||
+                (d.data() as any).role === "manager")
           );
           if (found) {
             sid = s.id;
@@ -116,8 +117,8 @@ export default function ManagerNotesPage() {
   }, []);
 
   /* ---------------------------------------------------------
-     LOAD GLOBAL USERS (for name lookup)
---------------------------------------------------------- */
+     LOAD GLOBAL USERS
+  --------------------------------------------------------- */
   useEffect(() => {
     async function load() {
       const snap = await getDocs(collection(db!, "users"));
@@ -160,7 +161,7 @@ export default function ManagerNotesPage() {
 
   /* ---------------------------------------------------------
      LOAD TRAINERS + TRAINEES
---------------------------------------------------------- */
+  --------------------------------------------------------- */
   useEffect(() => {
     if (!storeId) return;
     const sid = storeId;
@@ -180,7 +181,7 @@ export default function ManagerNotesPage() {
             uid: data.uid ?? d.id,
             email: data.email,
             name: data.name,
-            role: "trainer", // display as trainer
+            role: "trainer",
           };
         })
       );
@@ -203,7 +204,7 @@ export default function ManagerNotesPage() {
 
   /* ---------------------------------------------------------
      UNIFIED NOTES FEED
---------------------------------------------------------- */
+  --------------------------------------------------------- */
   useEffect(() => {
     if (!storeId) return;
 
@@ -247,8 +248,8 @@ export default function ManagerNotesPage() {
   }, [storeId]);
 
   /* ---------------------------------------------------------
-     NAME HELPER (GLOBAL)
---------------------------------------------------------- */
+     NAME HELPER
+  --------------------------------------------------------- */
   function findName(uid?: string): string {
     if (!uid) return "";
 
@@ -266,19 +267,20 @@ export default function ManagerNotesPage() {
 
   /* ---------------------------------------------------------
      ROLE DISPLAY
---------------------------------------------------------- */
+  --------------------------------------------------------- */
   function prettyRole(r?: string) {
     if (!r) return "Unknown";
     if (r === "supervisor") return "Trainer";
     if (r === "trainer") return "Trainer";
     if (r === "trainee") return "Trainee";
     if (r === "manager") return "Manager";
+    if (r === "gm") return "General Manager";
     if (r === "admin") return "Admin";
     return r;
   }
 
   /* ---------------------------------------------------------
-     SEND NOTE
+     SEND NOTE (GM VERSION)
 --------------------------------------------------------- */
   async function sendNote() {
     const body = text.trim();
@@ -288,10 +290,11 @@ export default function ManagerNotesPage() {
     const fromUid = auth.currentUser?.uid ?? null;
 
     try {
+      // Admin notes go to root
       if (recipientType === "admin") {
         await addDoc(collection(db!, "notes"), {
           text: body,
-          fromRole: "manager",
+          fromRole: "gm",
           toRole: "admin",
           targetUid: selectedRecipient,
           storeId,
@@ -299,9 +302,10 @@ export default function ManagerNotesPage() {
           createdAt: serverTimestamp(),
         });
       } else {
+        // Store-level notes
         await addDoc(collection(db!, "stores", storeId, "notes"), {
           text: body,
-          fromRole: "manager",
+          fromRole: "gm",
           toRole: recipientType === "trainer" ? "supervisor" : "trainee",
           targetUid: selectedRecipient,
           storeId,
@@ -309,6 +313,7 @@ export default function ManagerNotesPage() {
           createdAt: serverTimestamp(),
         });
       }
+
       setText("");
     } finally {
       setSaving(false);
@@ -346,13 +351,14 @@ export default function ManagerNotesPage() {
 
   return (
     <main className="mx-auto max-w-3xl p-4 space-y-8">
+      {/* HEADER */}
       <div className="flex justify-between items-center">
-        <h1 className="text-xl font-semibold">Notes</h1>
+        <h1 className="text-xl font-semibold">General Manager — Notes</h1>
         <Link
-          href="/manager"
+          href="/gm"
           className="text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
         >
-          ← Back
+          ← Back to GM Dashboard
         </Link>
       </div>
 
@@ -361,7 +367,6 @@ export default function ManagerNotesPage() {
         <h2 className="text-sm font-medium">Send a new note</h2>
 
         <div className="grid gap-3 md:grid-cols-2">
-          
           {/* SEND TO */}
           <div className="flex flex-col text-sm">
             Send to
@@ -407,7 +412,6 @@ export default function ManagerNotesPage() {
               </span>
             </div>
           </div>
-
         </div>
 
         <textarea

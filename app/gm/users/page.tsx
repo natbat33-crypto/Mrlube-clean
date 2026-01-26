@@ -24,7 +24,7 @@ type Emp = {
   email?: string;
   active?: boolean;
   trainer?: string;
-  supervisor?: string; // legacy
+  supervisor?: string;
 };
 
 type Store = {
@@ -34,7 +34,7 @@ type Store = {
 
 /* ================= PAGE ================= */
 
-export default function ManagerUsersPage() {
+export default function GMUsersPage() {
   const [uid, setUid] = useState<string | null>(null);
   const [storeId, setStoreId] = useState<string | null>(null);
   const [store, setStore] = useState<Store | null>(null);
@@ -142,8 +142,9 @@ export default function ManagerUsersPage() {
           )}
         </div>
 
+        {/* ⭐ FIXED → GM VERSION */}
         <Link
-          href="/manager"
+          href="/gm"
           className="text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
         >
           ← Back

@@ -24,6 +24,7 @@ type Role =
   | "supervisor"
   | "assistant-manager"
   | "manager"
+  | "gm"
   | "admin"
   | string;
 
@@ -138,7 +139,7 @@ async function loadAllTasks() {
 }
 
 /* ===========================================================
-   EMPLOYEE DETAIL PAGE
+   GENERAL MANAGER EMPLOYEE DETAIL PAGE
 =========================================================== */
 
 export default function EmployeeDetailPage({ params }: { params: { uid: string } }) {
@@ -158,7 +159,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
       if (!u) return setAuthUser(null);
       const snap = await getDoc(doc(db, "users", u.uid));
       const data = snap.data() || {};
-      setAuthUser({ uid: u.uid, role: data.role || "manager", storeId: data.storeId });
+      setAuthUser({ uid: u.uid, role: data.role || "gm", storeId: data.storeId });
     });
     return () => unsub();
   }, []);
@@ -311,7 +312,10 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
       startDateStr: d.toLocaleDateString(),
       daysIn: diff,
       isOverdue: remaining < 0,
-      label: remaining < 0 ? `Overdue by ${Math.abs(remaining)} days` : `${remaining} days remaining`,
+      label:
+        remaining < 0
+          ? `Overdue by ${Math.abs(remaining)} days`
+          : `${remaining} days remaining`,
     };
   }, [trainee]);
 
@@ -325,7 +329,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
     if (!canApprove) return;
     try {
       setApproveBusy(sectionKey);
-      const role = authUser?.role || "manager";
+      const role = authUser?.role || "gm";
       await setDoc(
         doc(db, "users", traineeUid, "sections", sectionKey),
         {
@@ -353,6 +357,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
     }
   }
 
+  /* ---------- Render ---------- */
   if (loading) {
     return (
       <main className="max-w-5xl mx-auto p-6">Loading trainee…</main>
@@ -363,10 +368,10 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
     return (
       <main className="max-w-5xl mx-auto p-6">
         <Link
-          href="/manager"
+          href="/gm"
           className="inline-block text-sm px-3 py-1 rounded-full bg-gray-100"
         >
-          ← Back
+          ← Back to General Manager Dashboard
         </Link>
         <div className="text-red-600">{error || "Unable to load trainee"}</div>
       </main>
@@ -385,10 +390,10 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
       {/* Back */}
       <div>
         <Link
-          href="/manager"
+          href="/gm"
           className="inline-flex items-center gap-2 text-sm px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200"
         >
-          ← Back to Manager Dashboard
+          ← Back to General Manager Dashboard
         </Link>
       </div>
 
@@ -397,7 +402,7 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
         <div className="text-xs uppercase text-gray-500">Trainee</div>
 
         <div className="text-[13px] text-gray-700 break-all leading-tight">
-            {trainee.name || trainee.email || trainee.uid}
+          {trainee.name || trainee.email || trainee.uid}
         </div>
 
         <div className="flex flex-wrap gap-2 text-[11px] text-gray-700">
@@ -421,7 +426,9 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
               {startInfo.startDateStr}
             </div>
 
-            <div className="text-[11px]">Days in training: {startInfo.daysIn}</div>
+            <div className="text-[11px]">
+              Days in training: {startInfo.daysIn}
+            </div>
 
             <div
               className={
@@ -491,7 +498,9 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
               }
             >
               <div className="min-w-0">
-                <div className="text-sm font-semibold break-words">{sec.title}</div>
+                <div className="text-sm font-semibold break-words">
+                  {sec.title}
+                </div>
                 <div className="text-[11px] text-gray-600">
                   {done}/{total} ({pct}%)
                 </div>
@@ -571,12 +580,13 @@ export default function EmployeeDetailPage({ params }: { params: { uid: string }
                           {t.order}. {t.title || t.id}
                         </div>
                         {t.required && (
-                          <div className="text-[10px] text-gray-500">Required</div>
+                          <div className="text-[10px] text-gray-500">
+                            Required
+                          </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Week 4 timers */}
                     {key === "week4" && t.timer && (
                       <div className="text-[10px] text-gray-600 sm:text-right whitespace-nowrap">
                         Last: {msToClock(t.timer.lastMs)}{" "}

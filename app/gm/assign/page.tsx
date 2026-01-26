@@ -3,6 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -14,10 +15,10 @@ import {
   getDocs,
 } from "firebase/firestore";
 
-/* ------------------------- tiny inline debug badge ------------------------- */
+/* ------------------------- Debug Badge ------------------------- */
 function DebugBanner({ storeId }: { storeId: string }) {
-  const [uid, setUid] = useState<string>("");
-  const [tokenStore, setTokenStore] = useState<string>("");
+  const [uid, setUid] = useState("");
+  const [tokenStore, setTokenStore] = useState("");
   const [empOk, setEmpOk] = useState<null | boolean>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -29,9 +30,7 @@ function DebugBanner({ storeId }: { storeId: string }) {
         const token = await u?.getIdTokenResult(true);
         setTokenStore(String(token?.claims?.storeId ?? ""));
         if (u?.uid && storeId) {
-          const snap = await getDoc(
-            doc(db, "stores", storeId, "employees", u.uid)
-          );
+          const snap = await getDoc(doc(db, "stores", storeId, "employees", u.uid));
           setEmpOk(snap.exists());
         }
       } catch (e: any) {
@@ -41,19 +40,11 @@ function DebugBanner({ storeId }: { storeId: string }) {
   }, [storeId]);
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        right: 12,
-        top: 12,
-        background: "rgba(0,0,0,0.7)",
-        color: "#fff",
-        padding: "8px 10px",
-        borderRadius: 8,
-        fontSize: 12,
-        zIndex: 50,
-      }}
-    >
+    <div style={{
+      position: "fixed", right: 12, top: 12,
+      background: "rgba(0,0,0,0.7)", color: "#fff",
+      padding: "8px 10px", borderRadius: 8, fontSize: 12, zIndex: 50
+    }}>
       <div><b>Debug</b></div>
       <div>uid: {uid || "—"}</div>
       <div>token store: {tokenStore || "—"}</div>
@@ -66,10 +57,10 @@ function DebugBanner({ storeId }: { storeId: string }) {
   );
 }
 
-/* ----------------------------- page component ----------------------------- */
+/* ----------------------------- Component ----------------------------- */
 type Employee = {
   uid: string;
-  role?: "manager" | "gm" | "supervisor" | "trainee" | string;
+  role?: string;
   active?: boolean;
   name?: string;
 };
@@ -80,7 +71,7 @@ export default function GMAssignPage() {
   const [storeId, setStoreId] = useState(storeFromQuery);
   const [meOk, setMeOk] = useState<boolean | null>(null);
 
-  // pick up storeId from token if not in query
+  /* -------- Load storeId from token if not in ?store= -------- */
   useEffect(() => {
     (async () => {
       if (storeFromQuery) return;
@@ -91,7 +82,7 @@ export default function GMAssignPage() {
     })();
   }, [storeFromQuery]);
 
-  // ensure signed-in GM is an active employee of this store
+  /* -------- Check GM is employee of store -------- */
   useEffect(() => {
     (async () => {
       try {
@@ -100,9 +91,7 @@ export default function GMAssignPage() {
           setMeOk(false);
           return;
         }
-        const snap = await getDoc(
-          doc(db, "stores", storeId, "employees", u.uid)
-        );
+        const snap = await getDoc(doc(db, "stores", storeId, "employees", u.uid));
         setMeOk(snap.exists());
       } catch {
         setMeOk(false);
@@ -110,7 +99,7 @@ export default function GMAssignPage() {
     })();
   }, [storeId]);
 
-  // load employees (supervisors + trainees)
+  /* -------- Load supervisors + trainees -------- */
   const [supervisors, setSupervisors] = useState<Employee[]>([]);
   const [trainees, setTrainees] = useState<Employee[]>([]);
 
@@ -125,26 +114,23 @@ export default function GMAssignPage() {
         ...(d.data() as any),
       })) as Employee[];
 
-      setSupervisors(
-        all.filter((e) => e.active !== false && e.role === "supervisor")
-      );
-      setTrainees(
-        all.filter((e) => e.active !== false && (e.role === "trainee" || !e.role))
-      );
+      setSupervisors(all.filter((e) => e.active !== false && e.role === "supervisor"));
+      setTrainees(all.filter((e) =>
+        e.active !== false && (e.role === "trainee" || !e.role)
+      ));
     })();
   }, [storeId]);
 
-  // form state
   const [traineeUid, setTraineeUid] = useState("");
   const [supervisorUid, setSupervisorUid] = useState("");
-  const [status, setStatus] = useState<string>("");
+  const [status, setStatus] = useState("");
 
   const canSubmit = useMemo(
     () => !!storeId && !!traineeUid && !!supervisorUid && meOk === true,
     [storeId, traineeUid, supervisorUid, meOk]
   );
 
-  // ASSIGN BUTTON HANDLER
+  /* --------------------- ASSIGN ACTION --------------------- */
   async function assign() {
     if (!canSubmit) return;
 
@@ -157,13 +143,10 @@ export default function GMAssignPage() {
     setStatus("Assigning…");
 
     try {
-      const assignmentRef = doc(db, "stores", storeId, "trainees", traineeUid);
-
-      // Write assignment same as manager version
       await setDoc(
-        assignmentRef,
+        doc(db, "stores", storeId, "trainees", traineeUid),
         {
-          storeId: storeId,
+          storeId,
           traineeId: traineeUid,
           supervisorId: supervisorUid,
           active: true,
@@ -174,30 +157,20 @@ export default function GMAssignPage() {
         { merge: true }
       );
 
-      // Update user docs so dashboards auto-connect
-      await setDoc(
-        doc(db, "users", traineeUid),
-        {
-          storeId: storeId,
-          supervisorUid: supervisorUid,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      await setDoc(doc(db, "users", traineeUid), {
+        storeId,
+        supervisorUid,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
 
-      await setDoc(
-        doc(db, "users", supervisorUid),
-        {
-          storeId: storeId,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      await setDoc(doc(db, "users", supervisorUid), {
+        storeId,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
 
       setStatus("✅ Assigned");
     } catch (e: any) {
-      console.error("Assign error:", e);
-      setStatus(`❌ ${e?.message ?? "Failed to assign"}`);
+      setStatus(`❌ ${e.message ?? "Failed"}`);
     }
   }
 
@@ -205,21 +178,27 @@ export default function GMAssignPage() {
     <main className="max-w-3xl mx-auto p-4 lg:p-6 space-y-6">
       <DebugBanner storeId={storeId} />
 
+      {/* ⭐ NEW: Correct Back link */}
+      <Link
+        href="/gm"
+        className="inline-block text-sm px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200"
+      >
+        ← Back to General Manager Dashboard
+      </Link>
+
       <h1 className="text-2xl font-bold">General Manager — Assign Trainee</h1>
 
       {!storeId ? (
         <p className="text-sm text-gray-700">
-          No store detected. Add <code>?store=24</code> in the URL or sign in so your
-          token has a <code>storeId</code> claim.
+          No store detected. Sign in or pass <code>?store=XX</code>.
         </p>
       ) : meOk === false ? (
         <p className="text-sm text-red-600">
-          You are not an active employee of store {storeId}. Check Firestore employees
-          doc.
+          You are not an active employee of this store.
         </p>
       ) : (
         <>
-          {/* pick supervisor */}
+          {/* Supervisor Pick */}
           <section className="space-y-2">
             <label className="text-sm font-medium">Supervisor</label>
             <select
@@ -237,7 +216,7 @@ export default function GMAssignPage() {
             </select>
           </section>
 
-          {/* pick trainee */}
+          {/* Trainee Pick */}
           <section className="space-y-2">
             <label className="text-sm font-medium">Trainee</label>
             <select
@@ -269,11 +248,6 @@ export default function GMAssignPage() {
             </button>
             <span className="text-sm text-gray-600">{status}</span>
           </div>
-
-          <p className="text-xs text-gray-500 pt-2">
-            Writes to <code>/stores/{storeId}/trainees/{traineeUid}</code> and updates{" "}
-            <code>users/{traineeUid}</code> + <code>users/{supervisorUid}</code>.
-          </p>
         </>
       )}
     </main>
