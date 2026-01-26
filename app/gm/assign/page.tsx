@@ -30,48 +30,74 @@ type Employee = {
 export default function GMAssignPage() {
   const sp = useSearchParams();
   const storeFromQuery = sp.get("store") || "";
-  const [storeId, setStoreId] = useState(storeFromQuery);
 
+  const [storeId, setStoreId] = useState(storeFromQuery);
   const [meOk, setMeOk] = useState<boolean | null>(null);
 
-  /* ----------------------------------------
-     1. Load storeId from token if not in URL
-  ---------------------------------------- */
+  /* -----------------------------------------------------
+     1. Load storeId — Query → Token → Firestore fallback
+  ----------------------------------------------------- */
   useEffect(() => {
     (async () => {
-      if (storeFromQuery) return;
+      // 1. URL ?store=163
+      if (storeFromQuery) {
+        setStoreId(storeFromQuery);
+        return;
+      }
+
       const u = auth.currentUser;
       if (!u) return;
 
-      const tok = await u.getIdTokenResult(true);
-      const claimStore = String(tok.claims?.storeId ?? "");
+      // 2. Token claim
+      try {
+        const tok = await u.getIdTokenResult(true);
+        const claimStore = String(tok.claims?.storeId ?? "");
+        if (claimStore) {
+          setStoreId(claimStore);
+          return;
+        }
+      } catch (e) {
+        console.log("Token claim read failed", e);
+      }
 
-      if (claimStore) setStoreId(claimStore);
+      // 3. Firestore fallback — ALWAYS RELIABLE
+      try {
+        const snap = await getDoc(doc(db, "users", u.uid));
+        const fsStore = String(snap.data()?.storeId ?? "");
+        if (fsStore) {
+          setStoreId(fsStore);
+        }
+      } catch (e) {
+        console.log("Firestore user fallback failed", e);
+      }
     })();
   }, [storeFromQuery]);
 
-  /* ----------------------------------------
-     2. Verify GM is an employee of the store
-  ---------------------------------------- */
+  /* -----------------------------------------------------
+     2. Verify GM is employee of the store
+  ----------------------------------------------------- */
   useEffect(() => {
     (async () => {
+      const u = auth.currentUser;
+      if (!u || !storeId) {
+        setMeOk(false);
+        return;
+      }
+
       try {
-        const u = auth.currentUser;
-        if (!u || !storeId) {
-          setMeOk(false);
-          return;
-        }
-        const snap = await getDoc(doc(db, "stores", storeId, "employees", u.uid));
+        const snap = await getDoc(
+          doc(db, "stores", storeId, "employees", u.uid)
+        );
         setMeOk(snap.exists());
-      } catch {
+      } catch (e) {
         setMeOk(false);
       }
     })();
   }, [storeId]);
 
-  /* ----------------------------------------
-     3. Load employees for dropdowns
-  ---------------------------------------- */
+  /* -----------------------------------------------------
+     3. Load supervisors + trainees
+  ----------------------------------------------------- */
   const [supervisors, setSupervisors] = useState<Employee[]>([]);
   const [trainees, setTrainees] = useState<Employee[]>([]);
 
@@ -92,28 +118,34 @@ export default function GMAssignPage() {
       );
 
       setTrainees(
-        all.filter((e) =>
-          e.active !== false && (e.role === "trainee" || !e.role)
+        all.filter(
+          (e) =>
+            e.active !== false &&
+            (e.role === "trainee" || !e.role)
         )
       );
     })();
   }, [storeId]);
 
-  /* ----------------------------------------
+  /* -----------------------------------------------------
      4. Form state
-  ---------------------------------------- */
+  ----------------------------------------------------- */
   const [traineeUid, setTraineeUid] = useState("");
   const [supervisorUid, setSupervisorUid] = useState("");
   const [status, setStatus] = useState("");
 
   const canSubmit = useMemo(
-    () => !!storeId && !!traineeUid && !!supervisorUid && meOk === true,
+    () =>
+      !!storeId &&
+      !!traineeUid &&
+      !!supervisorUid &&
+      meOk === true,
     [storeId, traineeUid, supervisorUid, meOk]
   );
 
-  /* ----------------------------------------
+  /* -----------------------------------------------------
      5. ASSIGN
-  ---------------------------------------- */
+  ----------------------------------------------------- */
   async function assign() {
     if (!canSubmit) return;
 
@@ -126,7 +158,7 @@ export default function GMAssignPage() {
     setStatus("Assigning…");
 
     try {
-      // Write to trainees path
+      // Write to trainees collection
       await setDoc(
         doc(db, "stores", storeId, "trainees", traineeUid),
         {
@@ -141,7 +173,7 @@ export default function GMAssignPage() {
         { merge: true }
       );
 
-      // Update users
+      // Update trainee user doc
       await setDoc(
         doc(db, "users", traineeUid),
         {
@@ -152,6 +184,7 @@ export default function GMAssignPage() {
         { merge: true }
       );
 
+      // Update supervisor user doc
       await setDoc(
         doc(db, "users", supervisorUid),
         {
@@ -163,7 +196,7 @@ export default function GMAssignPage() {
 
       setStatus("✅ Assigned");
     } catch (e: any) {
-      setStatus(`❌ ${e?.message ?? "Failed"}`);
+      setStatus(`❌ ${e.message ?? "Failed"}`);
     }
   }
 
@@ -172,8 +205,7 @@ export default function GMAssignPage() {
   --------------------------------------------------------- */
   return (
     <main className="max-w-3xl mx-auto p-4 lg:p-6 space-y-6">
-
-      {/* Clean Back Link */}
+      {/* BACK LINK */}
       <Link
         href="/gm"
         className="inline-block text-sm px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200"
@@ -185,7 +217,7 @@ export default function GMAssignPage() {
 
       {!storeId ? (
         <p className="text-sm text-gray-700">
-          No store detected. Sign in or pass <code>?store=XX</code>.
+          No store detected. Sign in or use <code>?store=XX</code>.
         </p>
       ) : meOk === false ? (
         <p className="text-sm text-red-600">
@@ -199,7 +231,9 @@ export default function GMAssignPage() {
             <select
               className="border rounded px-3 py-2 w-full bg-white"
               value={supervisorUid}
-              onChange={(e) => setSupervisorUid(e.target.value)}
+              onChange={(e) =>
+                setSupervisorUid(e.target.value)
+              }
             >
               <option value="">Select supervisor…</option>
               {supervisors.map((s) => (
