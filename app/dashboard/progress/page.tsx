@@ -51,7 +51,7 @@ function monthMatrix(year: number, month: number) {
 
 /* ---------------- trainee doc ---------------- */
 async function ensureTraineeDoc(uid: string, defaultDays = 30) {
-  const ref = doc(db, "trainees", uid);
+  const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
     await setDoc(
