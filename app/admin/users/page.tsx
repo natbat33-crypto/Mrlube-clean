@@ -141,26 +141,32 @@ export default function AdminUsersPage() {
               No users waiting for assignment.
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-[700px] w-full text-sm border-collapse">
+            <div className="w-full overflow-x-auto">
+              <table className="min-w-[760px] w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="py-2 pr-4">Name</th>
-                    <th className="py-2 pr-4">Email</th>
-                    <th className="py-2 pr-4">Store</th>
-                    <th className="py-2 pr-4">Role</th>
-                    <th className="py-2 pr-4">Action</th>
+                    <th className="py-2 pr-4 whitespace-nowrap">Name</th>
+                    <th className="py-2 pr-4 whitespace-nowrap">Email</th>
+                    <th className="py-2 pr-4 whitespace-nowrap">Store</th>
+                    <th className="py-2 pr-4 whitespace-nowrap">Role</th>
+                    <th className="py-2 pr-4 whitespace-nowrap min-w-[120px]">
+                      Action
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {users.map((u) => (
                     <tr key={u.id} className="border-b bg-yellow-50">
-                      <td className="py-2 pr-4">{u.name || "—"}</td>
-                      <td className="py-2 pr-4">{u.email || "—"}</td>
+                      <td className="py-2 pr-4 whitespace-nowrap">
+                        {u.name || "—"}
+                      </td>
+                      <td className="py-2 pr-4 whitespace-nowrap">
+                        {u.email || "—"}
+                      </td>
 
-                      <td className="py-2 pr-4">
+                      <td className="py-2 pr-4 whitespace-nowrap">
                         <select
-                          className="border rounded px-2 py-1 text-sm w-full sm:w-auto"
+                          className="border rounded px-2 py-1 text-sm"
                           defaultValue=""
                           onChange={(e) =>
                             setPendingStore((prev) => ({
@@ -180,9 +186,9 @@ export default function AdminUsersPage() {
                         </select>
                       </td>
 
-                      <td className="py-2 pr-4">
+                      <td className="py-2 pr-4 whitespace-nowrap">
                         <select
-                          className="border rounded px-2 py-1 text-sm w-full sm:w-auto"
+                          className="border rounded px-2 py-1 text-sm"
                           defaultValue=""
                           disabled={!pendingStore[u.id]}
                           onChange={(e) =>
@@ -204,10 +210,10 @@ export default function AdminUsersPage() {
                         </select>
                       </td>
 
-                      <td className="py-2 pr-4">
+                      <td className="py-2 pr-4 whitespace-nowrap">
                         <button
                           onClick={() => deactivateUser(u.id)}
-                          className="text-red-600 hover:underline text-xs whitespace-nowrap"
+                          className="text-red-600 hover:underline text-xs"
                         >
                           Deactivate
                         </button>
