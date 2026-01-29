@@ -7,7 +7,6 @@ import {
   collection,
   getDocs,
   getDoc,
-  updateDoc,
   setDoc,
   doc,
   serverTimestamp,
@@ -74,30 +73,25 @@ export default function Day1Page() {
   }, [uid]);
 
   /* ---------------------------------------
-     Load static task definitions (FIXED)
-     - Never trust `done` from shared task docs
-     - Always start tasks with done:false, then overlay per-user progress
+     Load static task definitions
+     (never trust shared `done`)
   ---------------------------------------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
       try {
-        // Load Page Title
         const dayDoc = await getDoc(doc(db, "days", "day-1"));
         if (alive && dayDoc.exists()) {
           const dt = dayDoc.data() as any;
           setPageTitle(dt.title || dt.name || "Day 1 Orientation");
         }
 
-        // Load tasks (strip shared `done`)
         const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
         const list: Task[] =
           snap.docs
             .map((d) => {
-              const data = d.data() as Partial<Task>;
-              // ✅ Critical: ignore any `done` stored in shared task definition docs
-              const { done, ...rest } = data;
+              const { done, ...rest } = d.data() as Partial<Task>;
               return { id: d.id, ...rest, done: false };
             })
             .sort(
@@ -126,8 +120,7 @@ export default function Day1Page() {
   }, []);
 
   /* ---------------------------------------
-     LOAD USER'S SAVED PROGRESS (PER-USER TRUTH)
-     This is the ONLY source of checked state.
+     Load user's saved progress (per-user)
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
@@ -146,7 +139,6 @@ export default function Day1Page() {
         }
       });
 
-      // Overlay per-user progress onto static tasks
       setTasks((prev) =>
         prev.map((t) => ({
           ...t,
@@ -159,29 +151,18 @@ export default function Day1Page() {
   }, [uid]);
 
   /* ---------------------------------------
-     Toggle task complete (FIXED)
-     - DO NOT write `done` to shared tasks collection
-     - Only write per-user progress (supervisors read this)
+     Toggle task complete (per-user only)
   ---------------------------------------- */
   async function toggleTask(id: string, next: boolean) {
-    if (!uid) {
-      alert("Please log in to save your progress.");
-      return;
-    }
+    if (!uid) return;
 
     const t = tasks.find((x) => x.id === id);
 
-    // Optimistic UI
     setTasks((prev) =>
       prev.map((x) => (x.id === id ? { ...x, done: next } : x))
     );
 
     try {
-      // ❌ Removed: updating shared task definition doc
-      // This was causing global “checked tasks” for new users.
-      // await updateDoc(doc(db, "days", "day-1", "tasks", id), {...})
-
-      // Save per-user progress — this is what supervisors read
       const path = `days/day-1/tasks/${id}`;
       const key = path.replace(/\//g, "__");
 
@@ -201,7 +182,6 @@ export default function Day1Page() {
         { merge: true }
       );
     } catch {
-      // rollback
       setTasks((prev) =>
         prev.map((x) => (x.id === id ? { ...x, done: !next } : x))
       );
@@ -210,23 +190,23 @@ export default function Day1Page() {
   }
 
   /* ---------------------------------------
-     Auto-create /sections/day1 on complete
-     ✅ IMPORTANT: trainee NEVER writes `approved`
+     🔑 SYNC PROGRESS FOR DASHBOARD (FIX)
+     This is what makes 0/6, 1/6, etc work
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
 
-    const allComplete =
-      tasks.length > 0 && tasks.every((t) => t.done === true);
-
-    if (!allComplete) return;
+    const total = tasks.length;
+    const completed = tasks.filter((t) => t.done).length;
 
     setDoc(
       doc(db, "users", uid, "sections", "day1"),
       {
-        completed: true,
-        completedAt: serverTimestamp(),
-        // DO NOT WRITE approved HERE
+        completedCount: completed,
+        totalCount: total,
+        completed: total > 0 && completed === total,
+        updatedAt: serverTimestamp(),
+        // NEVER write approved here
       },
       { merge: true }
     );
@@ -254,155 +234,24 @@ export default function Day1Page() {
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <div style={{ marginBottom: 16 }}>
-        <Link
-          href="/dashboard"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            textDecoration: "none",
-            background: "#fff",
-            border: `1px solid ${GRAY}`,
-            borderRadius: 999,
-            padding: "8px 14px",
-            fontWeight: 600,
-            color: NAVY,
-            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-          }}
-        >
-          ← Back to Dashboard
-        </Link>
+        <Link href="/dashboard">← Back to Dashboard</Link>
       </div>
 
-      {day1Approved && (
-        <div
-          style={{
-            background: "#e8f5e9",
-            border: "1px solid #c8e6c9",
-            padding: "12px 16px",
-            borderRadius: 8,
-            marginBottom: 16,
-            color: "#256029",
-            fontWeight: 600,
-          }}
-        >
-          Day 1 Approved ✓
-        </div>
-      )}
+      {day1Approved && <strong>Day 1 Approved ✓</strong>}
 
-      {!day1Approved && doneCount === tasks.length && tasks.length > 0 && (
-        <div
-          style={{
-            background: "#fff3cd",
-            border: "1px solid #ffeeba",
-            padding: "12px 16px",
-            borderRadius: 8,
-            marginBottom: 16,
-            color: "#856404",
-            fontWeight: 600,
-          }}
-        >
-          Day 1 completed — waiting for approval.
-        </div>
-      )}
+      <h2>{pageTitle}</h2>
 
-      <h2 style={{ marginBottom: 6 }}>{pageTitle} — Tasks</h2>
+      <div>{doneCount}/{tasks.length} completed ({pct}%)</div>
 
-      <div style={{ fontSize: 14, marginBottom: 6 }}>
-        {doneCount}/{tasks.length} completed ({pct}%)
-      </div>
-
-      <div
-        style={{
-          height: 12,
-          background: "#d9d9df",
-          borderRadius: 999,
-          overflow: "hidden",
-          marginBottom: 18,
-        }}
-      >
-        <div
-          style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: YELLOW,
-            transition: "width .2s ease",
-          }}
-        />
-      </div>
-
-      {err && <p style={{ color: "crimson" }}>Error: {err}</p>}
-
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "grid",
-          gap: 10,
-        }}
-      >
+      <ul style={{ listStyle: "none", padding: 0 }}>
         {tasks.map((t, idx) => {
-          const order = num(t.order ?? t.sort_order ?? idx + 1);
           const done = !!t.done;
-
           return (
-            <li
-              key={t.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "12px 14px",
-                borderRadius: 12,
-                background: "#fff",
-                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
-                position: "relative",
-              }}
-            >
-              <span
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: 5,
-                  background: done ? GREEN : "transparent",
-                  borderTopLeftRadius: 12,
-                  borderBottomLeftRadius: 12,
-                }}
-              />
-
-              <button
-                onClick={() => toggleTask(t.id, !done)}
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: "50%",
-                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
-                  background: done ? GREEN : "#fff",
-                  display: "grid",
-                  placeItems: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
-                  stroke={done ? "#fff" : "transparent"}
-                  strokeWidth="3"
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              </button>
-
-              <div style={{ fontWeight: 600 }}>
-                {order}. {t.title ?? t.id}
-              </div>
+            <li key={t.id}>
+              <button onClick={() => toggleTask(t.id, !done)}>
+                {done ? "✓" : "○"}
+              </button>{" "}
+              {num(t.order ?? t.sort_order ?? idx + 1)}. {t.title}
             </li>
           );
         })}
