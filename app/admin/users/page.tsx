@@ -38,7 +38,6 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [stores, setStores] = useState<StoreRow[]>([]);
   const [loading, setLoading] = useState(true);
-
   const [pendingStore, setPendingStore] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -72,9 +71,6 @@ export default function AdminUsersPage() {
     load();
   }, []);
 
-  /* ----------------------------------------------------
-     🔥 DEACTIVATE USER — CALLS /api/deactivate
-  ---------------------------------------------------- */
   const deactivateUser = async (userId: string) => {
     if (!confirm("Deactivate this user?")) return;
 
@@ -87,14 +83,11 @@ export default function AdminUsersPage() {
     const data = await res.json();
 
     if (!res.ok || !data.success) {
-      alert("Error deactivating user: " + (data.error || "Unknown error"));
+      alert("Error deactivating user");
       return;
     }
 
-    // Remove from UI
     setUsers((prev) => prev.filter((u) => u.id !== userId));
-
-    alert("User deactivated");
   };
 
   const assignUser = async (
@@ -121,8 +114,8 @@ export default function AdminUsersPage() {
 
   return (
     <RoleGate allow={["admin"]}>
-      <main className="p-6 space-y-6">
-        <header className="flex items-start justify-between">
+      <main className="p-4 sm:p-6 space-y-6">
+        <header className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-primary">New Users</h1>
             <p className="text-muted-foreground mt-1">
@@ -132,13 +125,13 @@ export default function AdminUsersPage() {
 
           <Link
             href="/admin"
-            className="inline-flex items-center text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
+            className="inline-flex items-center text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50 w-fit"
           >
             ← Back to Dashboard
           </Link>
         </header>
 
-        <div className="rounded-xl border bg-white/50 p-6">
+        <div className="rounded-xl border bg-white/50 p-4 sm:p-6">
           <h2 className="text-xl font-semibold mb-4">Needs Assignment</h2>
 
           {loading ? (
@@ -149,7 +142,7 @@ export default function AdminUsersPage() {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
+              <table className="min-w-[700px] w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b text-left">
                     <th className="py-2 pr-4">Name</th>
@@ -165,10 +158,9 @@ export default function AdminUsersPage() {
                       <td className="py-2 pr-4">{u.name || "—"}</td>
                       <td className="py-2 pr-4">{u.email || "—"}</td>
 
-                      {/* Store dropdown */}
                       <td className="py-2 pr-4">
                         <select
-                          className="border rounded px-2 py-1 text-sm"
+                          className="border rounded px-2 py-1 text-sm w-full sm:w-auto"
                           defaultValue=""
                           onChange={(e) =>
                             setPendingStore((prev) => ({
@@ -188,10 +180,9 @@ export default function AdminUsersPage() {
                         </select>
                       </td>
 
-                      {/* Role dropdown */}
                       <td className="py-2 pr-4">
                         <select
-                          className="border rounded px-2 py-1 text-sm"
+                          className="border rounded px-2 py-1 text-sm w-full sm:w-auto"
                           defaultValue=""
                           disabled={!pendingStore[u.id]}
                           onChange={(e) =>
@@ -213,11 +204,10 @@ export default function AdminUsersPage() {
                         </select>
                       </td>
 
-                      {/* 🔥 Deactivate Button */}
                       <td className="py-2 pr-4">
                         <button
                           onClick={() => deactivateUser(u.id)}
-                          className="text-red-600 hover:underline text-xs"
+                          className="text-red-600 hover:underline text-xs whitespace-nowrap"
                         >
                           Deactivate
                         </button>
