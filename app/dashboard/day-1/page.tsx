@@ -74,24 +74,27 @@ export default function Day1Page() {
 
   /* ---------------------------------------
      Load static task definitions
-     (never trust shared `done`)
+     IMPORTANT: ignore any shared `done`
   ---------------------------------------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
       try {
+        // Load Page Title
         const dayDoc = await getDoc(doc(db, "days", "day-1"));
         if (alive && dayDoc.exists()) {
           const dt = dayDoc.data() as any;
           setPageTitle(dt.title || dt.name || "Day 1 Orientation");
         }
 
+        // Load tasks (strip shared `done`)
         const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
         const list: Task[] =
           snap.docs
             .map((d) => {
-              const { done, ...rest } = d.data() as Partial<Task>;
+              const data = d.data() as Partial<Task>;
+              const { done, ...rest } = data; // ✅ ignore shared done
               return { id: d.id, ...rest, done: false };
             })
             .sort(
@@ -120,44 +123,56 @@ export default function Day1Page() {
   }, []);
 
   /* ---------------------------------------
-     Load user's saved progress (per-user)
+     Load user's saved progress (PER-USER TRUTH)
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
 
     const col = collection(db, "users", uid, "progress");
 
-    const unsub = onSnapshot(col, (snap) => {
-      const map: Record<string, boolean> = {};
+    const unsub = onSnapshot(
+      col,
+      (snap) => {
+        const map: Record<string, boolean> = {};
 
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        if (data.week === "day-1") {
-          const parts = d.id.split("__");
-          const taskId = parts[parts.length - 1];
-          map[taskId] = !!data.done;
-        }
-      });
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          if (data.week === "day-1") {
+            const parts = d.id.split("__");
+            const taskId = parts[parts.length - 1];
+            map[taskId] = !!data.done;
+          }
+        });
 
-      setTasks((prev) =>
-        prev.map((t) => ({
-          ...t,
-          done: map[t.id] ?? false,
-        }))
-      );
-    });
+        setTasks((prev) =>
+          prev.map((t) => ({
+            ...t,
+            done: map[t.id] ?? false,
+          }))
+        );
+      },
+      (error) => {
+        console.error("Progress snapshot error:", error);
+        setErr(error.message ?? String(error));
+      }
+    );
 
     return unsub;
   }, [uid]);
 
   /* ---------------------------------------
-     Toggle task complete (per-user only)
+     Toggle task complete (PER-USER SAVE ONLY)
+     + show real error if rules block write
   ---------------------------------------- */
   async function toggleTask(id: string, next: boolean) {
-    if (!uid) return;
+    if (!uid) {
+      alert("Please log in to save your progress.");
+      return;
+    }
 
     const t = tasks.find((x) => x.id === id);
 
+    // Optimistic UI
     setTasks((prev) =>
       prev.map((x) => (x.id === id ? { ...x, done: next } : x))
     );
@@ -181,35 +196,46 @@ export default function Day1Page() {
         },
         { merge: true }
       );
-    } catch {
+    } catch (e: any) {
+      console.error("Save progress FAILED:", e);
+      // rollback
       setTasks((prev) =>
         prev.map((x) => (x.id === id ? { ...x, done: !next } : x))
       );
-      alert("Failed to save. Try again.");
+
+      const msg = e?.message ?? String(e);
+      alert(`Failed to save progress: ${msg}`);
     }
   }
 
   /* ---------------------------------------
-     🔑 SYNC PROGRESS FOR DASHBOARD (FIX)
-     This is what makes 0/6, 1/6, etc work
+     ✅ Dashboard sync (0/6, 1/6, etc)
+     Writes per-user counts to users/{uid}/sections/day1
+     DOES NOT touch approved
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
 
     const total = tasks.length;
-    const completed = tasks.filter((t) => t.done).length;
+    const completedCount = tasks.filter((t) => t.done).length;
+
+    // Only write when we actually have tasks loaded
+    if (total === 0) return;
 
     setDoc(
       doc(db, "users", uid, "sections", "day1"),
       {
-        completedCount: completed,
         totalCount: total,
-        completed: total > 0 && completed === total,
+        completedCount,
+        completed: completedCount === total,
+        completedAt: completedCount === total ? serverTimestamp() : deleteField(),
         updatedAt: serverTimestamp(),
-        // NEVER write approved here
+        // IMPORTANT: do NOT write approved here
       },
       { merge: true }
-    );
+    ).catch((e) => {
+      console.error("Section sync FAILED:", e);
+    });
   }, [uid, tasks]);
 
   /* ---------------------------------------
@@ -229,29 +255,160 @@ export default function Day1Page() {
     return <main style={{ padding: 24 }}>Loading…</main>;
 
   /* ---------------------------------------
-     UI
+     UI (YOUR ORIGINAL STYLING)
   ---------------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <div style={{ marginBottom: 16 }}>
-        <Link href="/dashboard">← Back to Dashboard</Link>
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            textDecoration: "none",
+            background: "#fff",
+            border: `1px solid ${GRAY}`,
+            borderRadius: 999,
+            padding: "8px 14px",
+            fontWeight: 600,
+            color: NAVY,
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+          }}
+        >
+          ← Back to Dashboard
+        </Link>
       </div>
 
-      {day1Approved && <strong>Day 1 Approved ✓</strong>}
+      {day1Approved && (
+        <div
+          style={{
+            background: "#e8f5e9",
+            border: "1px solid #c8e6c9",
+            padding: "12px 16px",
+            borderRadius: 8,
+            marginBottom: 16,
+            color: "#256029",
+            fontWeight: 600,
+          }}
+        >
+          Day 1 Approved ✓
+        </div>
+      )}
 
-      <h2>{pageTitle}</h2>
+      {!day1Approved && tasks.length > 0 && doneCount === tasks.length && (
+        <div
+          style={{
+            background: "#fff3cd",
+            border: "1px solid #ffeeba",
+            padding: "12px 16px",
+            borderRadius: 8,
+            marginBottom: 16,
+            color: "#856404",
+            fontWeight: 600,
+          }}
+        >
+          Day 1 completed — waiting for approval.
+        </div>
+      )}
 
-      <div>{doneCount}/{tasks.length} completed ({pct}%)</div>
+      <h2 style={{ marginBottom: 6 }}>{pageTitle} — Tasks</h2>
 
-      <ul style={{ listStyle: "none", padding: 0 }}>
+      <div style={{ fontSize: 14, marginBottom: 6 }}>
+        {doneCount}/{tasks.length} completed ({pct}%)
+      </div>
+
+      <div
+        style={{
+          height: 12,
+          background: "#d9d9df",
+          borderRadius: 999,
+          overflow: "hidden",
+          marginBottom: 18,
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: YELLOW,
+            transition: "width .2s ease",
+          }}
+        />
+      </div>
+
+      {err && <p style={{ color: "crimson" }}>Error: {err}</p>}
+
+      <ul
+        style={{
+          listStyle: "none",
+          padding: 0,
+          margin: 0,
+          display: "grid",
+          gap: 10,
+        }}
+      >
         {tasks.map((t, idx) => {
+          const order = num(t.order ?? t.sort_order ?? idx + 1);
           const done = !!t.done;
+
           return (
-            <li key={t.id}>
-              <button onClick={() => toggleTask(t.id, !done)}>
-                {done ? "✓" : "○"}
-              </button>{" "}
-              {num(t.order ?? t.sort_order ?? idx + 1)}. {t.title}
+            <li
+              key={t.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "#fff",
+                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
+                position: "relative",
+              }}
+            >
+              <span
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 5,
+                  background: done ? GREEN : "transparent",
+                  borderTopLeftRadius: 12,
+                  borderBottomLeftRadius: 12,
+                }}
+              />
+
+              <button
+                onClick={() => toggleTask(t.id, !done)}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
+                  background: done ? GREEN : "#fff",
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  stroke={done ? "#fff" : "transparent"}
+                  strokeWidth="3"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
+
+              <div style={{ fontWeight: 600 }}>
+                {order}. {t.title ?? t.id}
+              </div>
             </li>
           );
         })}
