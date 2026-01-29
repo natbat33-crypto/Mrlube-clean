@@ -12,6 +12,7 @@ import {
   updateDoc,
   query,
   where,
+  setDoc,
 } from "firebase/firestore";
 import { assignTrainee } from "@/lib/assignments";
 
@@ -42,6 +43,9 @@ export default function ManagerUsersPage() {
   const [trainees, setTrainees] = useState<Emp[]>([]);
   const [trainers, setTrainers] = useState<Emp[]>([]);
   const [managers, setManagers] = useState<Emp[]>([]);
+
+  // 🔴 NEW
+  const [newEmployees, setNewEmployees] = useState<Emp[]>([]);
 
   const [selTrainee, setSelTrainee] = useState("");
   const [selTrainer, setSelTrainer] = useState("");
@@ -78,7 +82,7 @@ export default function ManagerUsersPage() {
     })();
   }, [storeId]);
 
-  /* ---------- LOAD EMPLOYEES ---------- */
+  /* ---------- LOAD ASSIGNED EMPLOYEES ---------- */
   useEffect(() => {
     if (!storeId) return;
 
@@ -101,7 +105,52 @@ export default function ManagerUsersPage() {
     })();
   }, [storeId]);
 
-  /* ---------- ASSIGN ---------- */
+  /* ---------- LOAD NEW EMPLOYEES (NO ROLE YET) ---------- */
+  // 🔴 NEW
+  useEffect(() => {
+    if (!storeId) return;
+
+    (async () => {
+      const snap = await getDocs(
+        query(
+          collection(db, "users"),
+          where("storeId", "==", storeId)
+        )
+      );
+
+      const awaiting = snap.docs
+        .map((d) => ({ uid: d.id, ...(d.data() as any) }))
+        .filter(
+          (u) =>
+            !u.role &&
+            u.active !== false &&
+            u.uid !== uid // don’t show self
+        );
+
+      setNewEmployees(awaiting);
+    })();
+  }, [storeId, uid]);
+
+  /* ---------- ASSIGN NEW EMPLOYEE ---------- */
+  // 🔴 NEW
+  async function assignNewEmployee(userId: string, role: string) {
+    if (!storeId) return;
+
+    await updateDoc(doc(db, "users", userId), {
+      role,
+      active: true,
+    });
+
+    await setDoc(
+      doc(db, "stores", storeId, "employees", userId),
+      { role, active: true },
+      { merge: true }
+    );
+
+    setNewEmployees((prev) => prev.filter((u) => u.uid !== userId));
+  }
+
+  /* ---------- ASSIGN TRAINEE → TRAINER ---------- */
   async function doAssign() {
     if (!storeId || !selTrainee || !selTrainer) return;
 
@@ -150,19 +199,43 @@ export default function ManagerUsersPage() {
         </Link>
       </header>
 
-      {/* EMPLOYEES (NEW – LINK ONLY) */}
-      <section className="rounded-xl border bg-white p-5">
-        <h2 className="font-semibold mb-2">Employees</h2>
-        <p className="text-sm text-gray-600 mb-3">
-          Manage employee roles and access for this store.
-        </p>
-        <Link
-          href="/manager/employees"
-          className="inline-flex text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
-        >
-          Manage new employees →
-        </Link>
-      </section>
+      {/* 🔴 NEW EMPLOYEES */}
+      <Section title="New Employees (Awaiting Role)">
+        {newEmployees.length === 0
+          ? "No new employees."
+          : newEmployees.map((u) => (
+              <div
+                key={u.uid}
+                className="flex justify-between items-center gap-4 border rounded-lg p-3 bg-yellow-50"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium truncate">
+                    {u.name || u.email}
+                  </div>
+                  {u.email && u.name && (
+                    <div className="text-xs text-gray-500 truncate">
+                      {u.email}
+                    </div>
+                  )}
+                </div>
+
+                <select
+                  className="border rounded px-2 py-1 text-sm"
+                  defaultValue=""
+                  onChange={(e) =>
+                    assignNewEmployee(u.uid, e.target.value)
+                  }
+                >
+                  <option value="" disabled>
+                    Assign role…
+                  </option>
+                  <option value="trainee">Trainee</option>
+                  <option value="supervisor">Trainer</option>
+                  <option value="manager">Manager</option>
+                </select>
+              </div>
+            ))}
+      </Section>
 
       {/* TRAINEES */}
       <Section title="Trainees">
