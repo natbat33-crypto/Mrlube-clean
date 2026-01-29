@@ -47,8 +47,6 @@ export default function Day1Page() {
   const [loading, setLoading] = useState(true);
 
   const [day1Approved, setDay1Approved] = useState(false);
-
-  // SAFETY: prevent double hydration
   const [hydrated, setHydrated] = useState(false);
 
   /* ---------------------------------------
@@ -67,17 +65,14 @@ export default function Day1Page() {
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
     const ref = doc(db, "users", uid, "sections", "day1");
-    const unsub = onSnapshot(ref, (snap) => {
+    return onSnapshot(ref, (snap) => {
       setDay1Approved(snap.data()?.approved === true);
     });
-
-    return unsub;
   }, [uid]);
 
   /* ---------------------------------------
-     Load Day 1 task definitions
+     Load static Day 1 tasks
   ---------------------------------------- */
   useEffect(() => {
     let alive = true;
@@ -86,33 +81,26 @@ export default function Day1Page() {
       try {
         const dayDoc = await getDoc(doc(db, "days", "day-1"));
         if (alive && dayDoc.exists()) {
-          const dt = dayDoc.data() as any;
-          setPageTitle(dt.title || dt.name || "Day 1 Orientation");
+          const d: any = dayDoc.data();
+          setPageTitle(d.title || d.name || "Day 1 Orientation");
         }
 
         const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
-        const list: Task[] =
-          snap.docs
-            .map((d) => {
-              const data = d.data() as Partial<Task>;
-              const { done, ...rest } = data;
-              return { id: d.id, ...rest, done: false };
-            })
-            .sort(
-              (a, b) =>
-                num(a.order ?? a.sort_order ?? 0) -
-                num(b.order ?? b.sort_order ?? 0)
-            );
+        const list: Task[] = snap.docs
+          .map((d) => {
+            const data = d.data() as Partial<Task>;
+            const { done, ...rest } = data;
+            return { id: d.id, ...rest, done: false };
+          })
+          .sort(
+            (a, b) =>
+              num(a.order ?? a.sort_order ?? 0) -
+              num(b.order ?? b.sort_order ?? 0)
+          );
 
-        if (alive) {
-          setTasks(list);
-          setErr(null);
-        }
+        if (alive) setTasks(list);
       } catch (e: any) {
-        if (alive) {
-          setErr(e.message ?? String(e));
-          setTasks([]);
-        }
+        if (alive) setErr(e.message ?? String(e));
       } finally {
         if (alive) setLoading(false);
       }
@@ -124,34 +112,25 @@ export default function Day1Page() {
   }, []);
 
   /* ---------------------------------------
-     LOAD DONE FLAGS (user progress)
+     Load saved progress (ONCE)
   ---------------------------------------- */
   useEffect(() => {
-    if (!uid || tasks.length === 0 || hydrated) return;
+    if (!uid || !tasks.length || hydrated) return;
 
     (async () => {
-      try {
-        const col = collection(db, "users", uid, "progress");
-        const q = query(col, where("week", "==", "day-1"));
-        const snap = await getDocs(q);
+      const qSnap = await getDocs(
+        query(collection(db, "users", uid, "progress"), where("week", "==", "day-1"))
+      );
 
-        const doneMap: Record<string, boolean> = {};
+      const map: Record<string, boolean> = {};
+      qSnap.forEach((d) => {
+        if (!d.data()?.done) return;
+        const parts = d.id.split("__");
+        map[parts[parts.length - 1]] = true;
+      });
 
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          if (!data.done) return;
-          const parts = d.id.split("__");
-          doneMap[parts[parts.length - 1]] = true;
-        });
-
-        setTasks((prev) =>
-          prev.map((t) => ({ ...t, done: !!doneMap[t.id] }))
-        );
-
-        setHydrated(true);
-      } catch (e: any) {
-        setErr(e?.message ?? String(e));
-      }
+      setTasks((prev) => prev.map((t) => ({ ...t, done: !!map[t.id] })));
+      setHydrated(true);
     })();
   }, [uid, tasks.length, hydrated]);
 
@@ -160,8 +139,6 @@ export default function Day1Page() {
   ---------------------------------------- */
   async function toggleTask(id: string, next: boolean) {
     if (!uid) return;
-
-    const t = tasks.find((x) => x.id === id);
 
     setTasks((prev) =>
       prev.map((x) => (x.id === id ? { ...x, done: next } : x))
@@ -178,14 +155,13 @@ export default function Day1Page() {
           traineeId: uid,
           createdBy: uid,
           week: "day-1",
-          title: t?.title ?? id,
           done: next,
           completedAt: next ? serverTimestamp() : deleteField(),
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
-    } catch (e) {
+    } catch {
       setTasks((prev) =>
         prev.map((x) => (x.id === id ? { ...x, done: !next } : x))
       );
@@ -193,39 +169,35 @@ export default function Day1Page() {
   }
 
   /* ======================================================
-     ✅ ADDITIVE FIX — DASHBOARD SYNC (DO NOT REMOVE)
+     ✅ ADDITIVE FIX — DASHBOARD SYNC (KEEP THIS)
      ====================================================== */
   useEffect(() => {
-    if (!uid || tasks.length === 0) return;
+    if (!uid || !tasks.length) return;
 
     (async () => {
-      try {
-        const storeId = await getStoreId();
-        if (!storeId) return;
+      const storeId = await getStoreId();
+      if (!storeId) return;
 
-        const doneIds = tasks.filter(t => t.done).map(t => t.id);
+      const doneIds = tasks.filter(t => t.done).map(t => t.id);
 
-        await setDoc(
-          doc(db, "stores", String(storeId), "trainees", uid, "progress", "day-1"),
-          {
-            doneIds,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      } catch (e) {
-        console.error("[Day1 sync]", e);
-      }
+      await setDoc(
+        doc(db, "stores", String(storeId), "trainees", uid, "progress", "day-1"),
+        {
+          doneIds,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
     })();
   }, [uid, tasks]);
-  /* ================= END FIX ================= */
+  /* ====================================================== */
 
   /* ---------------------------------------
      Section completion
   ---------------------------------------- */
   useEffect(() => {
-    if (!uid) return;
-    if (!tasks.length || !tasks.every(t => t.done)) return;
+    if (!uid || !tasks.length) return;
+    if (!tasks.every(t => t.done)) return;
 
     setDoc(
       doc(db, "users", uid, "sections", "day1"),
@@ -240,26 +212,93 @@ export default function Day1Page() {
   if (authLoading || loading) return <main style={{ padding: 24 }}>Loading…</main>;
 
   /* ---------------------------------------
-     UI (UNCHANGED)
+     UI — YOUR ORIGINAL CSS
   ---------------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <Link href="/dashboard">← Back to Dashboard</Link>
+      <div style={{ marginBottom: 16 }}>
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            textDecoration: "none",
+            background: "#fff",
+            border: `1px solid ${GRAY}`,
+            borderRadius: 999,
+            padding: "8px 14px",
+            fontWeight: 600,
+            color: NAVY,
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+          }}
+        >
+          ← Back to Dashboard
+        </Link>
+      </div>
 
-      <h2>{pageTitle}</h2>
-      <div>{doneCount}/{tasks.length} ({pct}%)</div>
+      <h2 style={{ marginBottom: 6 }}>{pageTitle} — Tasks</h2>
 
-      <ul>
-        {tasks.map((t, i) => (
-          <li key={t.id}>
-            <button onClick={() => toggleTask(t.id, !t.done)}>
-              {t.done ? "✓" : "○"}
-            </button>
-            {i + 1}. {t.title}
-          </li>
-        ))}
+      <div style={{ fontSize: 14, marginBottom: 6 }}>
+        {doneCount}/{tasks.length} completed ({pct}%)
+      </div>
+
+      <div
+        style={{
+          height: 12,
+          background: "#d9d9df",
+          borderRadius: 999,
+          overflow: "hidden",
+          marginBottom: 18,
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: YELLOW,
+            transition: "width .2s ease",
+          }}
+        />
+      </div>
+
+      {err && <p style={{ color: "crimson" }}>Error: {err}</p>}
+
+      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 10 }}>
+        {tasks.map((t, idx) => {
+          const done = !!t.done;
+          return (
+            <li
+              key={t.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "#fff",
+                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
+                position: "relative",
+              }}
+            >
+              <button
+                onClick={() => toggleTask(t.id, !done)}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
+                  background: done ? GREEN : "#fff",
+                  cursor: "pointer",
+                }}
+              />
+              <div style={{ fontWeight: 600 }}>
+                {idx + 1}. {t.title ?? t.id}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </main>
   );
 }
-
