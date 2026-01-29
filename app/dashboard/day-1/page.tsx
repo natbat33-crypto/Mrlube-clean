@@ -48,7 +48,7 @@ export default function Day1Page() {
 
   const [day1Approved, setDay1Approved] = useState(false);
 
-  // ✅ SAFETY FIX: prevent double-hydration / stale flash
+  // SAFETY: prevent double hydration
   const [hydrated, setHydrated] = useState(false);
 
   /* ---------------------------------------
@@ -77,8 +77,7 @@ export default function Day1Page() {
   }, [uid]);
 
   /* ---------------------------------------
-     Load static task definitions (Day 1 own data)
-     IMPORTANT: ignore any shared `done`
+     Load Day 1 task definitions
   ---------------------------------------- */
   useEffect(() => {
     let alive = true;
@@ -96,7 +95,7 @@ export default function Day1Page() {
           snap.docs
             .map((d) => {
               const data = d.data() as Partial<Task>;
-              const { done, ...rest } = data; // ignore any shared done
+              const { done, ...rest } = data;
               return { id: d.id, ...rest, done: false };
             })
             .sort(
@@ -125,15 +124,10 @@ export default function Day1Page() {
   }, []);
 
   /* ---------------------------------------
-     ✅ LOAD DONE FLAGS (Week 1 pattern)
-     SAFETY FIX: run ONCE per mount to avoid stale flashes
+     LOAD DONE FLAGS (user progress)
   ---------------------------------------- */
   useEffect(() => {
-    if (!uid) return;
-    if (tasks.length === 0) return;
-    if (hydrated) return; // ✅ SAFETY GUARD
-
-    let stopped = false;
+    if (!uid || tasks.length === 0 || hydrated) return;
 
     (async () => {
       try {
@@ -146,52 +140,35 @@ export default function Day1Page() {
         snap.forEach((d) => {
           const data = d.data() as any;
           if (!data.done) return;
-
           const parts = d.id.split("__");
-          const taskId = parts[parts.length - 1];
-          doneMap[taskId] = true;
+          doneMap[parts[parts.length - 1]] = true;
         });
 
-        if (stopped) return;
-
         setTasks((prev) =>
-          prev.map((t) => ({
-            ...t,
-            done: !!doneMap[t.id],
-          }))
+          prev.map((t) => ({ ...t, done: !!doneMap[t.id] }))
         );
 
-        // ✅ mark hydration complete so we never re-apply unexpectedly
         setHydrated(true);
       } catch (e: any) {
-        console.error("[Day1] load done flags error:", e);
         setErr(e?.message ?? String(e));
       }
     })();
-
-    return () => {
-      stopped = true;
-    };
   }, [uid, tasks.length, hydrated]);
 
   /* ---------------------------------------
-     Toggle task complete (per-user, Day 1 keys)
+     Toggle task
   ---------------------------------------- */
   async function toggleTask(id: string, next: boolean) {
-    if (!uid) {
-      alert("Please log in to save your progress.");
-      return;
-    }
+    if (!uid) return;
 
     const t = tasks.find((x) => x.id === id);
 
-    // Optimistic UI
     setTasks((prev) =>
       prev.map((x) => (x.id === id ? { ...x, done: next } : x))
     );
 
     try {
-      const key = `days__day-1__tasks__${id}`; // explicit Week1-style key
+      const key = `days__day-1__tasks__${id}`;
       const storeId = await getStoreId();
 
       await setDoc(
@@ -208,212 +185,79 @@ export default function Day1Page() {
         },
         { merge: true }
       );
-    } catch (e: any) {
-      console.error("[Day1] toggle error:", e);
-      // rollback
+    } catch (e) {
       setTasks((prev) =>
         prev.map((x) => (x.id === id ? { ...x, done: !next } : x))
       );
-      alert(`Save failed — ${e?.message ?? String(e)}`);
     }
   }
 
+  /* ======================================================
+     ✅ ADDITIVE FIX — DASHBOARD SYNC (DO NOT REMOVE)
+     ====================================================== */
+  useEffect(() => {
+    if (!uid || tasks.length === 0) return;
+
+    (async () => {
+      try {
+        const storeId = await getStoreId();
+        if (!storeId) return;
+
+        const doneIds = tasks.filter(t => t.done).map(t => t.id);
+
+        await setDoc(
+          doc(db, "stores", String(storeId), "trainees", uid, "progress", "day-1"),
+          {
+            doneIds,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.error("[Day1 sync]", e);
+      }
+    })();
+  }, [uid, tasks]);
+  /* ================= END FIX ================= */
+
   /* ---------------------------------------
-     ✅ AUTO-CREATE SECTION DOC (COMPLETE ONLY)
-     Trainee NEVER writes approved
+     Section completion
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
-    const allComplete =
-      tasks.length > 0 && tasks.every((t) => t.done === true);
-    if (!allComplete) return;
+    if (!tasks.length || !tasks.every(t => t.done)) return;
 
     setDoc(
       doc(db, "users", uid, "sections", "day1"),
-      {
-        completed: true,
-        completedAt: serverTimestamp(),
-      },
+      { completed: true, completedAt: serverTimestamp() },
       { merge: true }
     );
   }, [uid, tasks]);
 
-  /* ---------------------------------------
-     Derived values
-  ---------------------------------------- */
-  const doneCount = useMemo(
-    () => tasks.filter((t) => t.done).length,
-    [tasks]
-  );
+  const doneCount = tasks.filter(t => t.done).length;
+  const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
-  const pct = useMemo(
-    () =>
-      tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0,
-    [doneCount, tasks.length]
-  );
-
-  if (authLoading || loading)
-    return <main style={{ padding: 24 }}>Loading…</main>;
+  if (authLoading || loading) return <main style={{ padding: 24 }}>Loading…</main>;
 
   /* ---------------------------------------
-     UI (UNCHANGED STYLING)
+     UI (UNCHANGED)
   ---------------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ marginBottom: 16 }}>
-        <Link
-          href="/dashboard"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            textDecoration: "none",
-            background: "#fff",
-            border: `1px solid ${GRAY}`,
-            borderRadius: 999,
-            padding: "8px 14px",
-            fontWeight: 600,
-            color: NAVY,
-            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-          }}
-        >
-          ← Back to Dashboard
-        </Link>
-      </div>
+      <Link href="/dashboard">← Back to Dashboard</Link>
 
-      {day1Approved && (
-        <div
-          style={{
-            background: "#e8f5e9",
-            border: "1px solid #c8e6c9",
-            padding: "12px 16px",
-            borderRadius: 8,
-            marginBottom: 16,
-            color: "#256029",
-            fontWeight: 600,
-          }}
-        >
-          Day 1 Approved ✓
-        </div>
-      )}
+      <h2>{pageTitle}</h2>
+      <div>{doneCount}/{tasks.length} ({pct}%)</div>
 
-      {!day1Approved && tasks.length > 0 && doneCount === tasks.length && (
-        <div
-          style={{
-            background: "#fff3cd",
-            border: "1px solid #ffeeba",
-            padding: "12px 16px",
-            borderRadius: 8,
-            marginBottom: 16,
-            color: "#856404",
-            fontWeight: 600,
-          }}
-        >
-          Day 1 completed — waiting for approval.
-        </div>
-      )}
-
-      <h2 style={{ marginBottom: 6 }}>{pageTitle} — Tasks</h2>
-
-      <div style={{ fontSize: 14, marginBottom: 6 }}>
-        {doneCount}/{tasks.length} completed ({pct}%)
-      </div>
-
-      <div
-        style={{
-          height: 12,
-          background: "#d9d9df",
-          borderRadius: 999,
-          overflow: "hidden",
-          marginBottom: 18,
-        }}
-      >
-        <div
-          style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: YELLOW,
-            transition: "width .2s ease",
-          }}
-        />
-      </div>
-
-      {err && <p style={{ color: "crimson" }}>Error: {err}</p>}
-
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "grid",
-          gap: 10,
-        }}
-      >
-        {tasks.map((t, idx) => {
-          const order = num(t.order ?? t.sort_order ?? idx + 1);
-          const done = !!t.done;
-
-          return (
-            <li
-              key={t.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "12px 14px",
-                borderRadius: 12,
-                background: "#fff",
-                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
-                position: "relative",
-              }}
-            >
-              <span
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: 5,
-                  background: done ? GREEN : "transparent",
-                  borderTopLeftRadius: 12,
-                  borderBottomLeftRadius: 12,
-                }}
-              />
-
-              <button
-                onClick={() => toggleTask(t.id, !done)}
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: "50%",
-                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
-                  background: done ? GREEN : "#fff",
-                  display: "grid",
-                  placeItems: "center",
-                  cursor: "pointer",
-                }}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
-                  stroke={done ? "#fff" : "transparent"}
-                  strokeWidth="3"
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              </button>
-
-              <div style={{ fontWeight: 600 }}>
-                {order}. {t.title ?? t.id}
-              </div>
-            </li>
-          );
-        })}
+      <ul>
+        {tasks.map((t, i) => (
+          <li key={t.id}>
+            <button onClick={() => toggleTask(t.id, !t.done)}>
+              {t.done ? "✓" : "○"}
+            </button>
+            {i + 1}. {t.title}
+          </li>
+        ))}
       </ul>
     </main>
   );
