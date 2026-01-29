@@ -36,13 +36,10 @@ function clamp(n: number) {
 async function getProgramTotalTasks(): Promise<number> {
   let total = 0;
 
-  // Weeks (modules)
   try {
     const modulesSnap = await getDocs(collection(db, "modules"));
     for (const mod of modulesSnap.docs) {
-      const tasksSnap = await getDocs(
-        collection(mod.ref, "tasks")
-      );
+      const tasksSnap = await getDocs(collection(mod.ref, "tasks"));
       tasksSnap.forEach((t) => {
         const td = t.data() as any;
         if (td.active === false) return;
@@ -53,13 +50,10 @@ async function getProgramTotalTasks(): Promise<number> {
     console.error("Error loading modules tasks for progress:", e);
   }
 
-  // Day 1 (days)
   try {
     const daysSnap = await getDocs(collection(db, "days"));
     for (const dayDoc of daysSnap.docs) {
-      const tasksSnap = await getDocs(
-        collection(dayDoc.ref, "tasks")
-      );
+      const tasksSnap = await getDocs(collection(dayDoc.ref, "tasks"));
       tasksSnap.forEach((t) => {
         const td = t.data() as any;
         if (td.active === false) return;
@@ -102,7 +96,7 @@ async function getTraineePercent(
   }
 }
 
-// Get one store's overall training % (avg of all trainees)
+// 🔧 FIXED: Get store progress using users collection as source of truth
 async function getStoreProgress(
   storeId: string,
   programTotalTasks: number
@@ -110,21 +104,21 @@ async function getStoreProgress(
   if (!storeId || programTotalTasks <= 0) return 0;
 
   try {
-    const employeesSnap = await getDocs(
-      collection(db, "stores", storeId, "employees")
-    );
+    const usersSnap = await getDocs(collection(db, "users"));
 
     const traineeUids: string[] = [];
-    employeesSnap.forEach((doc) => {
-      const data = doc.data() as any;
-      if (data.role === "trainee" && data.uid) {
-        traineeUids.push(data.uid as string);
+    usersSnap.forEach((doc) => {
+      const u = doc.data() as any;
+      if (
+        u.role === "trainee" &&
+        u.storeId === storeId &&
+        u.active !== false
+      ) {
+        traineeUids.push(doc.id);
       }
     });
 
-    if (traineeUids.length === 0) {
-      return 0;
-    }
+    if (traineeUids.length === 0) return 0;
 
     let sum = 0;
     for (const uid of traineeUids) {
@@ -132,8 +126,7 @@ async function getStoreProgress(
       sum += pct;
     }
 
-    const avg = sum / traineeUids.length;
-    return clamp(avg);
+    return clamp(sum / traineeUids.length);
   } catch (e) {
     console.error("Error computing store progress:", e);
     return 0;
@@ -151,7 +144,6 @@ export default function StoresPage() {
       try {
         setLoading(true);
 
-        // 1️⃣ Load stores
         const qy = query(
           collection(db, "stores"),
           orderBy("number", "asc")
@@ -165,21 +157,15 @@ export default function StoresPage() {
 
         if (!alive) return;
 
-        // 2️⃣ Get total tasks once
         const programTotalTasks = await getProgramTotalTasks();
 
-        // 3️⃣ For each store, compute overall % (avg trainee %)
         const listWithProgress: StoreWithProgress[] = [];
-
         for (const store of baseList) {
           const progress = await getStoreProgress(
             store.id,
             programTotalTasks
           );
-          listWithProgress.push({
-            ...store,
-            progress,
-          });
+          listWithProgress.push({ ...store, progress });
         }
 
         if (!alive) return;
@@ -205,7 +191,6 @@ export default function StoresPage() {
               <CardTitle className="text-[15px] font-semibold">
                 Store #{s.number}
               </CardTitle>
-
               {s.name ? (
                 <CardDescription className="muted line-clamp-1">
                   {s.name}
@@ -214,16 +199,13 @@ export default function StoresPage() {
             </CardHeader>
 
             <CardContent className="pt-3">
-              {/* Address */}
               <div className="text-sm">{s.address}</div>
 
-              {/* Store Progress */}
               {typeof s.progress === "number" ? (
                 <div className="mt-3">
                   <div className="text-xs font-medium text-muted-foreground">
                     Training Progress: {s.progress}%
                   </div>
-
                   <div className="mt-1 h-2 w-full bg-gray-200 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-blue-500 rounded-full transition-all"
@@ -256,15 +238,7 @@ export default function StoresPage() {
       ) : stores.length === 0 ? (
         <div className="text-sm text-muted-foreground">No stores found.</div>
       ) : (
-        <div
-          className="
-            grid gap-4
-            grid-cols-1
-            sm:grid-cols-2
-            lg:grid-cols-3
-            xl:grid-cols-4
-          "
-        >
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {cards}
         </div>
       )}
