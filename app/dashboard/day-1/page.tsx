@@ -48,6 +48,9 @@ export default function Day1Page() {
 
   const [day1Approved, setDay1Approved] = useState(false);
 
+  // ✅ SAFETY FIX: prevent double-hydration / stale flash
+  const [hydrated, setHydrated] = useState(false);
+
   /* ---------------------------------------
      AUTH
   ---------------------------------------- */
@@ -123,10 +126,12 @@ export default function Day1Page() {
 
   /* ---------------------------------------
      ✅ LOAD DONE FLAGS (Week 1 pattern)
-     This makes progress survive navigation reliably.
+     SAFETY FIX: run ONCE per mount to avoid stale flashes
   ---------------------------------------- */
   useEffect(() => {
-    if (!uid || tasks.length === 0) return;
+    if (!uid) return;
+    if (tasks.length === 0) return;
+    if (hydrated) return; // ✅ SAFETY GUARD
 
     let stopped = false;
 
@@ -155,9 +160,11 @@ export default function Day1Page() {
             done: !!doneMap[t.id],
           }))
         );
+
+        // ✅ mark hydration complete so we never re-apply unexpectedly
+        setHydrated(true);
       } catch (e: any) {
         console.error("[Day1] load done flags error:", e);
-        // show the error on screen too
         setErr(e?.message ?? String(e));
       }
     })();
@@ -165,7 +172,7 @@ export default function Day1Page() {
     return () => {
       stopped = true;
     };
-  }, [uid, tasks.length]);
+  }, [uid, tasks.length, hydrated]);
 
   /* ---------------------------------------
      Toggle task complete (per-user, Day 1 keys)
@@ -411,3 +418,4 @@ export default function Day1Page() {
     </main>
   );
 }
+

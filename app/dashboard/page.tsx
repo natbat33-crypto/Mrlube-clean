@@ -524,7 +524,30 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
       (e: unknown) => console.error("Day1 tasks snapshot error:", e)
     );
 
-    // Listen to trainee progress for doneIds
+    // ✅ FIX (SAFE): Prefer users/<uid>/sections/day1.completedCount for done
+    // This matches what Day 1 page writes for the dashboard bubble.
+    const secRef = doc(db, "users", String(traineeUid), "sections", "day1");
+    const unsubSection = onSnapshot(
+      secRef,
+      (snap: any) => {
+        if (!alive) return;
+        if (!snap.exists()) return;
+
+        const s = snap.data() as any;
+        const cc = typeof s?.completedCount === "number" ? s.completedCount : null;
+        const tc = typeof s?.totalCount === "number" ? s.totalCount : null;
+
+        if (cc !== null) setDone(cc);
+
+        // Safety: if tasks snapshot hasn’t populated yet, allow section doc to seed total
+        if (typeof tc === "number" && tc > 0) {
+          setTotal((prev) => (prev > 0 ? prev : tc));
+        }
+      },
+      (e: unknown) => console.error("Day1 sections snapshot error:", e)
+    );
+
+    // Legacy fallback (keep it so old users won’t break)
     const progRef = doc(
       db,
       "stores",
@@ -539,13 +562,14 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
       progRef,
       (snap: any) => {
         if (!alive) return;
-        if (!snap.exists()) {
-          setDone(0);
-          return;
-        }
+        if (!snap.exists()) return;
+
+        // Only use legacy if sections/day1 doesn't exist yet (or has no completedCount)
+        // We can’t read state from the section listener here directly, so we do a safe fallback:
+        // If done is still 0, use doneIds length.
         const p = snap.data() as any;
         const doneIds: string[] = Array.isArray(p?.doneIds) ? p.doneIds : [];
-        setDone(doneIds.length);
+        setDone((prev) => (prev > 0 ? prev : doneIds.length));
       },
       (e: unknown) => console.error("Day1 progress snapshot error:", e)
     );
@@ -553,6 +577,7 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
     return () => {
       alive = false;
       unsubTasks();
+      unsubSection();
       unsubProg();
     };
   }, [storeId, traineeUid]);
@@ -580,3 +605,4 @@ const Day1Card: FC<Day1CardProps> = ({ storeId, traineeUid }) => {
     </Link>
   );
 };
+
