@@ -105,7 +105,7 @@ export default function ManagerUsersPage() {
     })();
   }, [storeId]);
 
-  /* ---------- LOAD NEW EMPLOYEES (AWAITING ROLE) ---------- */
+  /* ---------- LOAD NEW EMPLOYEES (FIXED) ---------- */
   useEffect(() => {
     if (!storeId || !showNewEmployees) return;
 
@@ -121,7 +121,7 @@ export default function ManagerUsersPage() {
           .map((d) => ({ uid: d.id, ...(d.data() as any) }))
           .filter(
             (u) =>
-              !u.role &&
+              (u.role === "employee" || !u.role) &&
               u.active !== false &&
               u.uid !== uid
           );
@@ -134,7 +134,7 @@ export default function ManagerUsersPage() {
     })();
   }, [storeId, showNewEmployees, uid]);
 
-  /* ---------- ASSIGN NEW EMPLOYEE (MIRRORS ADMIN) ---------- */
+  /* ---------- ASSIGN NEW EMPLOYEE ---------- */
   async function assignNewEmployee(userId: string, role: string) {
     if (!storeId) return;
 
@@ -208,9 +208,9 @@ export default function ManagerUsersPage() {
   if (!uid || !storeId) return <main className="p-6">No access</main>;
 
   return (
-    <main className="max-w-4xl mx-auto p-6 space-y-6">
+    <main className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
       {/* HEADER */}
-      <header className="flex justify-between items-center">
+      <header className="flex flex-wrap gap-3 justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Store Users</h1>
           {store && (
@@ -228,9 +228,9 @@ export default function ManagerUsersPage() {
         </Link>
       </header>
 
-      {/* EMPLOYEES (CLICKABLE PANEL) */}
+      {/* EMPLOYEES */}
       <section className="rounded-xl border bg-white p-5">
-        <div className="flex justify-between items-start gap-4">
+        <div className="flex flex-wrap gap-3 justify-between items-start">
           <div>
             <h2 className="font-semibold mb-1">Employees</h2>
             <p className="text-sm text-gray-600">
@@ -261,7 +261,7 @@ export default function ManagerUsersPage() {
               newEmployees.map((u) => (
                 <div
                   key={u.uid}
-                  className="flex justify-between items-center gap-4 border rounded-lg p-3 bg-yellow-50"
+                  className="flex flex-wrap gap-3 justify-between items-center border rounded-lg p-3 bg-yellow-50"
                 >
                   <div className="min-w-0">
                     <div className="font-medium truncate">
@@ -277,7 +277,7 @@ export default function ManagerUsersPage() {
                     onChange={(e) =>
                       assignNewEmployee(u.uid, e.target.value)
                     }
-                    className="border rounded px-2 py-1 text-sm"
+                    className="border rounded px-2 py-1 text-sm min-w-[140px]"
                   >
                     <option value="" disabled>
                       Assign role…
@@ -293,7 +293,6 @@ export default function ManagerUsersPage() {
         )}
       </section>
 
-      {/* TRAINEES */}
       <Section title="Trainees">
         {trainees.length === 0
           ? "No trainees."
@@ -307,7 +306,6 @@ export default function ManagerUsersPage() {
             ))}
       </Section>
 
-      {/* TRAINERS */}
       <Section title="Trainers">
         {trainers.length === 0
           ? "No trainers."
@@ -321,7 +319,6 @@ export default function ManagerUsersPage() {
             ))}
       </Section>
 
-      {/* MANAGERS */}
       <Section title="Managers">
         {managers.length === 0
           ? "No managers."
@@ -330,11 +327,10 @@ export default function ManagerUsersPage() {
             ))}
       </Section>
 
-      {/* ASSIGN TRAINEE → TRAINER */}
       <section className="rounded-xl border bg-white p-5">
         <h2 className="font-semibold mb-3">Assign Trainee → Trainer</h2>
 
-        <div className="grid md:grid-cols-2 gap-3">
+        <div className="grid sm:grid-cols-2 gap-3">
           <select
             value={selTrainee}
             onChange={(e) => setSelTrainee(e.target.value)}
@@ -362,7 +358,7 @@ export default function ManagerUsersPage() {
           </select>
         </div>
 
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex items-center gap-3 flex-wrap">
           <button
             onClick={doAssign}
             disabled={!selTrainee || !selTrainer}
@@ -406,7 +402,7 @@ function UserRow({
   readOnly?: boolean;
 }) {
   return (
-    <div className="flex justify-between items-center gap-4 border rounded-lg p-3">
+    <div className="flex flex-wrap gap-3 justify-between items-center border rounded-lg p-3">
       <div className="min-w-0">
         <div className="font-medium truncate">
           {user.name || user.email}
