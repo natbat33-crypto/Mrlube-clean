@@ -12,9 +12,9 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 type StoreDoc = {
-  number: number;
-  name: string;
-  address: string;
+  number?: number;
+  name?: string;
+  address?: string;
 };
 
 type AnyDoc = Record<string, any>;
@@ -94,17 +94,35 @@ export default async function StorePage({ params }: StorePageProps) {
 
   const store = storeSnap.data() as StoreDoc;
 
-  /* ================= Trainees ================= */
-  const traineesSnap = await storeRef.collection("trainees").get();
+  /* ================= Trainees (FIX ONLY HERE) ================= */
   const totalTasks = await getProgramTotalTasks();
 
+  // ✅ Source of truth: users collection
+  // ✅ Handles storeId saved as string OR number (two queries, no full scan)
+  const usersRef = adminDb.collection("users");
+
+  let traineesDocs = (
+    await usersRef.where("role", "==", "trainee").where("storeId", "==", storeId).get()
+  ).docs;
+
+  if (traineesDocs.length === 0) {
+    const asNum = Number(storeId);
+    if (!Number.isNaN(asNum)) {
+      traineesDocs = (
+        await usersRef.where("role", "==", "trainee").where("storeId", "==", asNum).get()
+      ).docs;
+    }
+  }
+
   const trainees: Trainee[] = await Promise.all(
-    traineesSnap.docs.map(async (row, i) => {
+    traineesDocs.map(async (row, i) => {
       const data = row.data() as AnyDoc;
-      const uid: string = data.traineeId || row.id;
+      const uid: string = data.uid || row.id;
 
       const name =
         data.displayName ||
+        data.name ||
+        data.email ||
         (await resolveUserLabel(uid)) ||
         `Trainee ${i + 1}`;
 
@@ -121,9 +139,9 @@ export default async function StorePage({ params }: StorePageProps) {
     <main className="mx-auto max-w-4xl p-4 lg:p-6 space-y-6">
       {/* Store Header */}
       <div className="rounded-xl border bg-white p-5">
-        <h1 className="text-xl font-semibold">Store #{store.number}</h1>
-        <p className="text-sm text-muted-foreground">{store.name}</p>
-        <p className="mt-1 text-sm">{store.address}</p>
+        <h1 className="text-xl font-semibold">Store #{store.number ?? ""}</h1>
+        <p className="text-sm text-muted-foreground">{store.name ?? ""}</p>
+        <p className="mt-1 text-sm">{store.address ?? ""}</p>
 
         {/* Store Users */}
         <section className="mt-6">
