@@ -24,8 +24,6 @@ type Emp = {
   name?: string;
   email?: string;
   active?: boolean;
-  trainer?: string;
-  supervisor?: string; // legacy
 };
 
 type Store = {
@@ -50,7 +48,7 @@ export default function ManagerUsersPage() {
 
   const [loading, setLoading] = useState(true);
 
-  // ✅ NEW: toggle + new employees list
+  /* ===== NEW EMPLOYEES ===== */
   const [showNewEmployees, setShowNewEmployees] = useState(false);
   const [newEmployees, setNewEmployees] = useState<Emp[]>([]);
   const [newEmpStatus, setNewEmpStatus] = useState("");
@@ -107,21 +105,26 @@ export default function ManagerUsersPage() {
     })();
   }, [storeId]);
 
-  // ✅ NEW: load "awaiting role" users when panel is opened
+  /* ---------- LOAD NEW EMPLOYEES (AWAITING ROLE) ---------- */
   useEffect(() => {
-    if (!storeId) return;
-    if (!showNewEmployees) return;
+    if (!storeId || !showNewEmployees) return;
 
     (async () => {
       try {
         setNewEmpStatus("Loading…");
+
         const snap = await getDocs(
           query(collection(db, "users"), where("storeId", "==", storeId))
         );
 
         const awaiting = snap.docs
           .map((d) => ({ uid: d.id, ...(d.data() as any) }))
-          .filter((u) => !u.role && u.active !== false && u.uid !== uid);
+          .filter(
+            (u) =>
+              !u.role &&
+              u.active !== false &&
+              u.uid !== uid
+          );
 
         setNewEmployees(awaiting);
         setNewEmpStatus("");
@@ -131,7 +134,7 @@ export default function ManagerUsersPage() {
     })();
   }, [storeId, showNewEmployees, uid]);
 
-  // ✅ NEW: assign role (mirrors admin)
+  /* ---------- ASSIGN NEW EMPLOYEE (MIRRORS ADMIN) ---------- */
   async function assignNewEmployee(userId: string, role: string) {
     if (!storeId) return;
 
@@ -150,10 +153,8 @@ export default function ManagerUsersPage() {
         { merge: true }
       );
 
-      // Remove from awaiting list
       setNewEmployees((prev) => prev.filter((u) => u.uid !== userId));
 
-      // Refresh employees lists quickly (minimal + safe)
       const empSnap = await getDocs(
         query(
           collection(db, "stores", storeId, "employees"),
@@ -171,13 +172,13 @@ export default function ManagerUsersPage() {
       setManagers(all.filter((e) => e.role === "manager"));
 
       setNewEmpStatus("Assigned ✓");
-      setTimeout(() => setNewEmpStatus(""), 900);
+      setTimeout(() => setNewEmpStatus(""), 1000);
     } catch {
       setNewEmpStatus("Failed");
     }
   }
 
-  /* ---------- ASSIGN ---------- */
+  /* ---------- ASSIGN TRAINEE → TRAINER ---------- */
   async function doAssign() {
     if (!storeId || !selTrainee || !selTrainer) return;
 
@@ -197,9 +198,10 @@ export default function ManagerUsersPage() {
   async function deactivateUser(userId: string) {
     if (!storeId) return;
 
-    await updateDoc(doc(db, "stores", storeId, "employees", userId), {
-      active: false,
-    });
+    await updateDoc(
+      doc(db, "stores", storeId, "employees", userId),
+      { active: false }
+    );
   }
 
   if (loading) return <main className="p-6">Loading…</main>;
@@ -226,27 +228,25 @@ export default function ManagerUsersPage() {
         </Link>
       </header>
 
-      {/* EMPLOYEES (CLICKABLE) */}
+      {/* EMPLOYEES (CLICKABLE PANEL) */}
       <section className="rounded-xl border bg-white p-5">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex justify-between items-start gap-4">
           <div>
-            <h2 className="font-semibold mb-2">Employees</h2>
+            <h2 className="font-semibold mb-1">Employees</h2>
             <p className="text-sm text-gray-600">
-              Manage employee roles and access for this store.
+              Assign roles to newly signed-up employees.
             </p>
           </div>
 
-          {/* keep the "clickable thing" */}
           <button
             type="button"
             onClick={() => setShowNewEmployees((v) => !v)}
-            className="inline-flex text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50 whitespace-nowrap"
+            className="text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
           >
-            {showNewEmployees ? "Hide new employees ←" : "Manage new employees →"}
+            {showNewEmployees ? "Hide ←" : "Manage new employees →"}
           </button>
         </div>
 
-        {/* panel content */}
         {showNewEmployees && (
           <div className="mt-4 space-y-3">
             {newEmpStatus && (
@@ -267,20 +267,17 @@ export default function ManagerUsersPage() {
                     <div className="font-medium truncate">
                       {u.name || u.email}
                     </div>
-                    {u.email && u.name && (
-                      <div className="text-xs text-gray-500 truncate">
-                        {u.email}
-                      </div>
-                    )}
                     <div className="text-xs text-gray-600">
                       Awaiting role
                     </div>
                   </div>
 
                   <select
-                    className="border rounded px-2 py-1 text-sm"
                     defaultValue=""
-                    onChange={(e) => assignNewEmployee(u.uid, e.target.value)}
+                    onChange={(e) =>
+                      assignNewEmployee(u.uid, e.target.value)
+                    }
+                    className="border rounded px-2 py-1 text-sm"
                   >
                     <option value="" disabled>
                       Assign role…
@@ -333,7 +330,7 @@ export default function ManagerUsersPage() {
             ))}
       </Section>
 
-      {/* ASSIGN */}
+      {/* ASSIGN TRAINEE → TRAINER */}
       <section className="rounded-xl border bg-white p-5">
         <h2 className="font-semibold mb-3">Assign Trainee → Trainer</h2>
 
@@ -414,11 +411,6 @@ function UserRow({
         <div className="font-medium truncate">
           {user.name || user.email}
         </div>
-        {user.email && user.name && (
-          <div className="text-xs text-gray-500 truncate">
-            {user.email}
-          </div>
-        )}
         <div className="text-xs text-gray-600">{roleLabel}</div>
       </div>
 
