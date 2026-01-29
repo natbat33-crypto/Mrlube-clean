@@ -150,6 +150,20 @@ export default function ManagerUsersPage() {
         </Link>
       </header>
 
+      {/* EMPLOYEES (NEW – LINK ONLY) */}
+      <section className="rounded-xl border bg-white p-5">
+        <h2 className="font-semibold mb-2">Employees</h2>
+        <p className="text-sm text-gray-600 mb-3">
+          Manage employee roles and access for this store.
+        </p>
+        <Link
+          href="/manager/employees"
+          className="inline-flex text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
+        >
+          Manage new employees →
+        </Link>
+      </section>
+
       {/* TRAINEES */}
       <Section title="Trainees">
         {trainees.length === 0
