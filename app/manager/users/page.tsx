@@ -44,14 +44,16 @@ export default function ManagerUsersPage() {
   const [trainers, setTrainers] = useState<Emp[]>([]);
   const [managers, setManagers] = useState<Emp[]>([]);
 
-  // 🔴 NEW
-  const [newEmployees, setNewEmployees] = useState<Emp[]>([]);
-
   const [selTrainee, setSelTrainee] = useState("");
   const [selTrainer, setSelTrainer] = useState("");
   const [status, setStatus] = useState("");
 
   const [loading, setLoading] = useState(true);
+
+  // ✅ NEW: toggle + new employees list
+  const [showNewEmployees, setShowNewEmployees] = useState(false);
+  const [newEmployees, setNewEmployees] = useState<Emp[]>([]);
+  const [newEmpStatus, setNewEmpStatus] = useState("");
 
   /* ---------- AUTH ---------- */
   useEffect(() => {
@@ -82,7 +84,7 @@ export default function ManagerUsersPage() {
     })();
   }, [storeId]);
 
-  /* ---------- LOAD ASSIGNED EMPLOYEES ---------- */
+  /* ---------- LOAD EMPLOYEES ---------- */
   useEffect(() => {
     if (!storeId) return;
 
@@ -105,52 +107,77 @@ export default function ManagerUsersPage() {
     })();
   }, [storeId]);
 
-  /* ---------- LOAD NEW EMPLOYEES (NO ROLE YET) ---------- */
-  // 🔴 NEW
+  // ✅ NEW: load "awaiting role" users when panel is opened
   useEffect(() => {
     if (!storeId) return;
+    if (!showNewEmployees) return;
 
     (async () => {
-      const snap = await getDocs(
-        query(
-          collection(db, "users"),
-          where("storeId", "==", storeId)
-        )
-      );
-
-      const awaiting = snap.docs
-        .map((d) => ({ uid: d.id, ...(d.data() as any) }))
-        .filter(
-          (u) =>
-            !u.role &&
-            u.active !== false &&
-            u.uid !== uid // don’t show self
+      try {
+        setNewEmpStatus("Loading…");
+        const snap = await getDocs(
+          query(collection(db, "users"), where("storeId", "==", storeId))
         );
 
-      setNewEmployees(awaiting);
-    })();
-  }, [storeId, uid]);
+        const awaiting = snap.docs
+          .map((d) => ({ uid: d.id, ...(d.data() as any) }))
+          .filter((u) => !u.role && u.active !== false && u.uid !== uid);
 
-  /* ---------- ASSIGN NEW EMPLOYEE ---------- */
-  // 🔴 NEW
+        setNewEmployees(awaiting);
+        setNewEmpStatus("");
+      } catch {
+        setNewEmpStatus("Failed to load");
+      }
+    })();
+  }, [storeId, showNewEmployees, uid]);
+
+  // ✅ NEW: assign role (mirrors admin)
   async function assignNewEmployee(userId: string, role: string) {
     if (!storeId) return;
 
-    await updateDoc(doc(db, "users", userId), {
-      role,
-      active: true,
-    });
+    try {
+      setNewEmpStatus("Assigning…");
 
-    await setDoc(
-      doc(db, "stores", storeId, "employees", userId),
-      { role, active: true },
-      { merge: true }
-    );
+      await updateDoc(doc(db, "users", userId), {
+        role,
+        storeId,
+        active: true,
+      });
 
-    setNewEmployees((prev) => prev.filter((u) => u.uid !== userId));
+      await setDoc(
+        doc(db, "stores", storeId, "employees", userId),
+        { role, active: true },
+        { merge: true }
+      );
+
+      // Remove from awaiting list
+      setNewEmployees((prev) => prev.filter((u) => u.uid !== userId));
+
+      // Refresh employees lists quickly (minimal + safe)
+      const empSnap = await getDocs(
+        query(
+          collection(db, "stores", storeId, "employees"),
+          where("active", "==", true)
+        )
+      );
+
+      const all = empSnap.docs.map((d) => ({
+        uid: d.id,
+        ...(d.data() as any),
+      }));
+
+      setTrainees(all.filter((e) => e.role === "trainee"));
+      setTrainers(all.filter((e) => e.role === "supervisor"));
+      setManagers(all.filter((e) => e.role === "manager"));
+
+      setNewEmpStatus("Assigned ✓");
+      setTimeout(() => setNewEmpStatus(""), 900);
+    } catch {
+      setNewEmpStatus("Failed");
+    }
   }
 
-  /* ---------- ASSIGN TRAINEE → TRAINER ---------- */
+  /* ---------- ASSIGN ---------- */
   async function doAssign() {
     if (!storeId || !selTrainee || !selTrainer) return;
 
@@ -199,43 +226,75 @@ export default function ManagerUsersPage() {
         </Link>
       </header>
 
-      {/* 🔴 NEW EMPLOYEES */}
-      <Section title="New Employees (Awaiting Role)">
-        {newEmployees.length === 0
-          ? "No new employees."
-          : newEmployees.map((u) => (
-              <div
-                key={u.uid}
-                className="flex justify-between items-center gap-4 border rounded-lg p-3 bg-yellow-50"
-              >
-                <div className="min-w-0">
-                  <div className="font-medium truncate">
-                    {u.name || u.email}
-                  </div>
-                  {u.email && u.name && (
-                    <div className="text-xs text-gray-500 truncate">
-                      {u.email}
-                    </div>
-                  )}
-                </div>
+      {/* EMPLOYEES (CLICKABLE) */}
+      <section className="rounded-xl border bg-white p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-semibold mb-2">Employees</h2>
+            <p className="text-sm text-gray-600">
+              Manage employee roles and access for this store.
+            </p>
+          </div>
 
-                <select
-                  className="border rounded px-2 py-1 text-sm"
-                  defaultValue=""
-                  onChange={(e) =>
-                    assignNewEmployee(u.uid, e.target.value)
-                  }
+          {/* keep the "clickable thing" */}
+          <button
+            type="button"
+            onClick={() => setShowNewEmployees((v) => !v)}
+            className="inline-flex text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50 whitespace-nowrap"
+          >
+            {showNewEmployees ? "Hide new employees ←" : "Manage new employees →"}
+          </button>
+        </div>
+
+        {/* panel content */}
+        {showNewEmployees && (
+          <div className="mt-4 space-y-3">
+            {newEmpStatus && (
+              <div className="text-sm text-gray-500">{newEmpStatus}</div>
+            )}
+
+            {newEmployees.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                No new employees waiting for assignment.
+              </p>
+            ) : (
+              newEmployees.map((u) => (
+                <div
+                  key={u.uid}
+                  className="flex justify-between items-center gap-4 border rounded-lg p-3 bg-yellow-50"
                 >
-                  <option value="" disabled>
-                    Assign role…
-                  </option>
-                  <option value="trainee">Trainee</option>
-                  <option value="supervisor">Trainer</option>
-                  <option value="manager">Manager</option>
-                </select>
-              </div>
-            ))}
-      </Section>
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">
+                      {u.name || u.email}
+                    </div>
+                    {u.email && u.name && (
+                      <div className="text-xs text-gray-500 truncate">
+                        {u.email}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-600">
+                      Awaiting role
+                    </div>
+                  </div>
+
+                  <select
+                    className="border rounded px-2 py-1 text-sm"
+                    defaultValue=""
+                    onChange={(e) => assignNewEmployee(u.uid, e.target.value)}
+                  >
+                    <option value="" disabled>
+                      Assign role…
+                    </option>
+                    <option value="trainee">Trainee</option>
+                    <option value="supervisor">Trainer</option>
+                    <option value="manager">Manager</option>
+                  </select>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </section>
 
       {/* TRAINEES */}
       <Section title="Trainees">
