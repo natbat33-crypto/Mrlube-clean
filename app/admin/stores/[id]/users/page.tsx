@@ -133,66 +133,76 @@ export default function StoreUsersPage({
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading users…</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="py-2 text-left">Name</th>
-                  <th className="py-2 text-left">Role</th>
-                  <th className="py-2 text-left">Status</th>
-                  <th className="py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.uid} className="border-b">
-                    <td className="py-2">
-                      <div className="font-medium">{u.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {u.email}
-                      </div>
-                    </td>
-
-                    <td className="py-2 capitalize">
-                      {u.role === "supervisor" ? "Trainer" : u.role}
-                    </td>
-
-                    <td className="py-2">
-                      {u.active ? (
-                        <span className="text-green-600">Active</span>
-                      ) : (
-                        <span className="text-red-600">Inactive</span>
-                      )}
-                    </td>
-
-                    <td className="py-2 text-right space-x-2">
-                      <select
-                        defaultValue=""
-                        onChange={(e) =>
-                          changeRole(u.uid, e.target.value)
-                        }
-                        className="border rounded px-2 py-1 text-xs"
-                      >
-                        <option value="" disabled>
-                          Change role…
-                        </option>
-                        {ROLE_OPTIONS.map((r) => (
-                          <option key={r.value} value={r.value}>
-                            {r.label}
-                          </option>
-                        ))}
-                      </select>
-
-                      <button
-                        onClick={() => toggleActive(u.uid, !u.active)}
-                        className="text-xs underline text-gray-600"
-                      >
-                        {u.active ? "Deactivate" : "Reactivate"}
-                      </button>
-                    </td>
+            <div className="w-full overflow-x-auto">
+              <table className="min-w-[680px] w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b">
+                    <th className="py-2 text-left whitespace-nowrap">
+                      Name
+                    </th>
+                    <th className="py-2 text-left whitespace-nowrap">
+                      Role
+                    </th>
+                    <th className="py-2 text-left whitespace-nowrap">
+                      Status
+                    </th>
+                    <th className="py-2 text-right whitespace-nowrap">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.uid} className="border-b">
+                      <td className="py-2 whitespace-nowrap">
+                        <div className="font-medium">{u.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {u.email}
+                        </div>
+                      </td>
+
+                      <td className="py-2 capitalize whitespace-nowrap">
+                        {u.role === "supervisor" ? "Trainer" : u.role}
+                      </td>
+
+                      <td className="py-2 whitespace-nowrap">
+                        {u.active ? (
+                          <span className="text-green-600">Active</span>
+                        ) : (
+                          <span className="text-red-600">Inactive</span>
+                        )}
+                      </td>
+
+                      <td className="py-2 text-right whitespace-nowrap">
+                        <select
+                          defaultValue=""
+                          onChange={(e) =>
+                            changeRole(u.uid, e.target.value)
+                          }
+                          className="border rounded px-2 py-1 text-xs"
+                        >
+                          <option value="" disabled>
+                            Change role…
+                          </option>
+                          {ROLE_OPTIONS.map((r) => (
+                            <option key={r.value} value={r.value}>
+                              {r.label}
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          onClick={() => toggleActive(u.uid, !u.active)}
+                          className="ml-2 text-xs underline text-gray-600"
+                        >
+                          {u.active ? "Deactivate" : "Reactivate"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
