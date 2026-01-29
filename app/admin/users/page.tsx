@@ -39,7 +39,6 @@ export default function AdminUsersPage() {
   const [stores, setStores] = useState<StoreRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // store selection before role
   const [pendingStore, setPendingStore] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -54,11 +53,10 @@ export default function AdminUsersPage() {
         id: d.id,
       }));
 
-      // ✅ CORRECT pending logic
       const unassignedUsers = allUsers.filter((u) => {
-        if (u.storeId) return false;        // already assigned
-        if (u.role === "admin") return false; // never show admins
-        return true;                        // allow inactive users
+        if (u.storeId) return false;
+        if (u.role === "admin") return false;
+        return true;
       });
 
       const storeRows: StoreRow[] = storesSnap.docs.map((d) => ({
@@ -74,6 +72,31 @@ export default function AdminUsersPage() {
     load();
   }, []);
 
+  /* ----------------------------------------------------
+     🔥 DEACTIVATE USER — CALLS /api/deactivate
+  ---------------------------------------------------- */
+  const deactivateUser = async (userId: string) => {
+    if (!confirm("Deactivate this user?")) return;
+
+    const res = await fetch("/api/deactivate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid: userId }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      alert("Error deactivating user: " + (data.error || "Unknown error"));
+      return;
+    }
+
+    // Remove from UI
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+
+    alert("User deactivated");
+  };
+
   const assignUser = async (
     userId: string,
     role: string,
@@ -81,14 +104,12 @@ export default function AdminUsersPage() {
   ) => {
     if (!storeId) return;
 
-    // update user
     await updateDoc(doc(db, "users", userId), {
       role,
       storeId,
       active: true,
     });
 
-    // add to store employees
     await setDoc(
       doc(db, "stores", storeId, "employees", userId),
       { role, active: true },
@@ -144,6 +165,7 @@ export default function AdminUsersPage() {
                       <td className="py-2 pr-4">{u.name || "—"}</td>
                       <td className="py-2 pr-4">{u.email || "—"}</td>
 
+                      {/* Store dropdown */}
                       <td className="py-2 pr-4">
                         <select
                           className="border rounded px-2 py-1 text-sm"
@@ -166,6 +188,7 @@ export default function AdminUsersPage() {
                         </select>
                       </td>
 
+                      {/* Role dropdown */}
                       <td className="py-2 pr-4">
                         <select
                           className="border rounded px-2 py-1 text-sm"
@@ -190,8 +213,14 @@ export default function AdminUsersPage() {
                         </select>
                       </td>
 
-                      <td className="py-2 pr-4 text-xs text-gray-500">
-                        Assign
+                      {/* 🔥 Deactivate Button */}
+                      <td className="py-2 pr-4">
+                        <button
+                          onClick={() => deactivateUser(u.id)}
+                          className="text-red-600 hover:underline text-xs"
+                        >
+                          Deactivate
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -204,4 +233,3 @@ export default function AdminUsersPage() {
     </RoleGate>
   );
 }
-

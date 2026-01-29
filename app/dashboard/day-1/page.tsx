@@ -74,7 +74,9 @@ export default function Day1Page() {
   }, [uid]);
 
   /* ---------------------------------------
-     Load static task definitions
+     Load static task definitions (FIXED)
+     - Never trust `done` from shared task docs
+     - Always start tasks with done:false, then overlay per-user progress
   ---------------------------------------- */
   useEffect(() => {
     let alive = true;
@@ -88,11 +90,16 @@ export default function Day1Page() {
           setPageTitle(dt.title || dt.name || "Day 1 Orientation");
         }
 
-        // Load tasks
+        // Load tasks (strip shared `done`)
         const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
         const list: Task[] =
           snap.docs
-            .map((d) => ({ id: d.id, ...(d.data() as Partial<Task>) }))
+            .map((d) => {
+              const data = d.data() as Partial<Task>;
+              // ✅ Critical: ignore any `done` stored in shared task definition docs
+              const { done, ...rest } = data;
+              return { id: d.id, ...rest, done: false };
+            })
             .sort(
               (a, b) =>
                 num(a.order ?? a.sort_order ?? 0) -
@@ -119,8 +126,8 @@ export default function Day1Page() {
   }, []);
 
   /* ---------------------------------------
-     ⭐ LOAD USER'S SAVED PROGRESS (THE FIX)
-     This populates `done` for each task
+     LOAD USER'S SAVED PROGRESS (PER-USER TRUTH)
+     This is the ONLY source of checked state.
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
@@ -131,7 +138,7 @@ export default function Day1Page() {
       const map: Record<string, boolean> = {};
 
       snap.forEach((d) => {
-        const data = d.data();
+        const data = d.data() as any;
         if (data.week === "day-1") {
           const parts = d.id.split("__");
           const taskId = parts[parts.length - 1];
@@ -139,6 +146,7 @@ export default function Day1Page() {
         }
       });
 
+      // Overlay per-user progress onto static tasks
       setTasks((prev) =>
         prev.map((t) => ({
           ...t,
@@ -151,7 +159,9 @@ export default function Day1Page() {
   }, [uid]);
 
   /* ---------------------------------------
-     Toggle task complete
+     Toggle task complete (FIXED)
+     - DO NOT write `done` to shared tasks collection
+     - Only write per-user progress (supervisors read this)
   ---------------------------------------- */
   async function toggleTask(id: string, next: boolean) {
     if (!uid) {
@@ -167,13 +177,9 @@ export default function Day1Page() {
     );
 
     try {
-      // Try updating shared (ignore errors)
-      try {
-        await updateDoc(doc(db, "days", "day-1", "tasks", id), {
-          done: next,
-          completedAt: next ? serverTimestamp() : deleteField(),
-        });
-      } catch {}
+      // ❌ Removed: updating shared task definition doc
+      // This was causing global “checked tasks” for new users.
+      // await updateDoc(doc(db, "days", "day-1", "tasks", id), {...})
 
       // Save per-user progress — this is what supervisors read
       const path = `days/day-1/tasks/${id}`;
@@ -221,7 +227,6 @@ export default function Day1Page() {
         completed: true,
         completedAt: serverTimestamp(),
         // DO NOT WRITE approved HERE
-        // approved is authority and must be set only by trainer/supervisor/admin
       },
       { merge: true }
     );
@@ -236,8 +241,7 @@ export default function Day1Page() {
   );
 
   const pct = useMemo(
-    () =>
-      tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0,
+    () => (tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0),
     [doneCount, tasks.length]
   );
 
@@ -286,7 +290,7 @@ export default function Day1Page() {
         </div>
       )}
 
-      {!day1Approved && doneCount === tasks.length && (
+      {!day1Approved && doneCount === tasks.length && tasks.length > 0 && (
         <div
           style={{
             background: "#fff3cd",
@@ -406,5 +410,3 @@ export default function Day1Page() {
     </main>
   );
 }
-
-
