@@ -300,7 +300,29 @@ export default function DashboardPage() {
 
     return () => unsubs.forEach((u) => u());
   }, [traineeUid]);
+/* ---------- SAFETY NET: NORMALIZE WEEK 1 APPROVAL (LEGACY USERS) ---------- */
+useEffect(() => {
+  if (!traineeUid) return;
+  if (approved.week1 === true) return;
 
+  const ref = doc(db, "users", traineeUid, "sections", "week1");
+
+  getDoc(ref)
+    .then((snap) => {
+      if (!snap.exists()) return;
+
+      const data = snap.data() as any;
+
+      // If supervisor already approved week1 earlier but flag is missing,
+      // normalize so gating works permanently
+      if (data?.approvedAt && data?.approved !== true) {
+        setDoc(ref, { approved: true }, { merge: true });
+      }
+    })
+    .catch((e) =>
+      console.error("[dashboard] normalize week1 approval error", e)
+    );
+}, [traineeUid, approved.week1]);
   /* ---------- COMPUTE GATES (AUTHORITATIVE, CURRENT STATE) ---------- */
   useEffect(() => {
     // Week1 requires day1 approved

@@ -86,11 +86,10 @@ export default function SupervisorWeek1Page() {
           )
         );
 
-        // 3️⃣ Only tasks that are done but not approved
+        // ✅ FIX: show ALL week1 tasks (no done-gating)
         const data: ProgDoc[] = progSnap.docs
           .map((d) => ({ id: d.id, ...(d.data() as any) }))
-          .filter((p) => byId[getTaskKey(p.id)])
-          .filter((p) => p.done === true && p.approved !== true);
+          .filter((p) => byId[getTaskKey(p.id)]);
 
         // 4️⃣ Sort by module order
         data.sort((a, b) => {
@@ -115,7 +114,7 @@ export default function SupervisorWeek1Page() {
   }, [traineeId]);
 
   /* ============================================
-     APPROVAL TOGGLE — REAL FIX
+     APPROVAL TOGGLE
   ============================================ */
   async function setApproved(p: ProgDoc, next: boolean) {
     if (!traineeId) return;
@@ -125,7 +124,7 @@ export default function SupervisorWeek1Page() {
       prev.map((x) => (x.id === p.id ? { ...x, approved: next } : x))
     );
 
-    // write approval to task
+    // write approval
     await setDoc(
       doc(db, "users", traineeId, "progress", p.id),
       {
@@ -136,18 +135,16 @@ export default function SupervisorWeek1Page() {
       { merge: true }
     );
 
-    // 🔑 AUTHORITATIVE CHECK — REQUERY FIRESTORE
+    // ✅ FIX: section completion based ONLY on approval
     if (next === true) {
       const remainingSnap = await getDocs(
         query(
           collection(db, "users", traineeId, "progress"),
           where("week", "==", "week1"),
-          where("done", "==", true),
           where("approved", "!=", true)
         )
       );
 
-      // If nothing left unapproved → unlock Week 2
       if (remainingSnap.empty) {
         await setDoc(
           doc(db, "users", traineeId, "sections", "week1"),
@@ -207,7 +204,7 @@ export default function SupervisorWeek1Page() {
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : items.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No completed tasks yet.
+              No tasks yet.
             </p>
           ) : (
             <ul className="space-y-2">
