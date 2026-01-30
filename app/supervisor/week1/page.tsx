@@ -65,30 +65,42 @@ export default function SupervisorWeek1Page() {
   const searchParams = useSearchParams();
   const asParam = searchParams.get("as");
 
-  const [selectedTraineeId, setSelectedTraineeId] = useState<string | null>(
-    asParam
-  );
+  const selectedTraineeId = useMemo(() => {
+    const uid = asParam ?? getStoredReviewUid() ?? "";
+    if (uid) setStoredReviewUid(uid);
+    return uid.trim();
+  }, [asParam]);
 
   const [tasks, setTasks] = useState<TaskMeta[]>([]);
-  const [tasksById, setTasksById] = useState<Record<string, TaskMeta>>({});
   const [progress, setProgress] = useState<ProgressMap>({});
   const [loading, setLoading] = useState(true);
 
   /* ============================================
-     LOCK TRAINEE CONTEXT (SAME AS DAY 1)
+     HARD GUARD — NO TRAINEE, NO READS
   ============================================ */
-  useEffect(() => {
-    if (asParam) {
-      setSelectedTraineeId(asParam);
-      setStoredReviewUid(asParam);
-      return;
-    }
+  if (!selectedTraineeId) {
+    return (
+      <div className="space-y-6">
+        <Link
+          href={`/supervisor`}
+          className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
+        >
+          ← Back to Dashboard
+        </Link>
 
-    const stored = getStoredReviewUid();
-    if (!selectedTraineeId && stored) {
-      setSelectedTraineeId(stored);
-    }
-  }, [asParam, selectedTraineeId]);
+        <Card className="border-primary/20">
+          <CardHeader>
+            <CardTitle>Review — Week 1</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              No trainee selected.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   /* ============================================
      LOAD TASKS
@@ -105,12 +117,9 @@ export default function SupervisorWeek1Page() {
         );
 
         const list: TaskMeta[] = [];
-        const map: Record<string, TaskMeta> = {};
 
         snap.docs.forEach((d) => {
-          const meta = { id: d.id, ...(d.data() as any) };
-          list.push(meta);
-          map[d.id] = meta;
+          list.push({ id: d.id, ...(d.data() as any) });
         });
 
         list.sort((a, b) => {
@@ -121,7 +130,6 @@ export default function SupervisorWeek1Page() {
 
         if (!alive) return;
         setTasks(list);
-        setTasksById(map);
       } catch (e) {
         console.error("[Supervisor Week1] task load error:", e);
       } finally {
@@ -135,11 +143,9 @@ export default function SupervisorWeek1Page() {
   }, []);
 
   /* ============================================
-     LISTEN TO TRAINEE PROGRESS
+     LISTEN TO TRAINEE PROGRESS (SCOPED)
   ============================================ */
   useEffect(() => {
-    if (!selectedTraineeId) return;
-
     const qRef = query(
       collection(db, "users", selectedTraineeId, "progress"),
       where("week", "==", "week1")
@@ -161,10 +167,10 @@ export default function SupervisorWeek1Page() {
   }, [selectedTraineeId]);
 
   /* ============================================
-     AUTO-SET SECTION APPROVAL
+     AUTO-SET SECTION APPROVAL (SCOPED)
   ============================================ */
   useEffect(() => {
-    if (!selectedTraineeId || tasks.length === 0) return;
+    if (tasks.length === 0) return;
 
     const allApproved =
       tasks.length > 0 &&
@@ -180,14 +186,12 @@ export default function SupervisorWeek1Page() {
     ).catch((e) =>
       console.error("[Week1 supervisor] section approval write:", e)
     );
-  }, [selectedTraineeId, tasks, progress]);
+  }, [tasks, progress, selectedTraineeId]);
 
   /* ============================================
      APPROVE / UNAPPROVE TASK
   ============================================ */
   async function toggleApprove(taskId: string, next: boolean) {
-    if (!selectedTraineeId) return;
-
     const key = `modules__week1__tasks__${taskId}`;
 
     await setDoc(
@@ -223,7 +227,7 @@ export default function SupervisorWeek1Page() {
   return (
     <div className="space-y-6">
       <Link
-        href={`/supervisor?as=${selectedTraineeId ?? ""}`}
+        href={`/supervisor?as=${selectedTraineeId}`}
         className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
       >
         ← Back to Dashboard
