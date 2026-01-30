@@ -3,7 +3,6 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { db, auth } from "@/lib/firebase";
 import { getStoreId } from "@/lib/getStoreId";
 import {
@@ -16,6 +15,7 @@ import {
   serverTimestamp,
   deleteField,
   onSnapshot,
+  where,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -27,28 +27,37 @@ type Task = {
   title?: string;
   order?: number;
   sort_order?: number;
+  required?: boolean;
   done?: boolean;
 };
 
+type Approvals = Record<string, boolean>;
+
 const YELLOW = "#FFC20E";
+const NAVY = "#0b3d91";
 const GREEN = "#2e7d32";
 const GRAY = "#e9e9ee";
 
 /* ----------------------------------
-   MAIN
+   MAIN COMPONENT
 ---------------------------------- */
 export default function Week3Page() {
-  const router = useRouter();
-
   const [uid, setUid] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [week2Approved, setWeek2Approved] = useState<boolean | null>(null);
 
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [approvedById, setApprovedById] = useState<Record<string, boolean>>({});
+  const [approvedById, setApprovedById] = useState<Approvals>({});
+  const [weekApproved, setWeekApproved] = useState<boolean>(false);
+
+  const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  /* ---------- AUTH ---------- */
+  // 🔒 Week 2 authority
+  const [week2Approved, setWeek2Approved] = useState<boolean | null>(null);
+
+  /* ----------------------------------
+     AUTH
+  ---------------------------------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUid(u?.uid ?? null);
@@ -57,32 +66,49 @@ export default function Week3Page() {
     return unsub;
   }, []);
 
-  /* ---------- WEEK 2 GUARD ---------- */
+  /* ----------------------------------
+     🔒 WEEK 2 AUTHORITY (LIVE)
+  ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
-    return onSnapshot(doc(db, "users", uid, "sections", "week2"), (snap) => {
+
+    const ref = doc(db, "users", uid, "sections", "week2");
+    const unsub = onSnapshot(ref, (snap) => {
       setWeek2Approved(snap.exists() && snap.data()?.approved === true);
     });
+
+    return unsub;
   }, [uid]);
 
-  /* ---------- LOAD TASKS ---------- */
+  /* ----------------------------------
+     LOAD WEEK 3 TASKS
+  ---------------------------------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
-      const snap = await getDocs(
-        query(collection(db, "modules", "week3", "tasks"), orderBy("order", "asc"))
-      );
+      try {
+        const col = collection(db, "modules", "week3", "tasks");
+        const q = query(col, orderBy("order", "asc"));
+        const snap = await getDocs(q);
 
-      const list = snap.docs.map((d) => ({
-        id: d.id,
-        ...(d.data() as any),
-        done: false,
-      }));
+        const list: Task[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Partial<Task>),
+          done: false,
+        }));
 
-      if (alive) {
-        setTasks(list);
-        setLoading(false);
+        if (alive) {
+          setTasks(list);
+          setErr(null);
+        }
+      } catch (e: any) {
+        if (alive) {
+          setErr(e?.message ?? String(e));
+          setTasks([]);
+        }
+      } finally {
+        if (alive) setLoading(false);
       }
     })();
 
@@ -91,161 +117,301 @@ export default function Week3Page() {
     };
   }, []);
 
-  /* ---------- HYDRATE DONE ---------- */
-  useEffect(() => {
-    if (!uid || !tasks.length) return;
-
-    (async () => {
-      const snap = await getDocs(collection(db, "users", uid, "progress"));
-      const done: Record<string, boolean> = {};
-
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        if (data.week !== "week3" || !data.done) return;
-        const id = d.id.split("__").pop();
-        if (id) done[id] = true;
-      });
-
-      setTasks((prev) => prev.map((t) => ({ ...t, done: !!done[t.id] })));
-    })();
-  }, [uid, tasks.length]);
-
-  /* ---------- LIVE APPROVAL BADGES ---------- */
+  /* ----------------------------------
+     WHOLE WEEK APPROVAL
+  ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
 
-    const unsubs = tasks.map((t) =>
-      onSnapshot(
-        doc(db, "users", uid, "progress", `modules__week3__tasks__${t.id}`),
-        (snap) =>
-          setApprovedById((p) => ({ ...p, [t.id]: !!snap.data()?.approved }))
-      )
-    );
+    const ref = doc(db, "users", uid, "sections", "week3");
+    const unsub = onSnapshot(ref, (snap) => {
+      setWeekApproved(snap.data()?.approved === true);
+    });
+
+    return unsub;
+  }, [uid]);
+
+  /* ----------------------------------
+     PER-TASK APPROVALS
+  ---------------------------------- */
+  useEffect(() => {
+    if (!uid || tasks.length === 0) return;
+
+    const unsubs = tasks.map((task) => {
+      const key = `modules__week3__tasks__${task.id}`;
+      return onSnapshot(doc(db, "users", uid, "progress", key), (snap) => {
+        setApprovedById((prev) => ({
+          ...prev,
+          [task.id]: !!snap.data()?.approved,
+        }));
+      });
+    });
 
     return () => unsubs.forEach((u) => u());
   }, [uid, tasks]);
 
-  /* ---------- TOGGLE DONE ---------- */
-  async function toggleTask(id: string, next: boolean) {
+  /* ----------------------------------
+     LOAD DONE FLAGS
+  ---------------------------------- */
+  useEffect(() => {
+    if (!uid || tasks.length === 0) return;
+
+    (async () => {
+      try {
+        const snap = await getDocs(
+          query(
+            collection(db, "users", uid, "progress"),
+            where("week", "==", "week3")
+          )
+        );
+
+        const doneMap: Record<string, boolean> = {};
+        snap.forEach((d) => {
+          if (!d.data()?.done) return;
+          const parts = d.id.split("__");
+          doneMap[parts[parts.length - 1]] = true;
+        });
+
+        setTasks((prev) =>
+          prev.map((t) => ({ ...t, done: !!doneMap[t.id] }))
+        );
+      } catch (e) {
+        console.error("[Week3] load done error:", e);
+      }
+    })();
+  }, [uid, tasks.length]);
+
+  /* ----------------------------------
+     AUTO CREATE SECTION (COMPLETE ONLY)
+  ---------------------------------- */
+  useEffect(() => {
     if (!uid) return;
 
-    setTasks((p) => p.map((t) => (t.id === id ? { ...t, done: next } : t)));
+    const allDone = tasks.length > 0 && tasks.every((t) => t.done);
+    if (!allDone) return;
 
-    const storeId = await getStoreId();
-    await setDoc(
-      doc(db, "users", uid, "progress", `modules__week3__tasks__${id}`),
+    setDoc(
+      doc(db, "users", uid, "sections", "week3"),
       {
-        week: "week3",
-        done: next,
-        storeId: storeId || "",
-        traineeId: uid,
-        updatedAt: serverTimestamp(),
+        completed: true,
+        completedAt: serverTimestamp(),
       },
       { merge: true }
     );
-  }
+  }, [uid, tasks]);
 
-  /* ---------- AUTO COMPLETE ---------- */
-  useEffect(() => {
+  /* ----------------------------------
+     TOGGLE DONE
+  ---------------------------------- */
+  async function toggleTask(id: string, next: boolean) {
     if (!uid) return;
-    if (tasks.length && tasks.every((t) => t.done)) {
-      setDoc(
-        doc(db, "users", uid, "sections", "week3"),
-        { completed: true, completedAt: serverTimestamp() },
+
+    setTasks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, done: next } : t))
+    );
+
+    try {
+      const storeId = await getStoreId();
+      const task = tasks.find((t) => t.id === id);
+      const key = `modules__week3__tasks__${id}`;
+
+      await setDoc(
+        doc(db, "users", uid, "progress", key),
+        {
+          storeId: storeId || "",
+          traineeId: uid,
+          createdBy: uid,
+          week: "week3",
+          title: task?.title ?? id,
+          done: next,
+          completedAt: next ? serverTimestamp() : deleteField(),
+          updatedAt: serverTimestamp(),
+        },
         { merge: true }
       );
+    } catch (e) {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, done: !next } : t))
+      );
     }
-  }, [uid, tasks]);
+  }
+
+  /* ----------------------------------
+     DERIVED
+  ---------------------------------- */
+  const locked = week2Approved === false;
+
+  const doneCount = useMemo(() => tasks.filter((t) => t.done).length, [tasks]);
+  const pct = useMemo(
+    () => (tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0),
+    [doneCount, tasks.length]
+  );
 
   if (authLoading || loading || week2Approved === null) {
     return <main style={{ padding: 24 }}>Loading…</main>;
   }
 
-  if (!week2Approved) {
-    return (
-      <main style={{ padding: 24 }}>
-        <Link href="/dashboard">← Back</Link>
-        <p style={{ marginTop: 16, fontWeight: 700 }}>
-          Week 3 is locked. Week 2 must be approved.
-        </p>
-      </main>
-    );
-  }
-
-  const doneCount = tasks.filter((t) => t.done).length;
-  const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
-
-  /* ---------- UI ---------- */
+  /* ----------------------------------
+     UI (MIRRORED FROM WEEK 1)
+  ---------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <Link href="/dashboard">← Back to Dashboard</Link>
+      <div style={{ marginBottom: 16 }}>
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#fff",
+            border: `1px solid ${GRAY}`,
+            borderRadius: 999,
+            padding: "8px 14px",
+            fontWeight: 600,
+            textDecoration: "none",
+            color: NAVY,
+          }}
+        >
+          ← Back to Dashboard
+        </Link>
+      </div>
 
-      <h2 style={{ marginTop: 12 }}>Week 3</h2>
-      <div style={{ fontSize: 14, marginBottom: 6 }}>
+      {locked && (
+        <div
+          style={{
+            background: "#f1f3f4",
+            border: "1px solid #dadce0",
+            padding: "12px 16px",
+            borderRadius: 8,
+            marginBottom: 16,
+            fontWeight: 600,
+            color: "#5f6368",
+          }}
+        >
+          Complete and get Week 2 approved to unlock Week 3.
+        </div>
+      )}
+
+      <h2 style={{ marginBottom: 6, opacity: locked ? 0.6 : 1 }}>
+        Week 3 — Tasks
+      </h2>
+
+      <div style={{ fontSize: 14, marginBottom: 6, opacity: locked ? 0.6 : 1 }}>
         {doneCount}/{tasks.length} completed ({pct}%)
       </div>
 
-      <div style={{ height: 12, background: "#ddd", borderRadius: 999 }}>
+      <div
+        style={{
+          height: 12,
+          background: "#d9d9df",
+          borderRadius: 999,
+          overflow: "hidden",
+          marginBottom: 18,
+          opacity: locked ? 0.5 : 1,
+        }}
+      >
         <div
           style={{
-            width: `${pct}%`,
             height: "100%",
+            width: `${pct}%`,
             background: YELLOW,
-            borderRadius: 999,
           }}
         />
       </div>
 
-      <ul style={{ listStyle: "none", padding: 0, marginTop: 18 }}>
-        {tasks.map((t, i) => (
-          <li
-            key={t.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: 14,
-              borderRadius: 12,
-              background: "#fff",
-              border: `1px solid ${t.done ? "#d6ead8" : GRAY}`,
-              marginBottom: 10,
-            }}
-          >
-            <button
-              onClick={() => toggleTask(t.id, !t.done)}
+      {err && <p style={{ color: "crimson" }}>{err}</p>}
+
+      <ul
+        style={{
+          listStyle: "none",
+          padding: 0,
+          display: "grid",
+          gap: 10,
+          opacity: locked ? 0.6 : 1,
+          pointerEvents: locked ? "none" : "auto",
+        }}
+      >
+        {tasks.map((t, index) => {
+          const order = t.order ?? t.sort_order ?? index + 1;
+          const done = !!t.done;
+          const approved = !!approvedById[t.id];
+
+          return (
+            <li
+              key={t.id}
               style={{
-                width: 22,
-                height: 22,
-                borderRadius: "50%",
-                border: t.done ? `2px solid ${GREEN}` : `2px solid ${GRAY}`,
-                background: t.done ? GREEN : "#fff",
-                color: "#fff",
-                fontWeight: 900,
-                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "#fff",
+                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
+                position: "relative",
               }}
             >
-              {t.done ? "✓" : ""}
-            </button>
+              <span
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 5,
+                  background: done ? GREEN : "transparent",
+                  borderTopLeftRadius: 12,
+                  borderBottomLeftRadius: 12,
+                }}
+              />
 
-            <div style={{ fontWeight: 600 }}>
-              {(t.order ?? i + 1)}. {t.title}
-              {approvedById[t.id] && (
-                <span
-                  style={{
-                    marginLeft: 8,
-                    fontSize: 12,
-                    background: "#e6f4ea",
-                    color: GREEN,
-                    padding: "2px 8px",
-                    borderRadius: 999,
-                  }}
+              <button
+                onClick={() => toggleTask(t.id, !done)}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
+                  background: done ? GREEN : "#fff",
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  stroke={done ? "#fff" : "transparent"}
+                  strokeWidth="3"
+                  fill="none"
                 >
-                  Approved ✓
-                </span>
-              )}
-            </div>
-          </li>
-        ))}
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 600 }}>
+                  {order}. {t.title ?? t.id}
+                </div>
+
+                {approved && (
+                  <span
+                    style={{
+                      fontSize: 12,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: "#e7f6ec",
+                      border: "1px solid #c7e8d3",
+                      color: "#1b5e20",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Approved ✓
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </main>
   );

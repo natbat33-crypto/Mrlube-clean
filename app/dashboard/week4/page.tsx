@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { db, auth } from "@/lib/firebase";
+import { getStoreId } from "@/lib/getStoreId";
 import {
   collection,
   doc,
@@ -11,13 +12,11 @@ import {
   orderBy,
   query,
   setDoc,
-  updateDoc,
   serverTimestamp,
   deleteField,
   onSnapshot,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-import { getStoreId } from "@/lib/getStoreId";
 
 /* ----------------------------------
    TYPES
@@ -27,7 +26,6 @@ type Task = {
   title?: string;
   order?: number;
   sort_order?: number;
-  required?: boolean;
   done?: boolean;
   lastMs?: number;
   bestMs?: number;
@@ -52,17 +50,20 @@ function msToClock(ms?: number): string {
   return `${m}:${s}`;
 }
 
+/* ----------------------------------
+   MAIN
+---------------------------------- */
 export default function Week4Page() {
   const [uid, setUid] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // 🔒 AUTHORITY — Week 3 must be approved
+  // 🔒 Week 3 authority
   const [week3Approved, setWeek3Approved] = useState<boolean | null>(null);
 
   const [baseTasks, setBaseTasks] = useState<Task[]>([]);
   const [statsById, setStatsById] = useState<Record<string, any>>({});
-  const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   /* ----------------------------------
      AUTH
@@ -76,22 +77,14 @@ export default function Week4Page() {
   }, []);
 
   /* ----------------------------------
-     🔒 AUTHORITY GUARD — Week 3 REQUIRED
-     users/{uid}/sections/week3.approved
+     🔒 WEEK 3 AUTHORITY (LIVE)
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
     const ref = doc(db, "users", uid, "sections", "week3");
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
-        const ok = snap.exists() && snap.data()?.approved === true;
-        setWeek3Approved(ok);
-      },
-      () => setWeek3Approved(false)
-    );
-
+    const unsub = onSnapshot(ref, (snap) => {
+      setWeek3Approved(snap.exists() && snap.data()?.approved === true);
+    });
     return unsub;
   }, [uid]);
 
@@ -107,16 +100,11 @@ export default function Week4Page() {
           orderBy("order", "asc")
         );
         const snap = await getDocs(qy);
-        const list: Task[] = snap.docs
-          .map((d) => {
-            const { done, ...rest } = d.data() as any;
-            return { id: d.id, ...(rest as Partial<Task>) };
-          })
-          .sort(
-            (a, b) =>
-              num(a.order ?? a.sort_order) -
-              num(b.order ?? b.sort_order)
-          );
+        const list: Task[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Partial<Task>),
+          done: false,
+        }));
         if (alive) setBaseTasks(list);
       } catch (e: any) {
         if (alive) {
@@ -133,16 +121,18 @@ export default function Week4Page() {
   }, []);
 
   /* ----------------------------------
-     LIVE PER-USER STATS
+     LIVE PER-TASK STATS
   ---------------------------------- */
   useEffect(() => {
     if (!uid || !baseTasks.length) return;
+
     const unsubs = baseTasks.map((t) => {
       const key = `modules__week4__tasks__${t.id}`;
       return onSnapshot(doc(db, "users", uid, "progress", key), (snap) => {
         setStatsById((prev) => ({ ...prev, [t.id]: snap.data() || {} }));
       });
     });
+
     return () => unsubs.forEach((u) => u());
   }, [uid, baseTasks]);
 
@@ -152,7 +142,7 @@ export default function Week4Page() {
       return {
         ...t,
         order: t.order ?? t.sort_order ?? idx + 1,
-        done: s.done,
+        done: !!s.done,
         lastMs: s.lastMs,
         bestMs: s.bestMs,
         avgMs: s.avgMs,
@@ -165,7 +155,7 @@ export default function Week4Page() {
   const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
   /* ----------------------------------
-     TOGGLE TASK
+     TOGGLE DONE
   ---------------------------------- */
   async function toggleTask(id: string, next: boolean) {
     if (!uid) return;
@@ -176,8 +166,8 @@ export default function Week4Page() {
     }));
 
     try {
-      const key = `modules__week4__tasks__${id}`;
       const storeId = await getStoreId();
+      const key = `modules__week4__tasks__${id}`;
 
       await setDoc(
         doc(db, "users", uid, "progress", key),
@@ -199,8 +189,7 @@ export default function Week4Page() {
   }
 
   /* ----------------------------------
-     ✅ AUTO-CREATE sections/week4
-     (NO approved written)
+     AUTO-CREATE SECTION (COMPLETE ONLY)
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
@@ -217,51 +206,165 @@ export default function Week4Page() {
     );
   }, [uid, tasks]);
 
-  /* ----------------------------------
-     BLOCK UNTIL AUTH KNOWN
-  ---------------------------------- */
   if (authLoading || loading || week3Approved === null) {
     return <main style={{ padding: 24 }}>Loading…</main>;
   }
 
-  /* ----------------------------------
-     LOCKED VIEW
-  ---------------------------------- */
-  if (week3Approved === false) {
-    return (
-      <main style={{ padding: 24 }}>
-        <Link href="/dashboard">← Back to Dashboard</Link>
-        <p style={{ marginTop: 16, fontWeight: 700 }}>
-          Week 4 is locked. Week 3 must be approved.
-        </p>
-      </main>
-    );
-  }
+  const locked = week3Approved === false;
 
   /* ----------------------------------
-     NORMAL UI
+     UI — MIRRORED FROM WEEK 1
   ---------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <Link href="/dashboard">← Back to Dashboard</Link>
-      <h2>Week 4 — Timed Tasks</h2>
-      <div>{doneCount}/{tasks.length} completed ({pct}%)</div>
+      <div style={{ marginBottom: 16 }}>
+        <Link
+          href="/dashboard"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#fff",
+            border: `1px solid ${GRAY}`,
+            borderRadius: 999,
+            padding: "8px 14px",
+            fontWeight: 600,
+            textDecoration: "none",
+            color: NAVY,
+          }}
+        >
+          ← Back to Dashboard
+        </Link>
+      </div>
 
-      <ul style={{ listStyle: "none", padding: 0 }}>
-        {tasks.map((t) => (
-          <li key={t.id} style={{ padding: 12, border: "1px solid #ddd" }}>
-            <button onClick={() => toggleTask(t.id, !t.done)}>
-              {t.done ? "✓" : "○"}
-            </button>{" "}
-            {t.title}
-          </li>
-        ))}
+      {locked && (
+        <div
+          style={{
+            background: "#f1f3f4",
+            border: "1px solid #dadce0",
+            padding: "12px 16px",
+            borderRadius: 8,
+            marginBottom: 16,
+            fontWeight: 600,
+            color: "#5f6368",
+          }}
+        >
+          Complete and get Week 3 approved to unlock Week 4.
+        </div>
+      )}
+
+      <h2 style={{ marginBottom: 6, opacity: locked ? 0.6 : 1 }}>
+        Week 4 — Timed Tasks
+      </h2>
+
+      <div style={{ fontSize: 14, marginBottom: 6, opacity: locked ? 0.6 : 1 }}>
+        {doneCount}/{tasks.length} completed ({pct}%)
+      </div>
+
+      <div
+        style={{
+          height: 12,
+          background: "#d9d9df",
+          borderRadius: 999,
+          overflow: "hidden",
+          marginBottom: 18,
+          opacity: locked ? 0.5 : 1,
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: YELLOW,
+          }}
+        />
+      </div>
+
+      {err && <p style={{ color: "crimson" }}>{err}</p>}
+
+      <ul
+        style={{
+          listStyle: "none",
+          padding: 0,
+          display: "grid",
+          gap: 10,
+          opacity: locked ? 0.6 : 1,
+          pointerEvents: locked ? "none" : "auto",
+        }}
+      >
+        {tasks.map((t, index) => {
+          const order = t.order ?? t.sort_order ?? index + 1;
+          const done = t.done;
+
+          return (
+            <li
+              key={t.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "#fff",
+                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
+                position: "relative",
+              }}
+            >
+              <span
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 5,
+                  background: done ? GREEN : "transparent",
+                  borderTopLeftRadius: 12,
+                  borderBottomLeftRadius: 12,
+                }}
+              />
+
+              <button
+                onClick={() => toggleTask(t.id, !done)}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
+                  background: done ? GREEN : "#fff",
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  stroke={done ? "#fff" : "transparent"}
+                  strokeWidth="3"
+                  fill="none"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ fontWeight: 600 }}>
+                  {order}. {t.title ?? t.id}
+                </div>
+
+                <div style={{ fontSize: 12, color: "#5f6368" }}>
+                  Last: {msToClock(t.lastMs)} • Best: {msToClock(t.bestMs)} • Avg:{" "}
+                  {msToClock(t.avgMs)} • Runs: {t.count ?? 0}
+                </div>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </main>
   );
 }
-
-
 
 
 
