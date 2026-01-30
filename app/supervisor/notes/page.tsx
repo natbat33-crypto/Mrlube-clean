@@ -175,7 +175,7 @@ export default function SupervisorNotesPage() {
     if (traineeUid) localStorage.setItem("supNotesTrainee", traineeUid);
   }, [traineeUid]);
 
-  /* ----- build trainee dropdown (emails instead of raw UID) ----- */
+  /* ----- build trainee dropdown (FIX: resolve name/email from users/{uid}) ----- */
   useEffect(() => {
     (async () => {
       if (!storeId || !meUid) return;
@@ -192,20 +192,29 @@ export default function SupervisorNotesPage() {
       const options: TraineeOption[] = [];
 
       for (const d of qs.docs) {
-        const traineeId = d.id;
         const data = d.data() as any;
 
-        const name =
-          data.name || data.displayName || data.traineeName || null;
-        const email =
-          data.email || data.traineeEmail || data.userEmail || null;
+        // ✅ FIX: support either doc.id OR traineeId field
+        const traineeId = String(data.traineeId || d.id);
+
+        // ✅ FIX: pull display info from users/{traineeId}
+        let uName: string | null = null;
+        let uEmail: string | null = null;
+
+        try {
+          const userSnap = await getDoc(doc(db, "users", traineeId));
+          const u = userSnap.exists() ? (userSnap.data() as any) : null;
+          uName = u?.displayName || u?.name || null;
+          uEmail = u?.email || null;
+        } catch {
+          // ignore, fallback below
+        }
 
         let label = traineeId;
-        if (email && name) label = `${name} — ${email}`;
-        else if (email) label = email;
-        else if (name) label = `${name} — ${traineeId}`;
+        if (uEmail && uName) label = `${uName} — ${uEmail}`;
+        else if (uEmail) label = uEmail;
+        else if (uName) label = `${uName} — ${traineeId}`;
 
-        // fallback already covers any weird docs
         options.push({ id: traineeId, label });
       }
 
@@ -557,10 +566,6 @@ export default function SupervisorNotesPage() {
     </main>
   );
 }
-
-
-
-
 
 
 
