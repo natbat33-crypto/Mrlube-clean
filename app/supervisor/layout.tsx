@@ -19,6 +19,9 @@ import { signOut, onAuthStateChanged } from "firebase/auth";
 import RoleGate from "@/components/RoleGate";
 import { doc, getDoc } from "firebase/firestore";
 
+/* ✅ ADD THIS IMPORT */
+import { SupervisorSelectionProvider } from "./SupervisorSelectionProvider";
+
 export default function SupervisorLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -195,7 +198,7 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
               </div>
             )}
 
-            {/* SIGN OUT — uses router.replace so no 404 */}
+            {/* SIGN OUT */}
             <button
               onClick={async () => {
                 try {
@@ -218,20 +221,21 @@ export default function SupervisorLayout({ children }: { children: ReactNode }) 
           />
         )}
 
-        {/* MAIN */}
-        <main
-          className={`transition-all duration-300 p-4 lg:p-6 ${
-            open ? "lg:ml-64" : ""
-          }`}
-        >
-          {children}
+        {/* MAIN — WRAPPED ONCE */}
+        <SupervisorSelectionProvider storeId={storeId}>
+          <main
+            className={`transition-all duration-300 p-4 lg:p-6 ${
+              open ? "lg:ml-64" : ""
+            }`}
+          >
+            {children}
 
-          <footer className="mt-6 pt-4 text-center text-xs text-gray-500 border-t">
-            © {new Date().getFullYear()} Mr. Lube. All rights reserved.
-          </footer>
-        </main>
+            <footer className="mt-6 pt-4 text-center text-xs text-gray-500 border-t">
+              © {new Date().getFullYear()} Mr. Lube. All rights reserved.
+            </footer>
+          </main>
+        </SupervisorSelectionProvider>
       </div>
     </RoleGate>
   );
 }
-
