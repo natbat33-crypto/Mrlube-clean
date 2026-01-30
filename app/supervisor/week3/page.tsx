@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
@@ -93,38 +93,29 @@ function getTaskKey(p: ProgDoc): string {
 }
 
 /* ============================================
-   Fetch Week 3 progress
+   Fetch Week 3 progress (SCOPED!)
+   ONLY from users/{selectedTraineeUid}/progress
 ============================================ */
-async function fetchProgressForWeek3(storeId: string) {
-  const traineesSnap = await getDocs(
-    collection(db, "stores", storeId, "trainees")
+async function fetchProgressForWeek3(storeId: string, selectedTraineeUid: string) {
+  if (!storeId || !selectedTraineeUid) return { docs: [] as ProgDoc[] };
+
+  const q = query(
+    collection(db, "users", selectedTraineeUid, "progress"),
+    where("week", "==", "week3"),
+    where("done", "==", true),
+    where("storeId", "==", storeId)
   );
 
-  const traineeIds: string[] = [];
-  traineesSnap.forEach((d) => {
-    const t = d.data() as any;
-    if (t.active === true) traineeIds.push(d.id);
-  });
+  const snap = await getDocs(q);
 
   const docs: ProgDoc[] = [];
-
-  for (const traineeId of traineeIds) {
-    const q = query(
-      collection(db, "users", traineeId, "progress"),
-      where("week", "==", "week3"),
-      where("done", "==", true),
-      where("storeId", "==", storeId)
-    );
-
-    const snap = await getDocs(q);
-    snap.forEach((d) => {
-      docs.push({
-        id: d.id,
-        traineeId,
-        ...(d.data() as any),
-      });
+  snap.forEach((d) => {
+    docs.push({
+      id: d.id,
+      traineeId: selectedTraineeUid,
+      ...(d.data() as any),
     });
-  }
+  });
 
   return { docs };
 }
@@ -134,21 +125,34 @@ async function fetchProgressForWeek3(storeId: string) {
 ============================================ */
 export default function SupervisorWeek3Page() {
   const searchParams = useSearchParams();
+
+  // Your dashboard uses ?as=... as the selected trainee UID.
+  // Keep that, but enforce it everywhere.
   const asParam = searchParams.get("as");
-  const reviewUid = asParam ?? getStoredReviewUid() ?? "";
+  const selectedTraineeUid = useMemo(() => {
+    return (asParam ?? getStoredReviewUid() ?? "").trim();
+  }, [asParam]);
 
   const [storeId, setStoreId] = useState("");
   const [tasksById, setTasksById] = useState<Record<string, TaskMeta>>({});
   const [items, setItems] = useState<ProgDoc[]>([]);
   const [loading, setLoading] = useState(true);
 
-  /* ---------- Load store, tasks, progress ---------- */
+  /* ---------- Load store, tasks, progress (rerun when trainee changes) ---------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
       try {
         setLoading(true);
+
+        // If no trainee selected, do NOT read anything.
+        if (!selectedTraineeUid) {
+          if (!alive) return;
+          setItems([]);
+          setLoading(false);
+          return;
+        }
 
         const sid = await resolveStoreId();
         if (!alive) return;
@@ -166,9 +170,13 @@ export default function SupervisorWeek3Page() {
         taskSnap.docs.forEach((d) => {
           byId[d.id] = { id: d.id, ...(d.data() as any) };
         });
+        if (!alive) return;
         setTasksById(byId);
 
-        const { docs } = await fetchProgressForWeek3(sid);
+        // ✅ THIS is the invariant:
+        // supervisor reads progress ONLY from users/{selectedTraineeUid}/progress
+        const { docs } = await fetchProgressForWeek3(sid, selectedTraineeUid);
+
         let data = docs.filter((d) => d.week === "week3" && d.done);
 
         data.sort((a, b) => {
@@ -190,36 +198,25 @@ export default function SupervisorWeek3Page() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [selectedTraineeUid]);
 
-  /* ---------- Section enforcement ---------- */
+  /* ---------- Section enforcement (SCOPED!) ---------- */
   useEffect(() => {
+    if (!selectedTraineeUid) return;
     if (items.length === 0) return;
 
-    const byTrainee: Record<string, ProgDoc[]> = {};
+    const allApproved =
+      items.length > 0 && items.every((d) => d.approved === true);
 
-    items.forEach((p) => {
-      if (!p.traineeId) return;
-      byTrainee[p.traineeId] ||= [];
-      byTrainee[p.traineeId].push(p);
-    });
-
-    Object.entries(byTrainee).forEach(([traineeId, docs]) => {
-      const allApproved =
-        docs.length > 0 && docs.every((d) => d.approved === true);
-
-      setDoc(
-        doc(db, "users", traineeId, "sections", "week3"),
-        {
-          approved: allApproved,
-          approvedAt: allApproved ? serverTimestamp() : deleteField(),
-        },
-        { merge: true }
-      ).catch((e) =>
-        console.error("[Week3 enforce] error:", e)
-      );
-    });
-  }, [items]);
+    setDoc(
+      doc(db, "users", selectedTraineeUid, "sections", "week3"),
+      {
+        approved: allApproved,
+        approvedAt: allApproved ? serverTimestamp() : deleteField(),
+      },
+      { merge: true }
+    ).catch((e) => console.error("[Week3 enforce] error:", e));
+  }, [items, selectedTraineeUid]);
 
   /* ---------- Approval toggle ---------- */
   async function setApproved(p: ProgDoc, next: boolean) {
@@ -228,10 +225,10 @@ export default function SupervisorWeek3Page() {
     );
 
     try {
-      if (!p.traineeId) throw new Error("Missing traineeId");
+      if (!selectedTraineeUid) throw new Error("No trainee selected");
 
       await setDoc(
-        doc(db, "users", p.traineeId, "progress", p.id),
+        doc(db, "users", selectedTraineeUid, "progress", p.id),
         {
           approved: next,
           approvedAt: next ? serverTimestamp() : deleteField(),
@@ -252,10 +249,33 @@ export default function SupervisorWeek3Page() {
   const waiting = items.filter((i) => i.done && !i.approved).length;
   const pct = reviewed ? Math.round((approved / reviewed) * 100) : 0;
 
+  // ✅ If no trainee selected, be explicit and do NOT show anyone's data.
+  if (!selectedTraineeUid) {
+    return (
+      <div className="space-y-6">
+        <Link
+          href={`/supervisor`}
+          className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
+        >
+          ← Back to Dashboard
+        </Link>
+
+        <Card className="border-primary/20">
+          <CardHeader>
+            <CardTitle>Review — Week 3</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">No trainee selected.</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <Link
-        href={`/supervisor?as=${reviewUid}`}
+        href={`/supervisor?as=${selectedTraineeUid}`}
         className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
       >
         ← Back to Dashboard
@@ -290,7 +310,7 @@ export default function SupervisorWeek3Page() {
 
                 return (
                   <li
-                    key={p.id + "_" + p.traineeId}
+                    key={p.id}
                     className="flex items-center justify-between gap-3 border rounded-md p-3 bg-white"
                   >
                     <div className="font-semibold text-sm break-words">
@@ -318,4 +338,3 @@ export default function SupervisorWeek3Page() {
     </div>
   );
 }
-
