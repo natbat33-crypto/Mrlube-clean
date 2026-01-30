@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useRef, useState, useMemo } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import {
   addDoc,
@@ -16,12 +17,45 @@ import {
   setDoc,
   where,
   getDoc,
-  deleteField,
 } from "firebase/firestore";
 
 /* -------------------------------------- */
 /* Helpers                                */
 /* -------------------------------------- */
+
+function getStoredReviewUid(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("reviewUid");
+}
+
+function setStoredReviewUid(uid: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("reviewUid", uid);
+}
+
+async function resolveStoreId(): Promise<string> {
+  const u = auth.currentUser;
+
+  if (u) {
+    const tok = await u.getIdTokenResult(true);
+    if (tok?.claims?.storeId) return String(tok.claims.storeId);
+  }
+
+  if (typeof window !== "undefined") {
+    const ls = localStorage.getItem("storeId");
+    if (ls) return ls;
+  }
+
+  if (u) {
+    const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
+    for (const sid of peek) {
+      const snap = await getDoc(doc(db, "stores", sid, "employees", u.uid));
+      if (snap.exists()) return sid;
+    }
+  }
+
+  return "";
+}
 
 function msToClock(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -47,20 +81,53 @@ function timerRefs(uid: string, taskId: string) {
 /* -------------------------------------- */
 
 export default function SupervisorWeek4Page() {
+  const searchParams = useSearchParams();
+  const asParam = searchParams.get("as");
+
   const [storeId, setStoreId] = useState("");
   const [trainees, setTrainees] = useState<{ id: string; name: string }[]>([]);
-  const [selectedTrainee, setSelectedTrainee] = useState<string | null>(null);
+  const [selectedTrainee, setSelectedTrainee] = useState<string | null>(asParam);
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  /* ---------------- LOCK TRAINEE CONTEXT ---------------- */
   useEffect(() => {
+    if (asParam) {
+      setSelectedTrainee(asParam);
+      setStoredReviewUid(asParam);
+      return;
+    }
+
+    const stored = getStoredReviewUid();
+    if (!selectedTrainee && stored) {
+      setSelectedTrainee(stored);
+    }
+  }, [asParam, selectedTrainee]);
+
+  /* ---------------- RESOLVE STORE ---------------- */
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const sid = await resolveStoreId();
+      if (!alive) return;
+      setStoreId(sid);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /* ---------------- LOAD TRAINEES (FALLBACK) ---------------- */
+  useEffect(() => {
+    if (!storeId) return;
+
     (async () => {
       const sup = auth.currentUser;
       if (!sup) return;
 
       const traineesSnap = await getDocs(
         query(
-          collection(db, "stores", "24", "trainees"),
+          collection(db, "stores", storeId, "trainees"),
           where("active", "==", true),
           where("supervisorId", "==", sup.uid)
         )
@@ -77,10 +144,22 @@ export default function SupervisorWeek4Page() {
       }
 
       setTrainees(list);
-      if (list.length) setSelectedTrainee(list[0].id);
-    })();
-  }, []);
 
+      // If we still don't have a trainee selected, pick one and persist it
+      if (!selectedTrainee && list.length) {
+        const stored = getStoredReviewUid();
+        const resolved =
+          (stored && list.find((t) => t.id === stored)?.id) || list[0]?.id;
+
+        if (resolved) {
+          setSelectedTrainee(resolved);
+          setStoredReviewUid(resolved);
+        }
+      }
+    })();
+  }, [storeId, selectedTrainee]);
+
+  /* ---------------- LOAD TASKS ---------------- */
   useEffect(() => {
     (async () => {
       const snap = await getDocs(collection(db, "modules", "week4", "tasks"));
@@ -96,11 +175,14 @@ export default function SupervisorWeek4Page() {
   }, []);
 
   if (loading) return <main className="p-6">Loading…</main>;
-  if (!selectedTrainee) return null;
+  if (!selectedTrainee) return <main className="p-6">No trainee selected.</main>;
 
   return (
     <div className="space-y-6">
-      <Link href="/supervisor" className="rounded-full border px-3 py-1.5 bg-white text-sm">
+      <Link
+        href={`/supervisor?as=${selectedTrainee}`}
+        className="rounded-full border px-3 py-1.5 bg-white text-sm"
+      >
         ← Back to Dashboard
       </Link>
 
@@ -108,7 +190,11 @@ export default function SupervisorWeek4Page() {
 
       <select
         value={selectedTrainee}
-        onChange={(e) => setSelectedTrainee(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setSelectedTrainee(next);
+          setStoredReviewUid(next);
+        }}
         className="border px-2 py-1 rounded-md text-sm"
       >
         {trainees.map((t) => (
@@ -120,21 +206,12 @@ export default function SupervisorWeek4Page() {
 
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
         {tasks.map((task) => {
-          const isApprovalTask =
-            task.order === 1 || task.sort_order === 1;
+          const isApprovalTask = task.order === 1 || task.sort_order === 1;
 
           return isApprovalTask ? (
-            <ApprovalCard
-              key={task.id}
-              task={task}
-              uid={selectedTrainee}
-            />
+            <ApprovalCard key={task.id} task={task} uid={selectedTrainee} />
           ) : (
-            <TimerCard
-              key={task.id}
-              task={task}
-              uid={selectedTrainee}
-            />
+            <TimerCard key={task.id} task={task} uid={selectedTrainee} />
           );
         })}
       </div>

@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 import { auth, db } from "@/lib/firebase";
 import {
@@ -20,6 +21,19 @@ import {
 
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+
+/* ----------------------------------
+   HELPERS — invariant persistence
+---------------------------------- */
+function getStoredReviewUid(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("reviewUid");
+}
+
+function setStoredReviewUid(uid: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("reviewUid", uid);
+}
 
 /* ----------------------------------
    TYPES
@@ -48,20 +62,41 @@ function num(v: any): number {
   return Number.isFinite(n) ? n : 9999;
 }
 
+/* ----------------------------------
+   COMPONENT
+---------------------------------- */
 export default function SupervisorWeek2Page() {
-  const [traineeId, setTraineeId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const asParam = searchParams.get("as");
+
+  const [traineeId, setTraineeId] = useState<string | null>(asParam);
   const [trainees, setTrainees] = useState<Trainee[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [loading, setLoading] = useState(true);
 
-  /* ---------------- LOAD TRAINEES (THE MISSING PIECE) ---------------- */
+  /* ---------------- LOCK TRAINEE CONTEXT ---------------- */
   useEffect(() => {
+    if (asParam) {
+      setTraineeId(asParam);
+      setStoredReviewUid(asParam);
+      return;
+    }
+
+    const stored = getStoredReviewUid();
+    if (!traineeId && stored) {
+      setTraineeId(stored);
+    }
+  }, [asParam, traineeId]);
+
+  /* ---------------- LOAD TRAINEES (FALLBACK ONLY) ---------------- */
+  useEffect(() => {
+    if (traineeId) return;
+
     (async () => {
       const sup = auth.currentUser;
       if (!sup) return;
 
-      // find trainees assigned to this supervisor
       const snap = await getDocs(
         query(
           collection(db, "stores", "24", "trainees"),
@@ -83,17 +118,16 @@ export default function SupervisorWeek2Page() {
 
       setTrainees(list);
 
-      // auto-select trainee
-      const stored = localStorage.getItem("reviewUid");
+      const stored = getStoredReviewUid();
       const resolved =
         (stored && list.find((t) => t.id === stored)?.id) || list[0]?.id;
 
       if (resolved) {
         setTraineeId(resolved);
-        localStorage.setItem("reviewUid", resolved);
+        setStoredReviewUid(resolved);
       }
     })();
-  }, []);
+  }, [traineeId]);
 
   /* ---------------- LOAD TASKS ---------------- */
   useEffect(() => {
@@ -186,7 +220,10 @@ export default function SupervisorWeek2Page() {
 
   return (
     <div className="space-y-6">
-      <Link href="/supervisor" className="rounded-full border px-3 py-1.5 bg-white text-sm">
+      <Link
+        href={`/supervisor?as=${traineeId}`}
+        className="rounded-full border px-3 py-1.5 bg-white text-sm"
+      >
         ← Back to Dashboard
       </Link>
 

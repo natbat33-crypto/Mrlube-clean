@@ -26,6 +26,19 @@ import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
 /* ----------------------------------
+   HELPERS — invariant persistence
+---------------------------------- */
+function getStoredReviewUid(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("reviewUid");
+}
+
+function setStoredReviewUid(uid: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("reviewUid", uid);
+}
+
+/* ----------------------------------
    TYPES
 ---------------------------------- */
 type Task = {
@@ -41,16 +54,6 @@ type ProgressItem = {
 };
 
 type ProgressMap = Record<string, ProgressItem>;
-
-function getTaskKey(id: string) {
-  const parts = id.split("__");
-  return parts[parts.length - 1];
-}
-
-function num(v: any): number {
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : 9999;
-}
 
 /* ----------------------------------
    MAIN COMPONENT
@@ -90,14 +93,23 @@ export default function Day1SupervisorPage() {
     if (ctxStoreId) setStoreId(ctxStoreId);
   }, [ctxStoreId]);
 
-  /* ---------------- DEFAULT TRAINEE ---------------- */
+  /* ---------------- DEFAULT TRAINEE (LOCKED) ---------------- */
   useEffect(() => {
     if (asParam) {
       setSelectedTraineeId(asParam);
+      setStoredReviewUid(asParam);
       return;
     }
+
+    const stored = getStoredReviewUid();
+    if (!selectedTraineeId && stored) {
+      setSelectedTraineeId(stored);
+      return;
+    }
+
     if (!selectedTraineeId && trainees.length > 0) {
       setSelectedTraineeId(trainees[0].traineeId);
+      setStoredReviewUid(trainees[0].traineeId);
     }
   }, [asParam, trainees, selectedTraineeId]);
 
@@ -119,7 +131,6 @@ export default function Day1SupervisorPage() {
           list.push(meta);
         });
 
-        // SAME SORTING AS WEEK 1
         list.sort((a, b) => {
           const oa = a.order ?? a.sort_order ?? 9999;
           const ob = b.order ?? b.sort_order ?? 9999;
@@ -209,11 +220,6 @@ export default function Day1SupervisorPage() {
   }
 
   /* ---------------- COUNTS ---------------- */
-  const doneCount = useMemo(
-    () => tasks.filter((t) => progress[t.id]?.done).length,
-    [tasks, progress]
-  );
-
   const approvedCount = useMemo(
     () => tasks.filter((t) => progress[t.id]?.approved).length,
     [tasks, progress]
@@ -235,7 +241,7 @@ export default function Day1SupervisorPage() {
   return (
     <div className="space-y-6">
       <Link
-        href="/supervisor"
+        href={`/supervisor?as=${selectedTraineeId ?? ""}`}
         className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
       >
         ← Back to Dashboard
@@ -247,8 +253,6 @@ export default function Day1SupervisorPage() {
         </CardHeader>
 
         <CardContent className="space-y-4">
-
-          {/* Summary row — EXACT as Week 1 */}
           <div className="flex flex-wrap items-end gap-6">
             <div className="text-sm text-muted-foreground">
               <span className="font-medium">{approvedCount}</span> approved •{" "}
@@ -267,10 +271,8 @@ export default function Day1SupervisorPage() {
             </div>
           </div>
 
-          {/* Task list — EXACT same UI as Week 1 */}
           <ul className="space-y-2">
             {tasks.map((t) => {
-              const meta = t;
               const done = progress[t.id]?.done ?? false;
               const approved = progress[t.id]?.approved ?? false;
 
@@ -280,8 +282,8 @@ export default function Day1SupervisorPage() {
                   className="flex items-center justify-between gap-3 border rounded-md p-3 bg-white"
                 >
                   <div className="font-semibold text-sm break-words">
-                    {meta.order ? `${meta.order}. ` : ""}
-                    {meta.title}
+                    {t.order ? `${t.order}. ` : ""}
+                    {t.title}
                   </div>
 
                   <button
@@ -299,7 +301,6 @@ export default function Day1SupervisorPage() {
               );
             })}
           </ul>
-
         </CardContent>
       </Card>
     </div>

@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import {
   collection,
@@ -18,6 +19,14 @@ import {
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+
+/* ============================================
+   HELPERS — invariant persistence
+============================================ */
+function getStoredReviewUid(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("reviewUid");
+}
 
 /* ============================================
    Types
@@ -124,6 +133,10 @@ async function fetchProgressForWeek3(storeId: string) {
    MAIN COMPONENT
 ============================================ */
 export default function SupervisorWeek3Page() {
+  const searchParams = useSearchParams();
+  const asParam = searchParams.get("as");
+  const reviewUid = asParam ?? getStoredReviewUid() ?? "";
+
   const [storeId, setStoreId] = useState("");
   const [tasksById, setTasksById] = useState<Record<string, TaskMeta>>({});
   const [items, setItems] = useState<ProgDoc[]>([]);
@@ -179,11 +192,7 @@ export default function SupervisorWeek3Page() {
     };
   }, []);
 
-  /* ===================================================
-     🔒 AUTHORITATIVE WEEK-3 SECTION ENFORCEMENT (FIX)
-     – current state always wins
-     – old users corrected immediately
-  =================================================== */
+  /* ---------- Section enforcement ---------- */
   useEffect(() => {
     if (items.length === 0) return;
 
@@ -238,19 +247,15 @@ export default function SupervisorWeek3Page() {
     }
   }
 
-  /* ---------- UI values ---------- */
   const reviewed = items.length;
   const approved = items.filter((i) => i.approved).length;
   const waiting = items.filter((i) => i.done && !i.approved).length;
   const pct = reviewed ? Math.round((approved / reviewed) * 100) : 0;
 
-  /* ============================================
-     RENDER
-============================================ */
   return (
     <div className="space-y-6">
       <Link
-        href="/supervisor"
+        href={`/supervisor?as=${reviewUid}`}
         className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
       >
         ← Back to Dashboard

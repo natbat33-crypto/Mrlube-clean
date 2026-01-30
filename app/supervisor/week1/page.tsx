@@ -21,6 +21,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
 /* ============================================
+   HELPERS — invariant persistence
+============================================ */
+function getStoredReviewUid(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("reviewUid");
+}
+
+function setStoredReviewUid(uid: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("reviewUid", uid);
+}
+
+/* ============================================
    TYPES
 ============================================ */
 type TaskMeta = {
@@ -50,12 +63,32 @@ function getTaskKey(id: string) {
 ============================================ */
 export default function SupervisorWeek1Page() {
   const searchParams = useSearchParams();
-  const traineeId = searchParams.get("as"); // ✅ single source of truth
+  const asParam = searchParams.get("as");
+
+  const [selectedTraineeId, setSelectedTraineeId] = useState<string | null>(
+    asParam
+  );
 
   const [tasks, setTasks] = useState<TaskMeta[]>([]);
   const [tasksById, setTasksById] = useState<Record<string, TaskMeta>>({});
   const [progress, setProgress] = useState<ProgressMap>({});
   const [loading, setLoading] = useState(true);
+
+  /* ============================================
+     LOCK TRAINEE CONTEXT (SAME AS DAY 1)
+  ============================================ */
+  useEffect(() => {
+    if (asParam) {
+      setSelectedTraineeId(asParam);
+      setStoredReviewUid(asParam);
+      return;
+    }
+
+    const stored = getStoredReviewUid();
+    if (!selectedTraineeId && stored) {
+      setSelectedTraineeId(stored);
+    }
+  }, [asParam, selectedTraineeId]);
 
   /* ============================================
      LOAD TASKS
@@ -105,10 +138,10 @@ export default function SupervisorWeek1Page() {
      LISTEN TO TRAINEE PROGRESS
   ============================================ */
   useEffect(() => {
-    if (!traineeId) return;
+    if (!selectedTraineeId) return;
 
     const qRef = query(
-      collection(db, "users", traineeId, "progress"),
+      collection(db, "users", selectedTraineeId, "progress"),
       where("week", "==", "week1")
     );
 
@@ -125,21 +158,20 @@ export default function SupervisorWeek1Page() {
 
       setProgress(map);
     });
-  }, [traineeId]);
+  }, [selectedTraineeId]);
 
   /* ============================================
-     ✅ AUTO-SET SECTION APPROVAL (THE FIX)
-     MIRRORS DAY 1 EXACTLY
+     AUTO-SET SECTION APPROVAL
   ============================================ */
   useEffect(() => {
-    if (!traineeId || tasks.length === 0) return;
+    if (!selectedTraineeId || tasks.length === 0) return;
 
     const allApproved =
       tasks.length > 0 &&
       tasks.every((t) => progress[t.id]?.approved === true);
 
     setDoc(
-      doc(db, "users", traineeId, "sections", "week1"),
+      doc(db, "users", selectedTraineeId, "sections", "week1"),
       {
         approved: allApproved,
         approvedAt: allApproved ? serverTimestamp() : deleteField(),
@@ -148,18 +180,18 @@ export default function SupervisorWeek1Page() {
     ).catch((e) =>
       console.error("[Week1 supervisor] section approval write:", e)
     );
-  }, [traineeId, tasks, progress]);
+  }, [selectedTraineeId, tasks, progress]);
 
   /* ============================================
      APPROVE / UNAPPROVE TASK
   ============================================ */
   async function toggleApprove(taskId: string, next: boolean) {
-    if (!traineeId) return;
+    if (!selectedTraineeId) return;
 
     const key = `modules__week1__tasks__${taskId}`;
 
     await setDoc(
-      doc(db, "users", traineeId, "progress", key),
+      doc(db, "users", selectedTraineeId, "progress", key),
       {
         approved: next,
         approvedAt: next ? serverTimestamp() : deleteField(),
@@ -191,7 +223,7 @@ export default function SupervisorWeek1Page() {
   return (
     <div className="space-y-6">
       <Link
-        href="/supervisor"
+        href={`/supervisor?as=${selectedTraineeId ?? ""}`}
         className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
       >
         ← Back to Dashboard
