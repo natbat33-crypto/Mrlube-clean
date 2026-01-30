@@ -6,18 +6,11 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { useSupervisorTrainees } from "@/lib/useSupervisorTrainees";
-import { db, auth } from "@/lib/firebase";
-import { onIdTokenChanged } from "firebase/auth";
+import { db } from "@/lib/firebase";
 
 import {
   collection,
   getDocs,
-  doc,
-  getDoc,
-  limit,
-  onSnapshot,
-  query,
-  where,
 } from "firebase/firestore";
 
 import {
@@ -49,7 +42,7 @@ function pickReviewUid(): string | null {
    COMPONENT
 ======================================== */
 export default function SupervisorPage() {
-  const [uid, setUid] = useState<string | null>(() => pickReviewUid());
+  const [uid] = useState<string | null>(() => pickReviewUid());
 
   const [weeks, setWeeks] = useState<WeekSummary[]>([
     { week: 1, waiting: 0, reviewed: 0, approved: 0 },
@@ -68,14 +61,25 @@ export default function SupervisorPage() {
   const [storeId, setStoreId] = useState<string | null>(null);
 
   const { storeId: resolvedStoreId } = useStoreCtx();
-  const trainees = useSupervisorTrainees(storeId);
-
   const searchParams = useSearchParams();
   const storeOverride = searchParams.get("store");
-  const asUid = searchParams.get("as");
 
   /* ================================
-     WEEK SUMMARY — FIXED + MIRRORED
+     🔑 CRITICAL FIX — RESOLVE STORE ID
+     (THIS WAS MISSING)
+  ================================= */
+  useEffect(() => {
+    if (storeOverride) {
+      setStoreId(storeOverride);
+    } else if (resolvedStoreId) {
+      setStoreId(resolvedStoreId);
+    }
+  }, [storeOverride, resolvedStoreId]);
+
+  const trainees = useSupervisorTrainees(storeId);
+
+  /* ================================
+     WEEK SUMMARY — WORKING LOGIC
   ================================= */
   useEffect(() => {
     let alive = true;
@@ -103,12 +107,10 @@ export default function SupervisorPage() {
             if (!data?.done) continue;
 
             let wk: number | null = null;
-
             if (data.week === "week1") wk = 1;
             if (data.week === "week2") wk = 2;
             if (data.week === "week3") wk = 3;
             if (data.week === "week4") wk = 4;
-
             if (!wk) continue;
 
             const b = tallies[wk];
@@ -128,14 +130,16 @@ export default function SupervisorPage() {
       }
     }
 
-    tally();
+    if (trainees.length) tally();
+    else setLoading(false);
+
     return () => {
       alive = false;
     };
   }, [trainees]);
 
   /* ================================
-     DAY 1 SUMMARY (UNCHANGED)
+     DAY 1 SUMMARY — UNCHANGED
   ================================= */
   useEffect(() => {
     let alive = true;
@@ -165,7 +169,7 @@ export default function SupervisorPage() {
       }
     }
 
-    tallyDay1();
+    if (trainees.length) tallyDay1();
     return () => {
       alive = false;
     };
