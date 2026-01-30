@@ -3,9 +3,8 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import {
   collection,
   doc,
@@ -16,6 +15,7 @@ import {
   where,
   serverTimestamp,
   deleteField,
+  getDoc,
 } from "firebase/firestore";
 
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
@@ -38,69 +38,82 @@ type ProgressItem = {
 
 type ProgressMap = Record<string, ProgressItem>;
 
+type Trainee = {
+  id: string;
+  name: string;
+};
+
 function num(v: any): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 9999;
 }
 
-/* ----------------------------------
-   COMPONENT
----------------------------------- */
 export default function SupervisorWeek2Page() {
-  const searchParams = useSearchParams();
-
-  // 🔑 FIX: persistent trainee selection
   const [traineeId, setTraineeId] = useState<string | null>(null);
-
+  const [trainees, setTrainees] = useState<Trainee[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [loading, setLoading] = useState(true);
 
-  /* ---------------- RESOLVE TRAINEE ---------------- */
+  /* ---------------- LOAD TRAINEES (THE MISSING PIECE) ---------------- */
   useEffect(() => {
-    const fromQuery = searchParams.get("as");
-    const fromStorage =
-      typeof window !== "undefined"
-        ? localStorage.getItem("reviewUid")
-        : null;
+    (async () => {
+      const sup = auth.currentUser;
+      if (!sup) return;
 
-    const resolved = fromQuery || fromStorage;
+      // find trainees assigned to this supervisor
+      const snap = await getDocs(
+        query(
+          collection(db, "stores", "24", "trainees"),
+          where("active", "==", true),
+          where("supervisorId", "==", sup.uid)
+        )
+      );
 
-    if (resolved) {
-      setTraineeId(resolved);
-      localStorage.setItem("reviewUid", resolved);
-    }
-  }, [searchParams]);
+      const list: Trainee[] = [];
+
+      for (const d of snap.docs) {
+        const uSnap = await getDoc(doc(db, "users", d.id));
+        const u = uSnap.exists() ? uSnap.data() : {};
+        list.push({
+          id: d.id,
+          name: (u as any).name || (u as any).email || d.id,
+        });
+      }
+
+      setTrainees(list);
+
+      // auto-select trainee
+      const stored = localStorage.getItem("reviewUid");
+      const resolved =
+        (stored && list.find((t) => t.id === stored)?.id) || list[0]?.id;
+
+      if (resolved) {
+        setTraineeId(resolved);
+        localStorage.setItem("reviewUid", resolved);
+      }
+    })();
+  }, []);
 
   /* ---------------- LOAD TASKS ---------------- */
   useEffect(() => {
-    let alive = true;
-
     (async () => {
-      try {
-        const snap = await getDocs(
-          collection(db, "modules", "week2", "tasks")
-        );
+      const snap = await getDocs(
+        collection(db, "modules", "week2", "tasks")
+      );
 
-        const list: Task[] = snap.docs
+      setTasks(
+        snap.docs
           .map((d) => ({ id: d.id, ...(d.data() as any) }))
           .sort(
             (a, b) =>
               num(a.order ?? a.sort_order) -
               num(b.order ?? b.sort_order)
-          );
+          )
+      );
 
-        if (alive) setTasks(list);
-      } catch (e) {
-        console.error("[Supervisor Week2] load tasks error:", e);
-      } finally {
-        if (alive) setLoading(false);
-      }
+      setLoading(false);
     })();
-
-    return () => {
-      alive = false;
-    };
   }, []);
 
   /* ---------------- LISTEN TO PROGRESS ---------------- */
@@ -112,33 +125,27 @@ export default function SupervisorWeek2Page() {
       where("week", "==", "week2")
     );
 
-    const unsub = onSnapshot(qRef, (snap) => {
+    return onSnapshot(qRef, (snap) => {
       const map: ProgressMap = {};
-
       snap.forEach((d) => {
-        const parts = d.id.split("__");
-        const taskId = parts[parts.length - 1];
+        const taskId = d.id.split("__").pop()!;
         const data = d.data() as any;
-
         map[taskId] = {
           done: !!data.done,
           approved: !!data.approved,
         };
       });
-
       setProgress(map);
     });
-
-    return unsub;
   }, [traineeId]);
 
-  /* ---------------- AUTO-SET SECTION APPROVAL ---------------- */
+  /* ---------------- AUTO-SECTION APPROVAL ---------------- */
   useEffect(() => {
     if (!traineeId || tasks.length === 0) return;
 
-    const allApproved =
-      tasks.length > 0 &&
-      tasks.every((t) => progress[t.id]?.approved === true);
+    const allApproved = tasks.every(
+      (t) => progress[t.id]?.approved === true
+    );
 
     setDoc(
       doc(db, "users", traineeId, "sections", "week2"),
@@ -147,8 +154,6 @@ export default function SupervisorWeek2Page() {
         approvedAt: allApproved ? serverTimestamp() : deleteField(),
       },
       { merge: true }
-    ).catch((e) =>
-      console.error("[Supervisor Week2] section approval error:", e)
     );
   }, [traineeId, tasks, progress]);
 
@@ -157,7 +162,6 @@ export default function SupervisorWeek2Page() {
     if (!traineeId) return;
 
     const key = `modules__week2__tasks__${taskId}`;
-
     await setDoc(
       doc(db, "users", traineeId, "progress", key),
       {
@@ -169,83 +173,53 @@ export default function SupervisorWeek2Page() {
     );
   }
 
-  /* ---------------- COUNTS ---------------- */
-  const approvedCount = useMemo(
-    () => tasks.filter((t) => progress[t.id]?.approved).length,
-    [tasks, progress]
-  );
+  if (loading) return <div className="p-6">Loading…</div>;
+  if (!traineeId) return <div className="p-6">No trainee selected.</div>;
 
-  const pct = useMemo(
-    () =>
-      tasks.length ? Math.round((approvedCount / tasks.length) * 100) : 0,
-    [approvedCount, tasks.length]
-  );
+  const approvedCount = tasks.filter(
+    (t) => progress[t.id]?.approved
+  ).length;
 
-  /* ---------------- UI ---------------- */
-  if (!traineeId) {
-    return <div className="p-6">No trainee selected.</div>;
-  }
-
-  if (loading) {
-    return <div className="p-6">Loading…</div>;
-  }
+  const pct = tasks.length
+    ? Math.round((approvedCount / tasks.length) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/supervisor"
-        className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
-      >
+      <Link href="/supervisor" className="rounded-full border px-3 py-1.5 bg-white text-sm">
         ← Back to Dashboard
       </Link>
 
-      <Card className="border-primary/20">
+      <Card>
         <CardHeader>
           <CardTitle>Review — Week 2</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-end gap-6">
-            <div className="text-sm text-muted-foreground">
-              <span className="font-medium">{approvedCount}</span> approved •{" "}
-              <span className="font-medium">
-                {tasks.length - approvedCount}
-              </span>{" "}
-              waiting • <span className="font-medium">{pct}%</span>
-            </div>
-
-            <div className="ml-auto min-w-[220px]">
-              <div className="flex justify-between text-xs mb-1">
-                <span>Approved</span>
-                <span className="text-black">{pct}%</span>
-              </div>
-              <Progress value={pct} className="h-2 [&>div]:bg-yellow-400" />
-            </div>
-          </div>
+          <Progress value={pct} className="h-2 [&>div]:bg-yellow-400" />
 
           <ul className="space-y-2">
             {tasks.map((t) => {
-              const done = progress[t.id]?.done ?? false;
-              const approved = progress[t.id]?.approved ?? false;
+              const done = progress[t.id]?.done;
+              const approved = progress[t.id]?.approved;
 
               return (
                 <li
                   key={t.id}
-                  className="flex items-center justify-between gap-3 border rounded-md p-3 bg-white"
+                  className="flex justify-between items-center border rounded p-3 bg-white"
                 >
-                  <div className="font-semibold text-sm break-words">
-                    {t.order ? `${t.order}. ` : ""}
-                    {t.title}
+                  <div className="font-semibold text-sm">
+                    {t.order}. {t.title}
                   </div>
 
                   <button
-                    onClick={() => toggleApprove(t.id, !approved)}
                     disabled={!done}
-                    className={`px-3 py-1.5 rounded-md text-sm border transition ${
+                    onClick={() => toggleApprove(t.id, !approved)}
+                    className={`px-3 py-1.5 rounded text-sm ${
                       approved
-                        ? "bg-green-600 text-white border-green-700 hover:bg-green-700"
-                        : "bg-white border-gray-300 hover:bg-gray-50"
-                    } ${!done ? "opacity-50 cursor-not-allowed" : ""}`}
+                        ? "bg-green-600 text-white"
+                        : "border"
+                    } ${!done ? "opacity-50" : ""}`}
                   >
                     {approved ? "Unapprove" : "Approve"}
                   </button>
