@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { db, auth } from "@/lib/firebase";
@@ -49,12 +49,10 @@ export default function Week2Page() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // 🔒 AUTHORITY
+  // 🔒 authority
   const [week1Approved, setWeek1Approved] = useState<boolean | null>(null);
 
-  /* ----------------------------------
-     AUTH
-  ---------------------------------- */
+  /* ---------- AUTH ---------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUid(u?.uid ?? null);
@@ -63,51 +61,39 @@ export default function Week2Page() {
     return unsub;
   }, []);
 
-  /* ----------------------------------
-     🔒 WEEK 1 AUTHORITY (LIVE)
-  ---------------------------------- */
+  /* ---------- WEEK 1 GATE ---------- */
   useEffect(() => {
     if (!uid) return;
 
     const ref = doc(db, "users", uid, "sections", "week1");
-    const unsub = onSnapshot(ref, (snap) => {
+    return onSnapshot(ref, (snap) => {
       const ok = snap.exists() && snap.data()?.approved === true;
       setWeek1Approved(ok);
-
-      if (!ok) {
-        router.replace("/dashboard");
-      }
+      if (!ok) router.replace("/dashboard");
     });
-
-    return unsub;
   }, [uid, router]);
 
-  /* ----------------------------------
-     LOAD TASK DEFINITIONS
-  ---------------------------------- */
+  /* ---------- LOAD TASK DEFINITIONS ---------- */
   useEffect(() => {
     let alive = true;
 
     (async () => {
       try {
-        const col = collection(db, "modules", "week2", "tasks");
-        const q = query(col, orderBy("order", "asc"));
+        const q = query(
+          collection(db, "modules", "week2", "tasks"),
+          orderBy("order", "asc")
+        );
         const snap = await getDocs(q);
 
         const list: Task[] = snap.docs.map((d) => ({
           id: d.id,
-          ...(d.data() as Partial<Task>),
+          ...(d.data() as any),
+          done: false,
         }));
 
-        if (alive) {
-          setTasks(list);
-          setErr(null);
-        }
+        if (alive) setTasks(list);
       } catch (e: any) {
-        if (alive) {
-          setErr(e?.message ?? String(e));
-          setTasks([]);
-        }
+        if (alive) setErr(e?.message ?? String(e));
       } finally {
         if (alive) setLoading(false);
       }
@@ -118,58 +104,72 @@ export default function Week2Page() {
     };
   }, []);
 
-  /* ----------------------------------
-     LOAD USER PROGRESS
-  ---------------------------------- */
+  /* ---------- LOAD USER PROGRESS ---------- */
   useEffect(() => {
     if (!uid || tasks.length === 0) return;
 
-    (async () => {
-      try {
-        const col = collection(db, "users", uid, "progress");
-        const q = query(col, where("week", "==", "week2"));
-        const snap = await getDocs(q);
+    const q = query(
+      collection(db, "users", uid, "progress"),
+      where("week", "==", "week2")
+    );
 
-        const doneMap: Record<string, boolean> = {};
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          if (!data.done) return;
-          const parts = d.id.split("__");
-          doneMap[parts[parts.length - 1]] = true;
-        });
+    return onSnapshot(q, (snap) => {
+      const map: Record<string, boolean> = {};
+      snap.forEach((d) => {
+        const parts = d.id.split("__");
+        map[parts[parts.length - 1]] = !!d.data()?.done;
+      });
 
-        setTasks((prev) =>
-          prev.map((t) => ({ ...t, done: !!doneMap[t.id] }))
-        );
-      } catch {}
-    })();
+      setTasks((prev) =>
+        prev.map((t) => ({ ...t, done: !!map[t.id] }))
+      );
+    });
   }, [uid, tasks.length]);
 
-  /* ----------------------------------
-     ✅ AUTO-CREATE sections/week2
-     (trainee never writes approved)
-  ---------------------------------- */
+  /* ---------- TOGGLE TASK (MATCHES WEEK 1) ---------- */
+  async function toggleTask(id: string, next: boolean) {
+    if (!uid) return;
+
+    setTasks((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, done: next } : x))
+    );
+
+    try {
+      const key = `modules__week2__tasks__${id}`;
+
+      await setDoc(
+        doc(db, "users", uid, "progress", key),
+        {
+          traineeId: uid,
+          week: "week2",
+          done: next,
+          completedAt: next ? serverTimestamp() : deleteField(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch {
+      setTasks((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, done: !next } : x))
+      );
+    }
+  }
+
+  /* ---------- AUTO-CREATE sections/week2 (NO APPROVAL) ---------- */
   useEffect(() => {
     if (!uid) return;
 
-    const allDone =
-      tasks.length > 0 && tasks.every((t) => t.done === true);
-
+    const allDone = tasks.length > 0 && tasks.every((t) => t.done === true);
     if (!allDone) return;
 
     setDoc(
       doc(db, "users", uid, "sections", "week2"),
-      {
-        completed: true,
-        completedAt: serverTimestamp(),
-      },
+      { completed: true, completedAt: serverTimestamp() },
       { merge: true }
     );
   }, [uid, tasks]);
 
-  /* ----------------------------------
-     BLOCK UNTIL AUTH RESOLVED
-  ---------------------------------- */
+  /* ---------- BLOCK ---------- */
   if (authLoading || loading || week1Approved === null) {
     return <main style={{ padding: 24 }}>Checking access…</main>;
   }
@@ -178,33 +178,30 @@ export default function Week2Page() {
     return <main style={{ padding: 24 }}>Access denied.</main>;
   }
 
-  /* ----------------------------------
-     UI
-  ---------------------------------- */
+  /* ---------- UI ---------- */
   const doneCount = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ marginBottom: 16 }}>
-        <Link
-          href="/dashboard"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            background: "#fff",
-            border: `1px solid ${GRAY}`,
-            borderRadius: 999,
-            padding: "8px 14px",
-            fontWeight: 600,
-            textDecoration: "none",
-            color: NAVY,
-          }}
-        >
-          ← Back to Dashboard
-        </Link>
-      </div>
+      <Link
+        href="/dashboard"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          background: "#fff",
+          border: `1px solid ${GRAY}`,
+          borderRadius: 999,
+          padding: "8px 14px",
+          fontWeight: 600,
+          color: NAVY,
+          textDecoration: "none",
+          marginBottom: 16,
+        }}
+      >
+        ← Back to Dashboard
+      </Link>
 
       <h2>Week 2</h2>
 
@@ -237,22 +234,33 @@ export default function Week2Page() {
           <li
             key={t.id}
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
               padding: "12px 14px",
               borderRadius: 12,
               background: "#fff",
               border: `1px solid ${t.done ? "#d6ead8" : GRAY}`,
             }}
           >
-            <strong>
+            <button
+              onClick={() => toggleTask(t.id, !t.done)}
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: "50%",
+                border: `2px solid ${t.done ? GREEN : "#9aa0a6"}`,
+                background: t.done ? GREEN : "#fff",
+                cursor: "pointer",
+              }}
+            />
+
+            <div style={{ fontWeight: 600 }}>
               {(t.order ?? t.sort_order ?? i + 1)}. {t.title}
-            </strong>
+            </div>
           </li>
         ))}
       </ul>
     </main>
   );
 }
-
-
-
-
