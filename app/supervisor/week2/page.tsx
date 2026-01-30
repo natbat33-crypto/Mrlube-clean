@@ -48,11 +48,29 @@ function num(v: any): number {
 ---------------------------------- */
 export default function SupervisorWeek2Page() {
   const searchParams = useSearchParams();
-  const traineeId = searchParams.get("as"); // ✅ single source of truth
+
+  // 🔑 FIX: persistent trainee selection
+  const [traineeId, setTraineeId] = useState<string | null>(null);
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [loading, setLoading] = useState(true);
+
+  /* ---------------- RESOLVE TRAINEE ---------------- */
+  useEffect(() => {
+    const fromQuery = searchParams.get("as");
+    const fromStorage =
+      typeof window !== "undefined"
+        ? localStorage.getItem("reviewUid")
+        : null;
+
+    const resolved = fromQuery || fromStorage;
+
+    if (resolved) {
+      setTraineeId(resolved);
+      localStorage.setItem("reviewUid", resolved);
+    }
+  }, [searchParams]);
 
   /* ---------------- LOAD TASKS ---------------- */
   useEffect(() => {

@@ -46,22 +46,16 @@ function msToClock(ms?: number): string {
   return `${m}:${s}`;
 }
 
-/* ----------------------------------
-   MAIN
----------------------------------- */
 export default function Week4Page() {
   const [uid, setUid] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-
   const [week3Approved, setWeek3Approved] = useState<boolean | null>(null);
 
   const [baseTasks, setBaseTasks] = useState<Task[]>([]);
   const [statsById, setStatsById] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
 
-  /* ----------------------------------
-     AUTH
-  ---------------------------------- */
+  /* AUTH */
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
       setUid(u?.uid ?? null);
@@ -69,9 +63,7 @@ export default function Week4Page() {
     });
   }, []);
 
-  /* ----------------------------------
-     WEEK 3 GATE
-  ---------------------------------- */
+  /* WEEK 3 GATE */
   useEffect(() => {
     if (!uid) return;
     return onSnapshot(doc(db, "users", uid, "sections", "week3"), (snap) => {
@@ -79,9 +71,7 @@ export default function Week4Page() {
     });
   }, [uid]);
 
-  /* ----------------------------------
-     LOAD TASK TEMPLATES
-  ---------------------------------- */
+  /* LOAD TASKS */
   useEffect(() => {
     (async () => {
       const snap = await getDocs(
@@ -97,9 +87,7 @@ export default function Week4Page() {
     })();
   }, []);
 
-  /* ----------------------------------
-     LIVE PROGRESS STATS
-  ---------------------------------- */
+  /* LIVE PROGRESS */
   useEffect(() => {
     if (!uid || !baseTasks.length) return;
 
@@ -133,9 +121,6 @@ export default function Week4Page() {
   const doneCount = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
-  /* ----------------------------------
-     TOGGLE (NON-APPROVAL TASKS ONLY)
-  ---------------------------------- */
   async function toggleTask(id: string, next: boolean) {
     if (!uid) return;
     const storeId = await getStoreId();
@@ -160,9 +145,6 @@ export default function Week4Page() {
 
   const locked = !week3Approved;
 
-  /* ----------------------------------
-     UI (Week-1 MIRROR)
-  ---------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <Link
@@ -235,31 +217,30 @@ export default function Week4Page() {
                 }}
               />
 
-              {!isApprovalTask && (
-                <button
-                  onClick={() => toggleTask(t.id, !done)}
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: "50%",
-                    border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
-                    background: done ? GREEN : "#fff",
-                    display: "grid",
-                    placeItems: "center",
-                  }}
+              {/* CHECKBOX — ENABLED FOR ALL TASKS */}
+              <button
+                onClick={() => toggleTask(t.id, !done)}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
+                  background: done ? GREEN : "#fff",
+                  display: "grid",
+                  placeItems: "center",
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  stroke={done ? "#fff" : "transparent"}
+                  strokeWidth="3"
+                  fill="none"
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="14"
-                    height="14"
-                    stroke={done ? "#fff" : "transparent"}
-                    strokeWidth="3"
-                    fill="none"
-                  >
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
-                </button>
-              )}
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
 
               <div>
                 <div style={{ fontWeight: 600 }}>
@@ -268,7 +249,9 @@ export default function Week4Page() {
 
                 {isApprovalTask ? (
                   <div style={{ fontSize: 12, color: "#5f6368" }}>
-                    {t.approved ? "Approved ✓" : "Waiting for supervisor approval"}
+                    {t.approved
+                      ? "Approved ✓"
+                      : "Waiting for supervisor approval"}
                   </div>
                 ) : (
                   <div style={{ fontSize: 12, color: "#5f6368" }}>
@@ -284,5 +267,4 @@ export default function Week4Page() {
     </main>
   );
 }
-
 
