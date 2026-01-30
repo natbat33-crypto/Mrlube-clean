@@ -1,7 +1,8 @@
+// day 1
 'use client';
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { db, auth } from "@/lib/firebase";
 import { getStoreId } from "@/lib/getStoreId";
@@ -61,14 +62,39 @@ export default function Day1Page() {
   }, []);
 
   /* ---------------------------------------
-     Listen for approval
+     Listen for approval (FIXED: supports legacy + new doc ids)
   ---------------------------------------- */
   useEffect(() => {
     if (!uid) return;
-    const ref = doc(db, "users", uid, "sections", "day1");
-    return onSnapshot(ref, (snap) => {
-      setDay1Approved(snap.data()?.approved === true);
+
+    const refNew = doc(db, "users", uid, "sections", "day1");
+    const refLegacy = doc(db, "users", uid, "sections", "day-1");
+
+    let sawApproved = false;
+
+    const unsubNew = onSnapshot(refNew, (snap) => {
+      const ok = snap.exists() && snap.data()?.approved === true;
+      if (ok) {
+        sawApproved = true;
+        setDay1Approved(true);
+      } else if (!sawApproved) {
+        // don't force false if legacy might be true
+        setDay1Approved(false);
+      }
     });
+
+    const unsubLegacy = onSnapshot(refLegacy, (snap) => {
+      const ok = snap.exists() && snap.data()?.approved === true;
+      if (ok) {
+        sawApproved = true;
+        setDay1Approved(true);
+      }
+    });
+
+    return () => {
+      unsubNew();
+      unsubLegacy();
+    };
   }, [uid]);
 
   /* ---------------------------------------
@@ -119,7 +145,10 @@ export default function Day1Page() {
 
     (async () => {
       const qSnap = await getDocs(
-        query(collection(db, "users", uid, "progress"), where("week", "==", "day-1"))
+        query(
+          collection(db, "users", uid, "progress"),
+          where("week", "==", "day-1")
+        )
       );
 
       const map: Record<string, boolean> = {};
@@ -178,7 +207,7 @@ export default function Day1Page() {
       const storeId = await getStoreId();
       if (!storeId) return;
 
-      const doneIds = tasks.filter(t => t.done).map(t => t.id);
+      const doneIds = tasks.filter((t) => t.done).map((t) => t.id);
 
       await setDoc(
         doc(db, "stores", String(storeId), "trainees", uid, "progress", "day-1"),
@@ -197,7 +226,7 @@ export default function Day1Page() {
   ---------------------------------------- */
   useEffect(() => {
     if (!uid || !tasks.length) return;
-    if (!tasks.every(t => t.done)) return;
+    if (!tasks.every((t) => t.done)) return;
 
     setDoc(
       doc(db, "users", uid, "sections", "day1"),
@@ -206,7 +235,7 @@ export default function Day1Page() {
     );
   }, [uid, tasks]);
 
-  const doneCount = tasks.filter(t => t.done).length;
+  const doneCount = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
   if (authLoading || loading) return <main style={{ padding: 24 }}>Loading…</main>;
@@ -264,7 +293,15 @@ export default function Day1Page() {
 
       {err && <p style={{ color: "crimson" }}>Error: {err}</p>}
 
-      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 10 }}>
+      <ul
+        style={{
+          listStyle: "none",
+          padding: 0,
+          margin: 0,
+          display: "grid",
+          gap: 10,
+        }}
+      >
         {tasks.map((t, idx) => {
           const done = !!t.done;
           return (
