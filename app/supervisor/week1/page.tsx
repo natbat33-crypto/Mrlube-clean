@@ -67,7 +67,7 @@ export default function SupervisorWeek1Page() {
       try {
         setLoading(true);
 
-        /* 1️⃣ Load Week-1 module tasks (authoritative) */
+        // 1️⃣ Load Week-1 tasks
         const taskSnap = await getDocs(
           collection(db, "modules", "week1", "tasks")
         );
@@ -78,21 +78,21 @@ export default function SupervisorWeek1Page() {
         });
         setTasksById(byId);
 
-        /* 2️⃣ Load ONLY this trainee’s Week-1 progress */
+        // 2️⃣ Load this trainee’s Week-1 progress
         const progSnap = await getDocs(
           query(
             collection(db, "users", traineeId, "progress"),
-            where("week", "==", "week1"),
+            where("week", "==", "week1")
           )
         );
 
-        /* 3️⃣ Filter + map */
+        // 3️⃣ Filter + map (done but not yet approved)
         const data: ProgDoc[] = progSnap.docs
           .map((d) => ({ id: d.id, ...(d.data() as any) }))
           .filter((p) => byId[getTaskKey(p.id)])
           .filter((p) => p.done === true && p.approved !== true);
 
-        /* 4️⃣ Sort by module order */
+        // 4️⃣ Sort by module order
         data.sort((a, b) => {
           const ta = byId[getTaskKey(a.id)];
           const tb = byId[getTaskKey(b.id)];
@@ -115,15 +115,17 @@ export default function SupervisorWeek1Page() {
   }, [traineeId]);
 
   /* ============================================
-     APPROVAL TOGGLE (UNCHANGED)
+     APPROVAL TOGGLE (FIXED)
   ============================================ */
   async function setApproved(p: ProgDoc, next: boolean) {
     if (!traineeId) return;
 
+    // Optimistic UI update
     setItems((prev) =>
       prev.map((x) => (x.id === p.id ? { ...x, approved: next } : x))
     );
 
+    // Save approval on task
     await setDoc(
       doc(db, "users", traineeId, "progress", p.id),
       {
@@ -133,6 +135,24 @@ export default function SupervisorWeek1Page() {
       },
       { merge: true }
     );
+
+    // ✅ NEW: if this was the LAST pending Week-1 task, unlock Week 2
+    if (next === true) {
+      const remaining = items.filter(
+        (i) => i.id !== p.id && i.approved !== true
+      );
+
+      if (remaining.length === 0) {
+        await setDoc(
+          doc(db, "users", traineeId, "sections", "week1"),
+          {
+            approved: true,
+            approvedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    }
   }
 
   /* ============================================
@@ -144,7 +164,7 @@ export default function SupervisorWeek1Page() {
   const pct = reviewed ? Math.round((approved / reviewed) * 100) : 0;
 
   /* ============================================
-     RENDER (UNCHANGED)
+     RENDER
   ============================================ */
   return (
     <div className="space-y-6">
