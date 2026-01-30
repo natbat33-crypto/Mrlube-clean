@@ -49,6 +49,9 @@ export default function Day1Page() {
   const [day1Approved, setDay1Approved] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
+  /* ✅ NEW: per-task approval map */
+  const [approvedById, setApprovedById] = useState<Record<string, boolean>>({});
+
   /* ---------- AUTH ---------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -58,7 +61,7 @@ export default function Day1Page() {
     return unsub;
   }, []);
 
-  /* ---------- LISTEN FOR TRAINER APPROVAL ---------- */
+  /* ---------- LISTEN FOR SECTION (DAY 1) APPROVAL ---------- */
   useEffect(() => {
     if (!uid) return;
 
@@ -102,7 +105,7 @@ export default function Day1Page() {
     };
   }, []);
 
-  /* ---------- LOAD SAVED PROGRESS ---------- */
+  /* ---------- LOAD SAVED DONE FLAGS ---------- */
   useEffect(() => {
     if (!uid || !tasks.length || hydrated) return;
 
@@ -126,7 +129,27 @@ export default function Day1Page() {
     })();
   }, [uid, tasks.length, hydrated]);
 
-  /* ---------- TOGGLE TASK (LOCKED IF APPROVED) ---------- */
+  /* ✅ NEW: LISTEN FOR PER-TASK TRAINER APPROVALS (DAY 1) */
+  useEffect(() => {
+    if (!uid || tasks.length === 0) return;
+
+    const unsubs = tasks.map((task) => {
+      const key = `days__day-1__tasks__${task.id}`;
+      const ref = doc(db, "users", uid, "progress", key);
+
+      return onSnapshot(ref, (snap) => {
+        const approved = !!snap.data()?.approved;
+        setApprovedById((prev) => ({
+          ...prev,
+          [task.id]: approved,
+        }));
+      });
+    });
+
+    return () => unsubs.forEach((u) => u && u());
+  }, [uid, tasks]);
+
+  /* ---------- TOGGLE TASK (LOCKED IF DAY 1 APPROVED) ---------- */
   async function toggleTask(id: string, next: boolean) {
     if (!uid || day1Approved) return;
 
@@ -158,7 +181,7 @@ export default function Day1Page() {
     }
   }
 
-  /* ---------- COMPLETE SECTION ---------- */
+  /* ---------- AUTO-CREATE SECTION (NO APPROVED WRITE) ---------- */
   useEffect(() => {
     if (!uid || !tasks.length) return;
     if (!tasks.every((t) => t.done)) return;
@@ -244,37 +267,58 @@ export default function Day1Page() {
       {err && <p style={{ color: "crimson" }}>{err}</p>}
 
       <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 10 }}>
-        {tasks.map((t, idx) => (
-          <li
-            key={t.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-              padding: "12px 14px",
-              borderRadius: 12,
-              background: "#fff",
-              border: `1px solid ${t.done ? "#d6ead8" : GRAY}`,
-              opacity: day1Approved ? 0.6 : 1,
-            }}
-          >
-            <button
-              onClick={() => toggleTask(t.id, !t.done)}
-              disabled={day1Approved}
+        {tasks.map((t, idx) => {
+          const approved = approvedById[t.id];
+
+          return (
+            <li
+              key={t.id}
               style={{
-                width: 22,
-                height: 22,
-                borderRadius: "50%",
-                border: `2px solid ${t.done ? GREEN : "#9aa0a6"}`,
-                background: t.done ? GREEN : "#fff",
-                cursor: day1Approved ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "#fff",
+                border: `1px solid ${t.done ? "#d6ead8" : GRAY}`,
+                opacity: day1Approved ? 0.6 : 1,
               }}
-            />
-            <div style={{ fontWeight: 600 }}>
-              {idx + 1}. {t.title ?? t.id}
-            </div>
-          </li>
-        ))}
+            >
+              <button
+                onClick={() => toggleTask(t.id, !t.done)}
+                disabled={day1Approved}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  border: `2px solid ${t.done ? GREEN : "#9aa0a6"}`,
+                  background: t.done ? GREEN : "#fff",
+                  cursor: day1Approved ? "not-allowed" : "pointer",
+                }}
+              />
+
+              <div style={{ fontWeight: 600 }}>
+                {idx + 1}. {t.title ?? t.id}
+                {approved && (
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontSize: 12,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: "#e7f6ec",
+                      border: "1px solid #c7e8d3",
+                      color: "#1b5e20",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Approved ✓
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </main>
   );
