@@ -1,4 +1,3 @@
-// day 1
 'use client';
 export const dynamic = "force-dynamic";
 
@@ -50,9 +49,7 @@ export default function Day1Page() {
   const [day1Approved, setDay1Approved] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
-  /* ---------------------------------------
-     AUTH
-  ---------------------------------------- */
+  /* ---------- AUTH ---------- */
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUid(u?.uid ?? null);
@@ -61,45 +58,17 @@ export default function Day1Page() {
     return unsub;
   }, []);
 
-  /* ---------------------------------------
-     Listen for approval (FIXED: supports legacy + new doc ids)
-  ---------------------------------------- */
+  /* ---------- LISTEN FOR TRAINER APPROVAL ---------- */
   useEffect(() => {
     if (!uid) return;
 
-    const refNew = doc(db, "users", uid, "sections", "day1");
-    const refLegacy = doc(db, "users", uid, "sections", "day-1");
-
-    let sawApproved = false;
-
-    const unsubNew = onSnapshot(refNew, (snap) => {
-      const ok = snap.exists() && snap.data()?.approved === true;
-      if (ok) {
-        sawApproved = true;
-        setDay1Approved(true);
-      } else if (!sawApproved) {
-        // don't force false if legacy might be true
-        setDay1Approved(false);
-      }
+    const ref = doc(db, "users", uid, "sections", "day1");
+    return onSnapshot(ref, (snap) => {
+      setDay1Approved(snap.exists() && snap.data()?.approved === true);
     });
-
-    const unsubLegacy = onSnapshot(refLegacy, (snap) => {
-      const ok = snap.exists() && snap.data()?.approved === true;
-      if (ok) {
-        sawApproved = true;
-        setDay1Approved(true);
-      }
-    });
-
-    return () => {
-      unsubNew();
-      unsubLegacy();
-    };
   }, [uid]);
 
-  /* ---------------------------------------
-     Load static Day 1 tasks
-  ---------------------------------------- */
+  /* ---------- LOAD TASKS ---------- */
   useEffect(() => {
     let alive = true;
 
@@ -113,11 +82,7 @@ export default function Day1Page() {
 
         const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
         const list: Task[] = snap.docs
-          .map((d) => {
-            const data = d.data() as Partial<Task>;
-            const { done, ...rest } = data;
-            return { id: d.id, ...rest, done: false };
-          })
+          .map((d) => ({ id: d.id, ...(d.data() as any), done: false }))
           .sort(
             (a, b) =>
               num(a.order ?? a.sort_order ?? 0) -
@@ -137,14 +102,12 @@ export default function Day1Page() {
     };
   }, []);
 
-  /* ---------------------------------------
-     Load saved progress (ONCE)
-  ---------------------------------------- */
+  /* ---------- LOAD SAVED PROGRESS ---------- */
   useEffect(() => {
     if (!uid || !tasks.length || hydrated) return;
 
     (async () => {
-      const qSnap = await getDocs(
+      const snap = await getDocs(
         query(
           collection(db, "users", uid, "progress"),
           where("week", "==", "day-1")
@@ -152,7 +115,7 @@ export default function Day1Page() {
       );
 
       const map: Record<string, boolean> = {};
-      qSnap.forEach((d) => {
+      snap.forEach((d) => {
         if (!d.data()?.done) return;
         const parts = d.id.split("__");
         map[parts[parts.length - 1]] = true;
@@ -163,11 +126,9 @@ export default function Day1Page() {
     })();
   }, [uid, tasks.length, hydrated]);
 
-  /* ---------------------------------------
-     Toggle task
-  ---------------------------------------- */
+  /* ---------- TOGGLE TASK (LOCKED IF APPROVED) ---------- */
   async function toggleTask(id: string, next: boolean) {
-    if (!uid) return;
+    if (!uid || day1Approved) return;
 
     setTasks((prev) =>
       prev.map((x) => (x.id === id ? { ...x, done: next } : x))
@@ -197,33 +158,7 @@ export default function Day1Page() {
     }
   }
 
-  /* ======================================================
-     ✅ ADDITIVE FIX — DASHBOARD SYNC (KEEP THIS)
-     ====================================================== */
-  useEffect(() => {
-    if (!uid || !tasks.length) return;
-
-    (async () => {
-      const storeId = await getStoreId();
-      if (!storeId) return;
-
-      const doneIds = tasks.filter((t) => t.done).map((t) => t.id);
-
-      await setDoc(
-        doc(db, "stores", String(storeId), "trainees", uid, "progress", "day-1"),
-        {
-          doneIds,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    })();
-  }, [uid, tasks]);
-  /* ====================================================== */
-
-  /* ---------------------------------------
-     Section completion
-  ---------------------------------------- */
+  /* ---------- COMPLETE SECTION ---------- */
   useEffect(() => {
     if (!uid || !tasks.length) return;
     if (!tasks.every((t) => t.done)) return;
@@ -238,35 +173,51 @@ export default function Day1Page() {
   const doneCount = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
-  if (authLoading || loading) return <main style={{ padding: 24 }}>Loading…</main>;
+  if (authLoading || loading) {
+    return <main style={{ padding: 24 }}>Loading…</main>;
+  }
 
-  /* ---------------------------------------
-     UI — YOUR ORIGINAL CSS
-  ---------------------------------------- */
+  /* ---------- UI ---------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ marginBottom: 16 }}>
-        <Link
-          href="/dashboard"
+      <Link
+        href="/dashboard"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          background: "#fff",
+          border: `1px solid ${GRAY}`,
+          borderRadius: 999,
+          padding: "8px 14px",
+          fontWeight: 600,
+          color: NAVY,
+          textDecoration: "none",
+        }}
+      >
+        ← Back to Dashboard
+      </Link>
+
+      {day1Approved && (
+        <div
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            textDecoration: "none",
-            background: "#fff",
-            border: `1px solid ${GRAY}`,
-            borderRadius: 999,
-            padding: "8px 14px",
+            marginTop: 16,
+            marginBottom: 16,
+            padding: "12px 16px",
+            borderRadius: 8,
+            background: "#e7f6ec",
+            border: "1px solid #c7e8d3",
+            color: "#1b5e20",
             fontWeight: 600,
-            color: NAVY,
-            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
           }}
         >
-          ← Back to Dashboard
-        </Link>
-      </div>
+          Day 1 approved ✓
+        </div>
+      )}
 
-      <h2 style={{ marginBottom: 6 }}>{pageTitle} — Tasks</h2>
+      <h2 style={{ marginBottom: 6 }}>
+        {pageTitle} — Tasks
+      </h2>
 
       <div style={{ fontSize: 14, marginBottom: 6 }}>
         {doneCount}/{tasks.length} completed ({pct}%)
@@ -286,55 +237,44 @@ export default function Day1Page() {
             width: `${pct}%`,
             height: "100%",
             background: YELLOW,
-            transition: "width .2s ease",
           }}
         />
       </div>
 
-      {err && <p style={{ color: "crimson" }}>Error: {err}</p>}
+      {err && <p style={{ color: "crimson" }}>{err}</p>}
 
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "grid",
-          gap: 10,
-        }}
-      >
-        {tasks.map((t, idx) => {
-          const done = !!t.done;
-          return (
-            <li
-              key={t.id}
+      <ul style={{ listStyle: "none", padding: 0, display: "grid", gap: 10 }}>
+        {tasks.map((t, idx) => (
+          <li
+            key={t.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              padding: "12px 14px",
+              borderRadius: 12,
+              background: "#fff",
+              border: `1px solid ${t.done ? "#d6ead8" : GRAY}`,
+              opacity: day1Approved ? 0.6 : 1,
+            }}
+          >
+            <button
+              onClick={() => toggleTask(t.id, !t.done)}
+              disabled={day1Approved}
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-                padding: "12px 14px",
-                borderRadius: 12,
-                background: "#fff",
-                border: `1px solid ${done ? "#d6ead8" : GRAY}`,
-                position: "relative",
+                width: 22,
+                height: 22,
+                borderRadius: "50%",
+                border: `2px solid ${t.done ? GREEN : "#9aa0a6"}`,
+                background: t.done ? GREEN : "#fff",
+                cursor: day1Approved ? "not-allowed" : "pointer",
               }}
-            >
-              <button
-                onClick={() => toggleTask(t.id, !done)}
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: "50%",
-                  border: `2px solid ${done ? GREEN : "#9aa0a6"}`,
-                  background: done ? GREEN : "#fff",
-                  cursor: "pointer",
-                }}
-              />
-              <div style={{ fontWeight: 600 }}>
-                {idx + 1}. {t.title ?? t.id}
-              </div>
-            </li>
-          );
-        })}
+            />
+            <div style={{ fontWeight: 600 }}>
+              {idx + 1}. {t.title ?? t.id}
+            </div>
+          </li>
+        ))}
       </ul>
     </main>
   );
