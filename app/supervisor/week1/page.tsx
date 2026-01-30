@@ -78,7 +78,7 @@ export default function SupervisorWeek1Page() {
         });
         setTasksById(byId);
 
-        // 2️⃣ Load this trainee’s Week-1 progress
+        // 2️⃣ Load trainee Week-1 progress
         const progSnap = await getDocs(
           query(
             collection(db, "users", traineeId, "progress"),
@@ -86,7 +86,7 @@ export default function SupervisorWeek1Page() {
           )
         );
 
-        // 3️⃣ Filter + map (done but not yet approved)
+        // 3️⃣ Only tasks that are done but not approved
         const data: ProgDoc[] = progSnap.docs
           .map((d) => ({ id: d.id, ...(d.data() as any) }))
           .filter((p) => byId[getTaskKey(p.id)])
@@ -115,17 +115,17 @@ export default function SupervisorWeek1Page() {
   }, [traineeId]);
 
   /* ============================================
-     APPROVAL TOGGLE (FIXED)
+     APPROVAL TOGGLE — REAL FIX
   ============================================ */
   async function setApproved(p: ProgDoc, next: boolean) {
     if (!traineeId) return;
 
-    // Optimistic UI update
+    // optimistic UI
     setItems((prev) =>
       prev.map((x) => (x.id === p.id ? { ...x, approved: next } : x))
     );
 
-    // Save approval on task
+    // write approval to task
     await setDoc(
       doc(db, "users", traineeId, "progress", p.id),
       {
@@ -136,13 +136,19 @@ export default function SupervisorWeek1Page() {
       { merge: true }
     );
 
-    // ✅ NEW: if this was the LAST pending Week-1 task, unlock Week 2
+    // 🔑 AUTHORITATIVE CHECK — REQUERY FIRESTORE
     if (next === true) {
-      const remaining = items.filter(
-        (i) => i.id !== p.id && i.approved !== true
+      const remainingSnap = await getDocs(
+        query(
+          collection(db, "users", traineeId, "progress"),
+          where("week", "==", "week1"),
+          where("done", "==", true),
+          where("approved", "!=", true)
+        )
       );
 
-      if (remaining.length === 0) {
+      // If nothing left unapproved → unlock Week 2
+      if (remainingSnap.empty) {
         await setDoc(
           doc(db, "users", traineeId, "sections", "week1"),
           {
@@ -206,8 +212,7 @@ export default function SupervisorWeek1Page() {
           ) : (
             <ul className="space-y-2">
               {items.map((p) => {
-                const key = getTaskKey(p.id);
-                const meta = tasksById[key];
+                const meta = tasksById[getTaskKey(p.id)];
                 return (
                   <li
                     key={p.id}
