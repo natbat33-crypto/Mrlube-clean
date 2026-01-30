@@ -12,6 +12,7 @@ import {
   updateDoc,
   query,
   where,
+  setDoc,
 } from "firebase/firestore";
 import { assignTrainee } from "@/lib/assignments";
 
@@ -23,8 +24,6 @@ type Emp = {
   name?: string;
   email?: string;
   active?: boolean;
-  trainer?: string;
-  supervisor?: string;
 };
 
 type Store = {
@@ -48,6 +47,11 @@ export default function GMUsersPage() {
   const [status, setStatus] = useState("");
 
   const [loading, setLoading] = useState(true);
+
+  /* ===== NEW EMPLOYEES ===== */
+  const [showNewEmployees, setShowNewEmployees] = useState(false);
+  const [newEmployees, setNewEmployees] = useState<Emp[]>([]);
+  const [newEmpStatus, setNewEmpStatus] = useState("");
 
   /* ---------- AUTH ---------- */
   useEffect(() => {
@@ -101,7 +105,64 @@ export default function GMUsersPage() {
     })();
   }, [storeId]);
 
-  /* ---------- ASSIGN ---------- */
+  /* ---------- LOAD NEW EMPLOYEES ---------- */
+  useEffect(() => {
+    if (!storeId || !showNewEmployees) return;
+
+    (async () => {
+      try {
+        setNewEmpStatus("Loading…");
+
+        const snap = await getDocs(
+          query(collection(db, "users"), where("storeId", "==", storeId))
+        );
+
+        const awaiting = snap.docs
+          .map((d) => ({ uid: d.id, ...(d.data() as any) }))
+          .filter(
+            (u) =>
+              (u.role === "employee" || !u.role) &&
+              u.active !== false &&
+              u.uid !== uid
+          );
+
+        setNewEmployees(awaiting);
+        setNewEmpStatus("");
+      } catch {
+        setNewEmpStatus("Failed to load");
+      }
+    })();
+  }, [storeId, showNewEmployees, uid]);
+
+  /* ---------- ASSIGN NEW EMPLOYEE ---------- */
+  async function assignNewEmployee(userId: string, role: string) {
+    if (!storeId) return;
+
+    try {
+      setNewEmpStatus("Assigning…");
+
+      await updateDoc(doc(db, "users", userId), {
+        role,
+        storeId,
+        active: true,
+      });
+
+      await setDoc(
+        doc(db, "stores", storeId, "employees", userId),
+        { role, active: true },
+        { merge: true }
+      );
+
+      setNewEmployees((prev) => prev.filter((u) => u.uid !== userId));
+
+      setNewEmpStatus("Assigned ✓");
+      setTimeout(() => setNewEmpStatus(""), 1000);
+    } catch {
+      setNewEmpStatus("Failed");
+    }
+  }
+
+  /* ---------- ASSIGN TRAINEE → TRAINER ---------- */
   async function doAssign() {
     if (!storeId || !selTrainee || !selTrainer) return;
 
@@ -131,7 +192,6 @@ export default function GMUsersPage() {
 
   return (
     <main className="max-w-4xl mx-auto p-6 space-y-6">
-      {/* HEADER */}
       <header className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Store Users</h1>
@@ -142,7 +202,6 @@ export default function GMUsersPage() {
           )}
         </div>
 
-        {/* ⭐ FIXED → GM VERSION */}
         <Link
           href="/gm"
           className="text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
@@ -151,7 +210,65 @@ export default function GMUsersPage() {
         </Link>
       </header>
 
-      {/* TRAINEES */}
+      {/* NEW EMPLOYEES */}
+      <section className="rounded-xl border bg-white p-5">
+        <div className="flex justify-between items-center">
+          <h2 className="font-semibold">New Employees</h2>
+          <button
+            onClick={() => setShowNewEmployees((v) => !v)}
+            className="text-sm border rounded-full px-3 py-1.5 hover:bg-gray-50"
+          >
+            {showNewEmployees ? "Hide ←" : "Manage →"}
+          </button>
+        </div>
+
+        {showNewEmployees && (
+          <div className="mt-4 space-y-3">
+            {newEmpStatus && (
+              <div className="text-sm text-gray-500">{newEmpStatus}</div>
+            )}
+
+            {newEmployees.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                No new employees waiting.
+              </p>
+            ) : (
+              newEmployees.map((u) => (
+                <div
+                  key={u.uid}
+                  className="flex justify-between items-center border rounded-lg p-3 bg-yellow-50"
+                >
+                  <div>
+                    <div className="font-medium">
+                      {u.name || u.email}
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      Awaiting role
+                    </div>
+                  </div>
+
+                  <select
+                    defaultValue=""
+                    onChange={(e) =>
+                      assignNewEmployee(u.uid, e.target.value)
+                    }
+                    className="border rounded px-2 py-1 text-sm"
+                  >
+                    <option value="" disabled>
+                      Assign role…
+                    </option>
+                    <option value="trainee">Trainee</option>
+                    <option value="supervisor">Trainer</option>
+                    <option value="manager">Manager</option>
+                  </select>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* EXISTING SECTIONS — UNCHANGED */}
       <Section title="Trainees">
         {trainees.length === 0
           ? "No trainees."
@@ -165,7 +282,6 @@ export default function GMUsersPage() {
             ))}
       </Section>
 
-      {/* TRAINERS */}
       <Section title="Trainers">
         {trainers.length === 0
           ? "No trainers."
@@ -179,7 +295,6 @@ export default function GMUsersPage() {
             ))}
       </Section>
 
-      {/* MANAGERS */}
       <Section title="Managers">
         {managers.length === 0
           ? "No managers."
@@ -188,7 +303,6 @@ export default function GMUsersPage() {
             ))}
       </Section>
 
-      {/* ASSIGN */}
       <section className="rounded-xl border bg-white p-5">
         <h2 className="font-semibold mb-3">Assign Trainee → Trainer</h2>
 
@@ -237,13 +351,7 @@ export default function GMUsersPage() {
 
 /* ================= COMPONENTS ================= */
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: any;
-}) {
+function Section({ title, children }: { title: string; children: any }) {
   return (
     <section className="rounded-xl border bg-white p-5">
       <h2 className="font-semibold mb-3">{title}</h2>
@@ -265,15 +373,8 @@ function UserRow({
 }) {
   return (
     <div className="flex justify-between items-center gap-4 border rounded-lg p-3">
-      <div className="min-w-0">
-        <div className="font-medium truncate">
-          {user.name || user.email}
-        </div>
-        {user.email && user.name && (
-          <div className="text-xs text-gray-500 truncate">
-            {user.email}
-          </div>
-        )}
+      <div>
+        <div className="font-medium">{user.name || user.email}</div>
         <div className="text-xs text-gray-600">{roleLabel}</div>
       </div>
 
