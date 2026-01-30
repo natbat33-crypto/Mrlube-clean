@@ -42,30 +42,6 @@ function timerRefs(uid: string, taskId: string) {
   return { aggRef, sessionsCol };
 }
 
-async function resolveStoreId(): Promise<string> {
-  const u = auth.currentUser;
-
-  if (u) {
-    const tok = await u.getIdTokenResult(true);
-    if (tok?.claims?.storeId) return String(tok.claims.storeId);
-  }
-
-  if (typeof window !== "undefined") {
-    const ls = localStorage.getItem("storeId");
-    if (ls) return ls;
-  }
-
-  if (u) {
-    const guess = ["24", "26", "262", "276", "298", "46", "79", "163"];
-    for (const sid of guess) {
-      const snap = await getDoc(doc(db, "stores", sid, "employees", u.uid));
-      if (snap.exists()) return sid;
-    }
-  }
-
-  return "";
-}
-
 /* -------------------------------------- */
 /* Supervisor Week 4 Page                 */
 /* -------------------------------------- */
@@ -77,81 +53,50 @@ export default function SupervisorWeek4Page() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  /* Load trainees */
   useEffect(() => {
     (async () => {
-      try {
-        const sid = await resolveStoreId();
-        setStoreId(sid);
-        if (!sid) return;
+      const sup = auth.currentUser;
+      if (!sup) return;
 
-        const sup = auth.currentUser;
-        if (!sup) return;
+      const traineesSnap = await getDocs(
+        query(
+          collection(db, "stores", "24", "trainees"),
+          where("active", "==", true),
+          where("supervisorId", "==", sup.uid)
+        )
+      );
 
-        const traineesSnap = await getDocs(
-          query(
-            collection(db, "stores", sid, "trainees"),
-            where("active", "==", true),
-            where("supervisorId", "==", sup.uid)
-          )
-        );
-
-        const list: { id: string; name: string }[] = [];
-
-        for (const d of traineesSnap.docs) {
-          const uSnap = await getDoc(doc(db, "users", d.id));
-          const u = uSnap.exists() ? uSnap.data() : {};
-
-          const name =
-            (u as any).email?.trim?.() ||
-            (u as any).name ||
-            (u as any).displayName ||
-            d.id;
-
-          list.push({ id: d.id, name });
-        }
-
-        setTrainees(list);
-        if (list.length > 0) setSelectedTrainee(list[0].id);
-      } catch (err) {
-        console.error("Week4 trainee load error:", err);
+      const list: any[] = [];
+      for (const d of traineesSnap.docs) {
+        const uSnap = await getDoc(doc(db, "users", d.id));
+        const u = uSnap.exists() ? uSnap.data() : {};
+        list.push({
+          id: d.id,
+          name: (u as any).name || (u as any).email || d.id,
+        });
       }
+
+      setTrainees(list);
+      if (list.length) setSelectedTrainee(list[0].id);
     })();
   }, []);
 
-  /* Load Week 4 Tasks */
   useEffect(() => {
     (async () => {
-      try {
-        const snap = await getDocs(collection(db, "modules", "week4", "tasks"));
-        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-
-        list.sort(
-          (a, b) =>
-            (a.order ?? a.sort_order ?? 9999) -
-            (b.order ?? b.sort_order ?? 9999)
-        );
-
-        setTasks(list);
-      } finally {
-        setLoading(false);
-      }
+      const snap = await getDocs(collection(db, "modules", "week4", "tasks"));
+      const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      list.sort(
+        (a, b) =>
+          (a.order ?? a.sort_order ?? 9999) -
+          (b.order ?? b.sort_order ?? 9999)
+      );
+      setTasks(list);
+      setLoading(false);
     })();
   }, []);
 
   if (loading) return <main className="p-6">Loading…</main>;
-  if (trainees.length === 0) {
-    return (
-      <main className="p-6 text-sm">
-        <Link href="/supervisor" className="rounded-full border px-3 py-1.5">
-          ← Back
-        </Link>
-        <p className="text-red-600 mt-4">No trainees assigned.</p>
-      </main>
-    );
-  }
-
-  const traineeId = selectedTrainee!;
+  if (!selectedTrainee) return null;
 
   return (
     <div className="space-y-6">
@@ -159,10 +104,10 @@ export default function SupervisorWeek4Page() {
         ← Back to Dashboard
       </Link>
 
-      <h2 className="text-xl font-semibold">Week 4 — Timers</h2>
+      <h2 className="text-xl font-semibold">Week 4</h2>
 
       <select
-        value={traineeId}
+        value={selectedTrainee}
         onChange={(e) => setSelectedTrainee(e.target.value)}
         className="border px-2 py-1 rounded-md text-sm"
       >
@@ -174,19 +119,68 @@ export default function SupervisorWeek4Page() {
       </select>
 
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
-        {tasks.map((t) => (
-          <TimerCard key={t.id} task={t} uid={traineeId} storeId={storeId} />
-        ))}
+        {tasks.map((task) => {
+          const isApprovalTask =
+            task.order === 1 || task.sort_order === 1;
+
+          return isApprovalTask ? (
+            <ApprovalCard
+              key={task.id}
+              task={task}
+              uid={selectedTrainee}
+            />
+          ) : (
+            <TimerCard
+              key={task.id}
+              task={task}
+              uid={selectedTrainee}
+            />
+          );
+        })}
       </div>
     </div>
   );
 }
 
 /* -------------------------------------- */
-/* TimerCard Component                    */
+/* Approval Task (FIRST TASK ONLY)         */
 /* -------------------------------------- */
 
-function TimerCard({ task, uid, storeId }: any) {
+function ApprovalCard({ task, uid }: any) {
+  const key = `modules__week4__tasks__${task.id}`;
+
+  async function approve() {
+    await setDoc(
+      doc(db, "users", uid, "progress", key),
+      {
+        week: "week4",
+        traineeId: uid,
+        done: true,
+        approved: true,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+
+  return (
+    <div className="border rounded-lg p-4 bg-white">
+      <div className="text-sm mb-3">{task.title}</div>
+      <button
+        onClick={approve}
+        className="px-3 py-1.5 rounded-md bg-green-600 text-white text-sm"
+      >
+        Approve
+      </button>
+    </div>
+  );
+}
+
+/* -------------------------------------- */
+/* Timer Task Card (UNCHANGED CORE)        */
+/* -------------------------------------- */
+
+function TimerCard({ task, uid }: any) {
   const { aggRef, sessionsCol } = useMemo(
     () => timerRefs(uid, task.id),
     [uid, task.id]
@@ -214,49 +208,33 @@ function TimerCard({ task, uid, storeId }: any) {
     startRef.current = null;
     setRunning(false);
 
-    await addDoc(sessionsCol, { ms: elapsed, createdAt: serverTimestamp() });
+    await addDoc(sessionsCol, {
+      ms: elapsed,
+      createdAt: serverTimestamp(),
+    });
 
     const key = `modules__week4__tasks__${task.id}`;
 
     await setDoc(
       doc(db, "users", uid, "progress", key),
       {
-        path: `modules/week4/tasks/${task.id}`,
         week: "week4",
-        storeId,
         traineeId: uid,
         done: true,
-        completedAt: serverTimestamp(),
+        lastMs: elapsed,
+        bestMs,
+        avgMs,
+        count: count + 1,
+        updatedAt: serverTimestamp(),
       },
       { merge: true }
     );
   }
 
-  /* 🔒 AUTHORITATIVE WEEK-4 ENFORCEMENT */
-  useEffect(() => {
-    const q = query(
-      collection(db, "users", uid, "progress"),
-      where("week", "==", "week4")
-    );
-
-    return onSnapshot(q, (snap) => {
-      const docs = snap.docs.map((d) => d.data());
-      const allDone = docs.length > 0 && docs.every((d) => d.done === true);
-
-      setDoc(
-        doc(db, "users", uid, "sections", "week4"),
-        {
-          approved: allDone,
-          approvedAt: allDone ? serverTimestamp() : deleteField(),
-        },
-        { merge: true }
-      );
-    });
-  }, [uid]);
-
   return (
     <div className="border rounded-lg p-4 bg-white">
-      <div className="text-sm mb-2">{task.title ?? task.id}</div>
+      <div className="text-sm mb-2">{task.title}</div>
+
       <button
         onClick={() => {
           if (!running) {
@@ -277,4 +255,3 @@ function TimerCard({ task, uid, storeId }: any) {
     </div>
   );
 }
-
