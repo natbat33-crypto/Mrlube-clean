@@ -83,14 +83,14 @@ export default function SupervisorWeek1Page() {
           query(
             collection(db, "users", traineeId, "progress"),
             where("week", "==", "week1"),
-            where("done", "==", true)
           )
         );
 
         /* 3️⃣ Filter + map */
         const data: ProgDoc[] = progSnap.docs
           .map((d) => ({ id: d.id, ...(d.data() as any) }))
-          .filter((p) => byId[getTaskKey(p.id)]);
+          .filter((p) => byId[getTaskKey(p.id)])
+          .filter((p) => p.done === true && p.approved !== true);
 
         /* 4️⃣ Sort by module order */
         data.sort((a, b) => {
