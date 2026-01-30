@@ -60,58 +60,30 @@ type ProgressMap = Record<string, ProgressItem>;
 ---------------------------------- */
 export default function Day1SupervisorPage() {
   const [authLoading, setAuthLoading] = useState(true);
-  const [supervisorUid, setSupervisorUid] = useState<string | null>(null);
 
-  const [tasksById, setTasksById] = useState<Record<string, Task>>({});
   const [tasks, setTasks] = useState<Task[]>([]);
   const [progress, setProgress] = useState<ProgressMap>({});
   const [loadingTasks, setLoadingTasks] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const searchParams = useSearchParams();
   const asParam = searchParams.get("as");
 
   const { storeId: ctxStoreId } = useStoreCtx();
-  const [storeId, setStoreId] = useState<string | null>(ctxStoreId ?? null);
-  const trainees = useSupervisorTrainees(storeId);
+  const trainees = useSupervisorTrainees(ctxStoreId ?? null);
 
-  const [selectedTraineeId, setSelectedTraineeId] = useState<string | null>(
-    asParam
-  );
+  const selectedTraineeId = useMemo(() => {
+    const uid = asParam ?? getStoredReviewUid() ?? "";
+    if (uid) setStoredReviewUid(uid);
+    return uid.trim();
+  }, [asParam]);
 
   /* ---------------- AUTH ---------------- */
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setSupervisorUid(u?.uid ?? null);
+    const unsub = onAuthStateChanged(auth, () => {
       setAuthLoading(false);
     });
     return unsub;
   }, []);
-
-  /* ---------------- STORE SYNC ---------------- */
-  useEffect(() => {
-    if (ctxStoreId) setStoreId(ctxStoreId);
-  }, [ctxStoreId]);
-
-  /* ---------------- DEFAULT TRAINEE (LOCKED) ---------------- */
-  useEffect(() => {
-    if (asParam) {
-      setSelectedTraineeId(asParam);
-      setStoredReviewUid(asParam);
-      return;
-    }
-
-    const stored = getStoredReviewUid();
-    if (!selectedTraineeId && stored) {
-      setSelectedTraineeId(stored);
-      return;
-    }
-
-    if (!selectedTraineeId && trainees.length > 0) {
-      setSelectedTraineeId(trainees[0].traineeId);
-      setStoredReviewUid(trainees[0].traineeId);
-    }
-  }, [asParam, trainees, selectedTraineeId]);
 
   /* ---------------- LOAD TASKS ---------------- */
   useEffect(() => {
@@ -122,13 +94,10 @@ export default function Day1SupervisorPage() {
         setLoadingTasks(true);
 
         const snap = await getDocs(collection(db, "days", "day-1", "tasks"));
-        const byId: Record<string, Task> = {};
         const list: Task[] = [];
 
         snap.docs.forEach((d) => {
-          const meta = { id: d.id, ...(d.data() as any) };
-          byId[d.id] = meta;
-          list.push(meta);
+          list.push({ id: d.id, ...(d.data() as any) });
         });
 
         list.sort((a, b) => {
@@ -139,10 +108,6 @@ export default function Day1SupervisorPage() {
 
         if (!alive) return;
         setTasks(list);
-        setTasksById(byId);
-      } catch (e: any) {
-        if (!alive) return;
-        setError(e?.message ?? "Failed to load tasks");
       } finally {
         if (alive) setLoadingTasks(false);
       }
@@ -153,16 +118,45 @@ export default function Day1SupervisorPage() {
     };
   }, []);
 
+  /* ---------------- HARD GUARD ---------------- */
+  if (authLoading || loadingTasks) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">Loading…</div>
+    );
+  }
+
+  if (!selectedTraineeId) {
+    return (
+      <div className="space-y-6">
+        <Link
+          href={`/supervisor`}
+          className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
+        >
+          ← Back to Dashboard
+        </Link>
+
+        <Card className="border-primary/20">
+          <CardHeader>
+            <CardTitle>Review — Day 1</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              No trainee selected.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   /* ---------------- LISTEN TO PROGRESS ---------------- */
   useEffect(() => {
-    if (!selectedTraineeId) return;
-
     const qRef = query(
       collection(db, "users", selectedTraineeId, "progress"),
       where("week", "==", "day-1")
     );
 
-    const unsub = onSnapshot(qRef, (snap) => {
+    return onSnapshot(qRef, (snap) => {
       const map: ProgressMap = {};
 
       snap.forEach((d) => {
@@ -178,13 +172,11 @@ export default function Day1SupervisorPage() {
 
       setProgress(map);
     });
-
-    return unsub;
   }, [selectedTraineeId]);
 
   /* ---------------- AUTO-SET SECTION APPROVAL ---------------- */
   useEffect(() => {
-    if (!selectedTraineeId || tasks.length === 0) return;
+    if (tasks.length === 0) return;
 
     const allApproved =
       tasks.length > 0 &&
@@ -197,15 +189,11 @@ export default function Day1SupervisorPage() {
         approvedAt: allApproved ? serverTimestamp() : deleteField(),
       },
       { merge: true }
-    ).catch((e) =>
-      console.error("[Day1 supervisor] section approval write:", e)
-    );
-  }, [selectedTraineeId, tasks, progress]);
+    ).catch(() => {});
+  }, [tasks, progress, selectedTraineeId]);
 
   /* ---------------- APPROVE TOGGLE ---------------- */
   async function toggleApprove(taskId: string, next: boolean) {
-    if (!selectedTraineeId) return;
-
     const key = `days__day-1__tasks__${taskId}`;
 
     await setDoc(
@@ -225,23 +213,15 @@ export default function Day1SupervisorPage() {
     [tasks, progress]
   );
 
-  const pct = useMemo(
-    () =>
-      tasks.length ? Math.round((approvedCount / tasks.length) * 100) : 0,
-    [approvedCount, tasks.length]
-  );
+  const pct = tasks.length
+    ? Math.round((approvedCount / tasks.length) * 100)
+    : 0;
 
   /* ---------------- UI ---------------- */
-  if (authLoading || loadingTasks) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground">Loading…</div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <Link
-        href={`/supervisor?as=${selectedTraineeId ?? ""}`}
+        href={`/supervisor?as=${selectedTraineeId}`}
         className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm bg-white hover:bg-muted transition"
       >
         ← Back to Dashboard
