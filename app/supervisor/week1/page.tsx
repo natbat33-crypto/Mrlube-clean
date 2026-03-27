@@ -9,6 +9,8 @@ import {
   collection,
   doc,
   getDocs,
+  getDoc,
+  addDoc,
   query,
   where,
   setDoc,
@@ -21,7 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
 /* ============================================
-   HELPERS — invariant persistence
+   HELPERS
 ============================================ */
 function getStoredReviewUid(): string | null {
   if (typeof window === "undefined") return null;
@@ -31,6 +33,11 @@ function getStoredReviewUid(): string | null {
 function setStoredReviewUid(uid: string) {
   if (typeof window === "undefined") return;
   localStorage.setItem("reviewUid", uid);
+}
+
+function getTaskKey(id: string) {
+  const parts = id.split("__");
+  return parts[parts.length - 1];
 }
 
 /* ============================================
@@ -51,14 +58,6 @@ type ProgressItem = {
 type ProgressMap = Record<string, ProgressItem>;
 
 /* ============================================
-   HELPERS
-============================================ */
-function getTaskKey(id: string) {
-  const parts = id.split("__");
-  return parts[parts.length - 1];
-}
-
-/* ============================================
    COMPONENT
 ============================================ */
 export default function SupervisorWeek1Page() {
@@ -76,7 +75,7 @@ export default function SupervisorWeek1Page() {
   const [loading, setLoading] = useState(true);
 
   /* ============================================
-     HARD GUARD — NO TRAINEE, NO READS
+     HARD GUARD
   ============================================ */
   if (!selectedTraineeId) {
     return (
@@ -87,15 +86,10 @@ export default function SupervisorWeek1Page() {
         >
           ← Back to Dashboard
         </Link>
-
         <Card className="border-primary/20">
-          <CardHeader>
-            <CardTitle>Review — Week 1</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle>Review — Week 1</CardTitle></CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              No trainee selected.
-            </p>
+            <p className="text-sm text-muted-foreground">No trainee selected.</p>
           </CardContent>
         </Card>
       </div>
@@ -107,27 +101,19 @@ export default function SupervisorWeek1Page() {
   ============================================ */
   useEffect(() => {
     let alive = true;
-
     (async () => {
       try {
         setLoading(true);
-
-        const snap = await getDocs(
-          collection(db, "modules", "week1", "tasks")
-        );
-
+        const snap = await getDocs(collection(db, "modules", "week1", "tasks"));
         const list: TaskMeta[] = [];
-
         snap.docs.forEach((d) => {
           list.push({ id: d.id, ...(d.data() as any) });
         });
-
         list.sort((a, b) => {
           const oa = a.order ?? a.sort_order ?? 9999;
           const ob = b.order ?? b.sort_order ?? 9999;
           return oa - ob;
         });
-
         if (!alive) return;
         setTasks(list);
       } catch (e) {
@@ -136,46 +122,33 @@ export default function SupervisorWeek1Page() {
         if (alive) setLoading(false);
       }
     })();
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   /* ============================================
-     LISTEN TO TRAINEE PROGRESS (SCOPED)
+     LISTEN TO TRAINEE PROGRESS
   ============================================ */
   useEffect(() => {
     const qRef = query(
       collection(db, "users", selectedTraineeId, "progress"),
       where("week", "==", "week1")
     );
-
     return onSnapshot(qRef, (snap) => {
       const map: ProgressMap = {};
-
       snap.forEach((d) => {
         const key = getTaskKey(d.id);
-        map[key] = {
-          done: !!d.data()?.done,
-          approved: !!d.data()?.approved,
-        };
+        map[key] = { done: !!d.data()?.done, approved: !!d.data()?.approved };
       });
-
       setProgress(map);
     });
   }, [selectedTraineeId]);
 
   /* ============================================
-     AUTO-SET SECTION APPROVAL (SCOPED)
+     AUTO-SET SECTION APPROVAL
   ============================================ */
   useEffect(() => {
     if (tasks.length === 0) return;
-
-    const allApproved =
-      tasks.length > 0 &&
-      tasks.every((t) => progress[t.id]?.approved === true);
-
+    const allApproved = tasks.length > 0 && tasks.every((t) => progress[t.id]?.approved === true);
     setDoc(
       doc(db, "users", selectedTraineeId, "sections", "week1"),
       {
@@ -183,13 +156,11 @@ export default function SupervisorWeek1Page() {
         approvedAt: allApproved ? serverTimestamp() : deleteField(),
       },
       { merge: true }
-    ).catch((e) =>
-      console.error("[Week1 supervisor] section approval write:", e)
-    );
+    ).catch((e) => console.error("[Week1 supervisor] section approval write:", e));
   }, [tasks, progress, selectedTraineeId]);
 
   /* ============================================
-     APPROVE / UNAPPROVE TASK
+     APPROVE / UNAPPROVE + EMAIL TRAINEE
   ============================================ */
   async function toggleApprove(taskId: string, next: boolean) {
     const key = `modules__week1__tasks__${taskId}`;
@@ -203,6 +174,50 @@ export default function SupervisorWeek1Page() {
       },
       { merge: true }
     );
+
+    if (next) {
+      try {
+        const updatedProgress = {
+          ...progress,
+          [taskId]: { ...progress[taskId], approved: true },
+        };
+        const allApproved = tasks.every(
+          (t) => updatedProgress[t.id]?.approved === true
+        );
+
+        if (allApproved) {
+          const traineeSnap = await getDoc(doc(db, "users", selectedTraineeId));
+          const traineeData = traineeSnap.data();
+          const traineeEmail: string | undefined = traineeData?.email;
+          const traineeName: string = traineeData?.name ?? traineeData?.email ?? "Trainee";
+
+          if (traineeEmail) {
+            await addDoc(collection(db, "mail"), {
+              to: traineeEmail,
+              message: {
+                subject: `Week 1 approved!`,
+                html: `
+                  <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                    <div style="background:#0b3d91;padding:20px 24px;">
+                      <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                    </div>
+                    <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                      <p>Hi ${traineeName},</p>
+                      <p>Your <strong>Week 1</strong> has been approved by your trainer!</p>
+                      <p style="color:#555;font-size:14px;">
+                        Log in to the Mr Lube Training portal to continue to Week 2.
+                      </p>
+                    </div>
+                  </div>
+                `,
+              },
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("[week1 approve notify] email failed:", e);
+      }
+    }
   }
 
   /* ============================================
@@ -213,17 +228,15 @@ export default function SupervisorWeek1Page() {
     [tasks, progress]
   );
 
-  const pct = tasks.length
-    ? Math.round((approvedCount / tasks.length) * 100)
-    : 0;
+  const pct = tasks.length ? Math.round((approvedCount / tasks.length) * 100) : 0;
 
-  /* ============================================
-     RENDER
-  ============================================ */
   if (loading) {
     return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
   }
 
+  /* ============================================
+     RENDER
+  ============================================ */
   return (
     <div className="space-y-6">
       <Link
@@ -242,9 +255,7 @@ export default function SupervisorWeek1Page() {
           <div className="flex flex-wrap items-end gap-6">
             <div className="text-sm text-muted-foreground">
               <span className="font-medium">{approvedCount}</span> approved •{" "}
-              <span className="font-medium">
-                {tasks.length - approvedCount}
-              </span>{" "}
+              <span className="font-medium">{tasks.length - approvedCount}</span>{" "}
               waiting • <span className="font-medium">{pct}%</span> approved
             </div>
 

@@ -9,6 +9,8 @@ import { getStoreId } from "@/lib/getStoreId";
 import {
   collection,
   getDocs,
+  getDoc,
+  addDoc,
   orderBy,
   query,
   setDoc,
@@ -53,7 +55,6 @@ export default function Week1Page() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ NEW: Day 1 authority (live)
   const [day1Approved, setDay1Approved] = useState<boolean | null>(null);
 
   /* ----------------------------------
@@ -68,17 +69,14 @@ export default function Week1Page() {
   }, []);
 
   /* ----------------------------------
-     ✅ 1b. DAY 1 AUTHORITY (LIVE)
-     Current approval state overrides history
+     1b. DAY 1 AUTHORITY (LIVE)
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
     const ref = doc(db, "users", uid, "sections", "day1");
     const unsub = onSnapshot(ref, (snap) => {
       setDay1Approved(snap.exists() && snap.data()?.approved === true);
     });
-
     return unsub;
   }, [uid]);
 
@@ -91,8 +89,6 @@ export default function Week1Page() {
     (async () => {
       try {
         const col = collection(db, "modules", "week1", "tasks");
-
-        // keep your existing ordering behavior
         const q = query(col, orderBy("order", "asc"));
         const snap = await getDocs(q);
 
@@ -108,12 +104,8 @@ export default function Week1Page() {
           };
         });
 
-        if (alive) {
-          setTasks(list);
-          setErr(null);
-        }
+        if (alive) { setTasks(list); setErr(null); }
       } catch (e: any) {
-        // if orderBy fails for any reason, fallback to unsorted fetch then sort locally
         try {
           const col = collection(db, "modules", "week1", "tasks");
           const snap = await getDocs(query(col));
@@ -124,26 +116,16 @@ export default function Week1Page() {
               const bo = b.order ?? b.sort_order ?? 9999;
               return ao - bo;
             });
-
-          if (alive) {
-            setTasks(list);
-            setErr(null);
-          }
+          if (alive) { setTasks(list); setErr(null); }
         } catch (e2: any) {
-          if (alive) {
-            console.error("[Week1] fetch error:", e2);
-            setErr(e2?.message ?? String(e2));
-            setTasks([]);
-          }
+          if (alive) { console.error("[Week1] fetch error:", e2); setErr(e2?.message ?? String(e2)); setTasks([]); }
         }
       } finally {
         if (alive) setLoading(false);
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   /* ----------------------------------
@@ -151,12 +133,10 @@ export default function Week1Page() {
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
     const ref = doc(db, "users", uid, "sections", "week1");
     const unsub = onSnapshot(ref, (snap) => {
       setWeekApproved(snap.data()?.approved === true);
     });
-
     return unsub;
   }, [uid]);
 
@@ -169,13 +149,9 @@ export default function Week1Page() {
     const unsubs = tasks.map((task: Task) => {
       const key = `modules__week1__tasks__${task.id}`;
       const ref = doc(db, "users", uid, "progress", key);
-
       return onSnapshot(ref, (snap) => {
         const approved = !!snap.data()?.approved;
-        setApprovedById((prev) => ({
-          ...prev,
-          [task.id]: approved,
-        }));
+        setApprovedById((prev) => ({ ...prev, [task.id]: approved }));
       });
     });
 
@@ -187,7 +163,6 @@ export default function Week1Page() {
   ---------------------------------- */
   useEffect(() => {
     if (!uid || tasks.length === 0) return;
-
     let stopped = false;
 
     (async () => {
@@ -197,66 +172,91 @@ export default function Week1Page() {
         const snap = await getDocs(q);
 
         const doneMap: Record<string, boolean> = {};
-
         snap.forEach((d) => {
           const data = d.data() as any;
           if (!data.done) return;
-
           const parts = d.id.split("__");
           const taskId = parts[parts.length - 1];
           doneMap[taskId] = true;
         });
 
         if (stopped) return;
-
-        setTasks((prev) =>
-          prev.map((t) => ({
-            ...t,
-            done: !!doneMap[t.id],
-          }))
-        );
+        setTasks((prev) => prev.map((t) => ({ ...t, done: !!doneMap[t.id] })));
       } catch (e) {
         console.error("[Week1] load done flags error:", e);
       }
     })();
 
-    return () => {
-      stopped = true;
-    };
+    return () => { stopped = true; };
   }, [uid, tasks.length]);
 
   /* ----------------------------------
-     ✅ AUTO-CREATE SECTION DOC (COMPLETE ONLY)
-     Trainee NEVER writes approved
+     AUTO-CREATE SECTION + EMAIL TRAINER
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
     const allComplete = tasks.length > 0 && tasks.every((t) => t.done === true);
     if (!allComplete) return;
 
+    // Write section completion (unchanged)
     setDoc(
       doc(db, "users", uid, "sections", "week1"),
-      {
-        completed: true,
-        completedAt: serverTimestamp(),
-      },
+      { completed: true, completedAt: serverTimestamp() },
       { merge: true }
     );
+
+    // Look up trainer email and send notification
+    (async () => {
+      try {
+        const traineeSnap = await getDoc(doc(db, "users", uid));
+        const traineeData = traineeSnap.data();
+        const traineeName: string = traineeData?.name ?? traineeData?.email ?? "Your trainee";
+        const supervisorUid: string | undefined = traineeData?.supervisorUid;
+        if (!supervisorUid) return;
+
+        const trainerSnap = await getDoc(doc(db, "users", supervisorUid));
+        const trainerEmail: string | undefined = trainerSnap.data()?.email;
+        if (!trainerEmail) return;
+
+        const completedDate = new Date().toLocaleDateString("en-CA", {
+          year: "numeric", month: "long", day: "numeric",
+        });
+
+        await addDoc(collection(db, "mail"), {
+          to: trainerEmail,
+          message: {
+            subject: `${traineeName} completed Week 1`,
+            html: `
+              <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                <div style="background:#0b3d91;padding:20px 24px;">
+                  <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                </div>
+                <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                  <p>Hi,</p>
+                  <p>Your trainee <strong>${traineeName}</strong> has completed
+                     <strong>Week 1</strong> on <strong>${completedDate}</strong>.</p>
+                  <p style="color:#555;font-size:14px;">
+                    Please log in to the Mr Lube Training portal to review their progress
+                    and approve Week 1 when ready.
+                  </p>
+                </div>
+              </div>
+            `,
+          },
+        });
+      } catch (e) {
+        console.warn("[week1 notify] email failed:", e);
+      }
+    })();
   }, [uid, tasks]);
 
   /* ----------------------------------
      6. TOGGLE TASK DONE
   ---------------------------------- */
   async function toggleTask(id: string, next: boolean) {
-    if (!uid) {
-      alert("Please log in.");
-      return;
-    }
+    if (!uid) { alert("Please log in."); return; }
 
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, done: next } : t))
-    );
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: next } : t)));
 
     try {
       const key = `modules__week1__tasks__${id}`;
@@ -279,9 +279,7 @@ export default function Week1Page() {
       );
     } catch (e) {
       console.error("toggle error:", e);
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, done: !next } : t))
-      );
+      setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !next } : t)));
       alert("Save failed — try again.");
     }
   }
@@ -290,7 +288,6 @@ export default function Week1Page() {
      DERIVED
   ---------------------------------- */
   const locked = day1Approved === false;
-
   const doneCount = useMemo(() => tasks.filter((t) => t.done).length, [tasks]);
   const pct = useMemo(
     () => (tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0),
@@ -302,7 +299,7 @@ export default function Week1Page() {
   }
 
   /* ----------------------------------
-     UI (UNCHANGED)
+     UI
   ---------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
@@ -326,7 +323,6 @@ export default function Week1Page() {
         </Link>
       </div>
 
-      {/* ✅ NEW: Day 1 lock banner (only shows when locked) */}
       {locked && (
         <div
           style={{
@@ -342,7 +338,6 @@ export default function Week1Page() {
           Complete and get Day 1 approved to unlock Week 1.
         </div>
       )}
-
 
       <h2 style={{ marginBottom: 6, opacity: locked ? 0.6 : 1 }}>
         Week 1 — Steps to a Perfect Service
@@ -441,18 +436,10 @@ export default function Week1Page() {
                 </svg>
               </button>
 
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  flexWrap: "wrap",
-                }}
-              >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ fontWeight: 600 }}>
                   {order}. {t.title ?? t.id}
                 </div>
-
                 {approved && (
                   <span
                     style={{
@@ -484,7 +471,5 @@ function num(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
 }
-
-
 
 

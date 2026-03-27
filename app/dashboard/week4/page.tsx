@@ -9,6 +9,8 @@ import {
   collection,
   doc,
   getDocs,
+  getDoc,
+  addDoc,
   orderBy,
   query,
   setDoc,
@@ -121,6 +123,63 @@ export default function Week4Page() {
   const doneCount = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
 
+  /* WRITE SECTION COMPLETION + EMAIL TRAINER */
+  useEffect(() => {
+    if (!uid || !tasks.length) return;
+    if (!tasks.every((t) => t.done)) return;
+
+    // Write section completion (unchanged)
+    setDoc(
+      doc(db, "users", uid, "sections", "week4"),
+      { completed: true, completedAt: serverTimestamp() },
+      { merge: true }
+    );
+
+    // Look up trainer email and send notification
+    (async () => {
+      try {
+        const traineeSnap = await getDoc(doc(db, "users", uid));
+        const traineeData = traineeSnap.data();
+        const traineeName: string = traineeData?.name ?? traineeData?.email ?? "Your trainee";
+        const supervisorUid: string | undefined = traineeData?.supervisorUid;
+        if (!supervisorUid) return;
+
+        const trainerSnap = await getDoc(doc(db, "users", supervisorUid));
+        const trainerEmail: string | undefined = trainerSnap.data()?.email;
+        if (!trainerEmail) return;
+
+        const completedDate = new Date().toLocaleDateString("en-CA", {
+          year: "numeric", month: "long", day: "numeric",
+        });
+
+        await addDoc(collection(db, "mail"), {
+          to: trainerEmail,
+          message: {
+            subject: `${traineeName} completed Week 4`,
+            html: `
+              <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                <div style="background:#0b3d91;padding:20px 24px;">
+                  <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                </div>
+                <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                  <p>Hi,</p>
+                  <p>Your trainee <strong>${traineeName}</strong> has completed
+                     <strong>Week 4</strong> on <strong>${completedDate}</strong>.</p>
+                  <p style="color:#555;font-size:14px;">
+                    Please log in to the Mr Lube Training portal to review their progress
+                    and approve Week 4 when ready.
+                  </p>
+                </div>
+              </div>
+            `,
+          },
+        });
+      } catch (e) {
+        console.warn("[week4 notify] email failed:", e);
+      }
+    })();
+  }, [uid, tasks]);
+
   async function toggleTask(id: string, next: boolean) {
     if (!uid) return;
     const storeId = await getStoreId();
@@ -217,7 +276,6 @@ export default function Week4Page() {
                 }}
               />
 
-              {/* CHECKBOX — ENABLED FOR ALL TASKS */}
               <button
                 onClick={() => toggleTask(t.id, !done)}
                 style={{
@@ -249,9 +307,7 @@ export default function Week4Page() {
 
                 {isApprovalTask ? (
                   <div style={{ fontSize: 12, color: "#5f6368" }}>
-                    {t.approved
-                      ? "Approved ✓"
-                      : "Waiting for supervisor approval"}
+                    {t.approved ? "Approved ✓" : "Waiting for supervisor approval"}
                   </div>
                 ) : (
                   <div style={{ fontSize: 12, color: "#5f6368" }}>

@@ -35,17 +35,14 @@ function setStoredReviewUid(uid: string) {
 
 async function resolveStoreId(): Promise<string> {
   const u = auth.currentUser;
-
   if (u) {
     const tok = await u.getIdTokenResult(true);
     if (tok?.claims?.storeId) return String(tok.claims.storeId);
   }
-
   if (typeof window !== "undefined") {
     const ls = localStorage.getItem("storeId");
     if (ls) return ls;
   }
-
   if (u) {
     const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
     for (const sid of peek) {
@@ -53,7 +50,6 @@ async function resolveStoreId(): Promise<string> {
       if (snap.exists()) return sid;
     }
   }
-
   return "";
 }
 
@@ -97,11 +93,8 @@ export default function SupervisorWeek4Page() {
       setStoredReviewUid(asParam);
       return;
     }
-
     const stored = getStoredReviewUid();
-    if (!selectedTrainee && stored) {
-      setSelectedTrainee(stored);
-    }
+    if (!selectedTrainee && stored) setSelectedTrainee(stored);
   }, [asParam, selectedTrainee]);
 
   /* ---------------- RESOLVE STORE ---------------- */
@@ -112,19 +105,15 @@ export default function SupervisorWeek4Page() {
       if (!alive) return;
       setStoreId(sid);
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   /* ---------------- LOAD TRAINEES (FALLBACK) ---------------- */
   useEffect(() => {
     if (!storeId) return;
-
     (async () => {
       const sup = auth.currentUser;
       if (!sup) return;
-
       const traineesSnap = await getDocs(
         query(
           collection(db, "stores", storeId, "trainees"),
@@ -132,29 +121,17 @@ export default function SupervisorWeek4Page() {
           where("supervisorId", "==", sup.uid)
         )
       );
-
       const list: any[] = [];
       for (const d of traineesSnap.docs) {
         const uSnap = await getDoc(doc(db, "users", d.id));
         const u = uSnap.exists() ? uSnap.data() : {};
-        list.push({
-          id: d.id,
-          name: (u as any).name || (u as any).email || d.id,
-        });
+        list.push({ id: d.id, name: (u as any).name || (u as any).email || d.id });
       }
-
       setTrainees(list);
-
-      // If we still don't have a trainee selected, pick one and persist it
       if (!selectedTrainee && list.length) {
         const stored = getStoredReviewUid();
-        const resolved =
-          (stored && list.find((t) => t.id === stored)?.id) || list[0]?.id;
-
-        if (resolved) {
-          setSelectedTrainee(resolved);
-          setStoredReviewUid(resolved);
-        }
+        const resolved = (stored && list.find((t) => t.id === stored)?.id) || list[0]?.id;
+        if (resolved) { setSelectedTrainee(resolved); setStoredReviewUid(resolved); }
       }
     })();
   }, [storeId, selectedTrainee]);
@@ -164,11 +141,7 @@ export default function SupervisorWeek4Page() {
     (async () => {
       const snap = await getDocs(collection(db, "modules", "week4", "tasks"));
       const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      list.sort(
-        (a, b) =>
-          (a.order ?? a.sort_order ?? 9999) -
-          (b.order ?? b.sort_order ?? 9999)
-      );
+      list.sort((a, b) => (a.order ?? a.sort_order ?? 9999) - (b.order ?? b.sort_order ?? 9999));
       setTasks(list);
       setLoading(false);
     })();
@@ -198,18 +171,15 @@ export default function SupervisorWeek4Page() {
         className="border px-2 py-1 rounded-md text-sm"
       >
         {trainees.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.name}
-          </option>
+          <option key={t.id} value={t.id}>{t.name}</option>
         ))}
       </select>
 
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
         {tasks.map((task) => {
           const isApprovalTask = task.order === 1 || task.sort_order === 1;
-
           return isApprovalTask ? (
-            <ApprovalCard key={task.id} task={task} uid={selectedTrainee} />
+            <ApprovalCard key={task.id} task={task} uid={selectedTrainee} tasks={tasks} />
           ) : (
             <TimerCard key={task.id} task={task} uid={selectedTrainee} />
           );
@@ -220,10 +190,10 @@ export default function SupervisorWeek4Page() {
 }
 
 /* -------------------------------------- */
-/* Approval Task (FIRST TASK ONLY)         */
+/* Approval Task — emails trainee when approved */
 /* -------------------------------------- */
 
-function ApprovalCard({ task, uid }: any) {
+function ApprovalCard({ task, uid, tasks }: any) {
   const key = `modules__week4__tasks__${task.id}`;
 
   async function approve() {
@@ -238,6 +208,39 @@ function ApprovalCard({ task, uid }: any) {
       },
       { merge: true }
     );
+
+    // Email the trainee when approval task is approved
+    try {
+      const traineeSnap = await getDoc(doc(db, "users", uid));
+      const traineeData = traineeSnap.data();
+      const traineeEmail: string | undefined = traineeData?.email;
+      const traineeName: string = traineeData?.name ?? traineeData?.email ?? "Trainee";
+
+      if (traineeEmail) {
+        await addDoc(collection(db, "mail"), {
+          to: traineeEmail,
+          message: {
+            subject: `Week 4 approved!`,
+            html: `
+              <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                <div style="background:#0b3d91;padding:20px 24px;">
+                  <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                </div>
+                <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                  <p>Hi ${traineeName},</p>
+                  <p>Your <strong>Week 4</strong> has been approved by your trainer!</p>
+                  <p style="color:#555;font-size:14px;">
+                    Congratulations on completing your Mr Lube training program!
+                  </p>
+                </div>
+              </div>
+            `,
+          },
+        });
+      }
+    } catch (e) {
+      console.warn("[week4 approve notify] email failed:", e);
+    }
   }
 
   return (
@@ -254,7 +257,7 @@ function ApprovalCard({ task, uid }: any) {
 }
 
 /* -------------------------------------- */
-/* Timer Task Card (UNCHANGED CORE)        */
+/* Timer Task Card (unchanged)            */
 /* -------------------------------------- */
 
 function TimerCard({ task, uid }: any) {
@@ -285,13 +288,9 @@ function TimerCard({ task, uid }: any) {
     startRef.current = null;
     setRunning(false);
 
-    await addDoc(sessionsCol, {
-      ms: elapsed,
-      createdAt: serverTimestamp(),
-    });
+    await addDoc(sessionsCol, { ms: elapsed, createdAt: serverTimestamp() });
 
     const key = `modules__week4__tasks__${task.id}`;
-
     await setDoc(
       doc(db, "users", uid, "progress", key),
       {
@@ -311,21 +310,15 @@ function TimerCard({ task, uid }: any) {
   return (
     <div className="border rounded-lg p-4 bg-white">
       <div className="text-sm mb-2">{task.title}</div>
-
       <button
         onClick={() => {
-          if (!running) {
-            startRef.current = Date.now();
-            setRunning(true);
-          } else {
-            stop();
-          }
+          if (!running) { startRef.current = Date.now(); setRunning(true); }
+          else { stop(); }
         }}
         className="px-3 py-1.5 rounded-md bg-primary text-white text-sm"
       >
         {running ? "Stop & Save" : "Start"}
       </button>
-
       <div className="mt-3 text-xs text-muted-foreground">
         Sessions {count} · Last {lastMs ? msToClock(lastMs) : "—"}
       </div>

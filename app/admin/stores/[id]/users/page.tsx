@@ -12,6 +12,7 @@ import {
   getDoc,
   updateDoc,
   setDoc,
+  addDoc,
 } from "firebase/firestore";
 
 type StoreUser = {
@@ -112,8 +113,81 @@ export default function StoreUsersPage({
   };
 
   const toggleActive = async (uid: string, active: boolean) => {
-    await updateDoc(doc(db, "users", uid), { active });
+  if (!active) {
+    try {
+      const user = users.find((u) => u.uid === uid); // ✅ ADD THIS LINE
 
+      await fetch("/api/deactivate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid,
+          email: user?.email || "",
+        }),
+      });
+    } catch (e) {
+      console.error("[deactivate] API call failed:", e);
+    }
+
+      // 2. Email admin notification
+      try {
+        const user = users.find((u) => u.uid === uid);
+        const userName = user?.name ?? "Unknown";
+        const userEmail = user?.email ?? "no email on file";
+        const roleLabel =
+          user?.role === "supervisor" ? "Trainer" : user?.role ?? "Unknown";
+
+        const storeSnap = await getDoc(doc(db, "stores", storeId));
+        const adminEmail: string =
+          storeSnap.data()?.adminEmail ?? "nataliegagnon444@gmail.com";
+
+        await addDoc(collection(db, "mail"), {
+          to: adminEmail,
+          message: {
+            subject: `Account deactivated — ${userName}`,
+            html: `
+              <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                <div style="background:#0b3d91;padding:20px 24px;">
+                  <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                </div>
+                <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                  <p>The following account has been fully deactivated in the Mr Lube Training portal.</p>
+                  <table style="font-size:14px;border-collapse:collapse;width:100%;">
+                    <tr>
+                      <td style="padding:6px 0;font-weight:600;width:120px;">Name</td>
+                      <td style="padding:6px 0;">${userName}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px 0;font-weight:600;">Email</td>
+                      <td style="padding:6px 0;">${userEmail}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px 0;font-weight:600;">Role</td>
+                      <td style="padding:6px 0;">${roleLabel}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding:6px 0;font-weight:600;">Store ID</td>
+                      <td style="padding:6px 0;">${storeId}</td>
+                    </tr>
+                  </table>
+                  <p style="margin-top:16px;color:#555;font-size:14px;">
+                    Their Firebase Auth account has been disabled and all active sessions revoked.
+                    They can no longer log in.
+                  </p>
+                </div>
+              </div>
+            `,
+          },
+        });
+      } catch (e) {
+        console.warn("[deactivate notify] email failed:", e);
+      }
+    } else {
+      // Reactivating — just update Firestore (no full Auth re-enable here)
+      await updateDoc(doc(db, "users", uid), { active: true });
+    }
+
+    // 3. Update local UI
     setUsers((prev) =>
       prev.map((u) => (u.uid === uid ? { ...u, active } : u))
     );
@@ -137,18 +211,10 @@ export default function StoreUsersPage({
               <table className="min-w-[680px] w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b">
-                    <th className="py-2 text-left whitespace-nowrap">
-                      Name
-                    </th>
-                    <th className="py-2 text-left whitespace-nowrap">
-                      Role
-                    </th>
-                    <th className="py-2 text-left whitespace-nowrap">
-                      Status
-                    </th>
-                    <th className="py-2 text-right whitespace-nowrap">
-                      Actions
-                    </th>
+                    <th className="py-2 text-left whitespace-nowrap">Name</th>
+                    <th className="py-2 text-left whitespace-nowrap">Role</th>
+                    <th className="py-2 text-left whitespace-nowrap">Status</th>
+                    <th className="py-2 text-right whitespace-nowrap">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -156,9 +222,7 @@ export default function StoreUsersPage({
                     <tr key={u.uid} className="border-b">
                       <td className="py-2 whitespace-nowrap">
                         <div className="font-medium">{u.name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {u.email}
-                        </div>
+                        <div className="text-xs text-muted-foreground">{u.email}</div>
                       </td>
 
                       <td className="py-2 capitalize whitespace-nowrap">
@@ -176,18 +240,12 @@ export default function StoreUsersPage({
                       <td className="py-2 text-right whitespace-nowrap">
                         <select
                           defaultValue=""
-                          onChange={(e) =>
-                            changeRole(u.uid, e.target.value)
-                          }
+                          onChange={(e) => changeRole(u.uid, e.target.value)}
                           className="border rounded px-2 py-1 text-xs"
                         >
-                          <option value="" disabled>
-                            Change role…
-                          </option>
+                          <option value="" disabled>Change role…</option>
                           {ROLE_OPTIONS.map((r) => (
-                            <option key={r.value} value={r.value}>
-                              {r.label}
-                            </option>
+                            <option key={r.value} value={r.value}>{r.label}</option>
                           ))}
                         </select>
 

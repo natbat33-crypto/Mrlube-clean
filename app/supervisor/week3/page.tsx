@@ -10,6 +10,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  addDoc,
   query,
   where,
   setDoc,
@@ -21,7 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
 /* ============================================
-   HELPERS — invariant persistence
+   HELPERS
 ============================================ */
 function getStoredReviewUid(): string | null {
   if (typeof window === "undefined") return null;
@@ -53,17 +54,14 @@ type ProgDoc = {
 ============================================ */
 async function resolveStoreId(): Promise<string> {
   const u = auth.currentUser;
-
   if (u) {
     const tok = await u.getIdTokenResult(true);
     if (tok?.claims?.storeId) return String(tok.claims.storeId);
   }
-
   if (typeof window !== "undefined") {
     const ls = localStorage.getItem("storeId");
     if (ls) return ls;
   }
-
   if (u) {
     const peek = ["24", "26", "262", "276", "298", "46", "79", "163"];
     for (const sid of peek) {
@@ -71,52 +69,34 @@ async function resolveStoreId(): Promise<string> {
       if (snap.exists()) return sid;
     }
   }
-
   return "";
 }
 
-/* ============================================
-   Get clean task key
-============================================ */
 function getTaskKey(p: ProgDoc): string {
   if (p.path) {
     const last = p.path.split("/").pop();
     if (last) return last;
   }
-
   if (p.id) {
     const parts = p.id.split("__");
     return parts[parts.length - 1];
   }
-
   return p.id;
 }
 
-/* ============================================
-   Fetch Week 3 progress (SCOPED!)
-   ONLY from users/{selectedTraineeUid}/progress
-============================================ */
 async function fetchProgressForWeek3(storeId: string, selectedTraineeUid: string) {
   if (!storeId || !selectedTraineeUid) return { docs: [] as ProgDoc[] };
-
   const q = query(
     collection(db, "users", selectedTraineeUid, "progress"),
     where("week", "==", "week3"),
     where("done", "==", true),
     where("storeId", "==", storeId)
   );
-
   const snap = await getDocs(q);
-
   const docs: ProgDoc[] = [];
   snap.forEach((d) => {
-    docs.push({
-      id: d.id,
-      traineeId: selectedTraineeUid,
-      ...(d.data() as any),
-    });
+    docs.push({ id: d.id, traineeId: selectedTraineeUid, ...(d.data() as any) });
   });
-
   return { docs };
 }
 
@@ -125,9 +105,6 @@ async function fetchProgressForWeek3(storeId: string, selectedTraineeUid: string
 ============================================ */
 export default function SupervisorWeek3Page() {
   const searchParams = useSearchParams();
-
-  // Your dashboard uses ?as=... as the selected trainee UID.
-  // Keep that, but enforce it everywhere.
   const asParam = searchParams.get("as");
   const selectedTraineeUid = useMemo(() => {
     return (asParam ?? getStoredReviewUid() ?? "").trim();
@@ -138,47 +115,31 @@ export default function SupervisorWeek3Page() {
   const [items, setItems] = useState<ProgDoc[]>([]);
   const [loading, setLoading] = useState(true);
 
-  /* ---------- Load store, tasks, progress (rerun when trainee changes) ---------- */
+  /* ---------- Load store, tasks, progress ---------- */
   useEffect(() => {
     let alive = true;
-
     (async () => {
       try {
         setLoading(true);
-
-        // If no trainee selected, do NOT read anything.
         if (!selectedTraineeUid) {
           if (!alive) return;
           setItems([]);
           setLoading(false);
           return;
         }
-
         const sid = await resolveStoreId();
         if (!alive) return;
         setStoreId(sid);
+        if (!sid) { setItems([]); return; }
 
-        if (!sid) {
-          setItems([]);
-          return;
-        }
-
-        const taskSnap = await getDocs(
-          collection(db, "modules", "week3", "tasks")
-        );
+        const taskSnap = await getDocs(collection(db, "modules", "week3", "tasks"));
         const byId: Record<string, TaskMeta> = {};
-        taskSnap.docs.forEach((d) => {
-          byId[d.id] = { id: d.id, ...(d.data() as any) };
-        });
+        taskSnap.docs.forEach((d) => { byId[d.id] = { id: d.id, ...(d.data() as any) }; });
         if (!alive) return;
         setTasksById(byId);
 
-        // ✅ THIS is the invariant:
-        // supervisor reads progress ONLY from users/{selectedTraineeUid}/progress
         const { docs } = await fetchProgressForWeek3(sid, selectedTraineeUid);
-
         let data = docs.filter((d) => d.week === "week3" && d.done);
-
         data.sort((a, b) => {
           const ka = getTaskKey(a);
           const kb = getTaskKey(b);
@@ -186,7 +147,6 @@ export default function SupervisorWeek3Page() {
           const ob = byId[kb]?.order ?? byId[kb]?.sort_order ?? 9999;
           return oa - ob;
         });
-
         if (alive) setItems(data);
       } catch (e) {
         console.error("[Week3] load error:", e);
@@ -194,20 +154,13 @@ export default function SupervisorWeek3Page() {
         if (alive) setLoading(false);
       }
     })();
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [selectedTraineeUid]);
 
-  /* ---------- Section enforcement (SCOPED!) ---------- */
+  /* ---------- Section enforcement ---------- */
   useEffect(() => {
-    if (!selectedTraineeUid) return;
-    if (items.length === 0) return;
-
-    const allApproved =
-      items.length > 0 && items.every((d) => d.approved === true);
-
+    if (!selectedTraineeUid || items.length === 0) return;
+    const allApproved = items.length > 0 && items.every((d) => d.approved === true);
     setDoc(
       doc(db, "users", selectedTraineeUid, "sections", "week3"),
       {
@@ -218,7 +171,7 @@ export default function SupervisorWeek3Page() {
     ).catch((e) => console.error("[Week3 enforce] error:", e));
   }, [items, selectedTraineeUid]);
 
-  /* ---------- Approval toggle ---------- */
+  /* ---------- Approval toggle + EMAIL TRAINEE ---------- */
   async function setApproved(p: ProgDoc, next: boolean) {
     setItems((prev) =>
       prev.map((x) => (x.id === p.id ? { ...x, approved: next } : x))
@@ -236,6 +189,43 @@ export default function SupervisorWeek3Page() {
         },
         { merge: true }
       );
+
+      if (next) {
+        const updatedItems = items.map((x) =>
+          x.id === p.id ? { ...x, approved: true } : x
+        );
+        const allApproved = updatedItems.every((x) => x.approved === true);
+
+        if (allApproved) {
+          const traineeSnap = await getDoc(doc(db, "users", selectedTraineeUid));
+          const traineeData = traineeSnap.data();
+          const traineeEmail: string | undefined = traineeData?.email;
+          const traineeName: string = traineeData?.name ?? traineeData?.email ?? "Trainee";
+
+          if (traineeEmail) {
+            await addDoc(collection(db, "mail"), {
+              to: traineeEmail,
+              message: {
+                subject: `Week 3 approved!`,
+                html: `
+                  <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                    <div style="background:#0b3d91;padding:20px 24px;">
+                      <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                    </div>
+                    <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                      <p>Hi ${traineeName},</p>
+                      <p>Your <strong>Week 3</strong> has been approved by your trainer!</p>
+                      <p style="color:#555;font-size:14px;">
+                        Log in to the Mr Lube Training portal to continue to Week 4.
+                      </p>
+                    </div>
+                  </div>
+                `,
+              },
+            });
+          }
+        }
+      }
     } catch (e) {
       console.error("Approval error:", e);
       setItems((prev) =>
@@ -249,7 +239,6 @@ export default function SupervisorWeek3Page() {
   const waiting = items.filter((i) => i.done && !i.approved).length;
   const pct = reviewed ? Math.round((approved / reviewed) * 100) : 0;
 
-  // ✅ If no trainee selected, be explicit and do NOT show anyone's data.
   if (!selectedTraineeUid) {
     return (
       <div className="space-y-6">
@@ -259,11 +248,8 @@ export default function SupervisorWeek3Page() {
         >
           ← Back to Dashboard
         </Link>
-
         <Card className="border-primary/20">
-          <CardHeader>
-            <CardTitle>Review — Week 3</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle>Review — Week 3</CardTitle></CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">No trainee selected.</p>
           </CardContent>
@@ -298,9 +284,7 @@ export default function SupervisorWeek3Page() {
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No completed tasks yet.
-            </p>
+            <p className="text-sm text-muted-foreground">No completed tasks yet.</p>
           ) : (
             <ul className="space-y-2">
               {items.map((p) => {

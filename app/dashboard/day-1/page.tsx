@@ -10,6 +10,7 @@ import {
   getDocs,
   getDoc,
   setDoc,
+  addDoc,
   doc,
   serverTimestamp,
   deleteField,
@@ -49,7 +50,6 @@ export default function Day1Page() {
   const [day1Approved, setDay1Approved] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
-  /* ✅ NEW: per-task approval map */
   const [approvedById, setApprovedById] = useState<Record<string, boolean>>({});
 
   /* ---------- AUTH ---------- */
@@ -64,7 +64,6 @@ export default function Day1Page() {
   /* ---------- LISTEN FOR SECTION (DAY 1) APPROVAL ---------- */
   useEffect(() => {
     if (!uid) return;
-
     const ref = doc(db, "users", uid, "sections", "day1");
     return onSnapshot(ref, (snap) => {
       setDay1Approved(snap.exists() && snap.data()?.approved === true);
@@ -100,9 +99,7 @@ export default function Day1Page() {
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   /* ---------- LOAD SAVED DONE FLAGS ---------- */
@@ -129,7 +126,7 @@ export default function Day1Page() {
     })();
   }, [uid, tasks.length, hydrated]);
 
-  /* ✅ NEW: LISTEN FOR PER-TASK TRAINER APPROVALS (DAY 1) */
+  /* ---------- LISTEN FOR PER-TASK TRAINER APPROVALS ---------- */
   useEffect(() => {
     if (!uid || tasks.length === 0) return;
 
@@ -139,17 +136,14 @@ export default function Day1Page() {
 
       return onSnapshot(ref, (snap) => {
         const approved = !!snap.data()?.approved;
-        setApprovedById((prev) => ({
-          ...prev,
-          [task.id]: approved,
-        }));
+        setApprovedById((prev) => ({ ...prev, [task.id]: approved }));
       });
     });
 
     return () => unsubs.forEach((u) => u && u());
   }, [uid, tasks]);
 
-  /* ---------- TOGGLE TASK (LOCKED IF DAY 1 APPROVED) ---------- */
+  /* ---------- TOGGLE TASK ---------- */
   async function toggleTask(id: string, next: boolean) {
     if (!uid || day1Approved) return;
 
@@ -181,16 +175,61 @@ export default function Day1Page() {
     }
   }
 
-  /* ---------- AUTO-CREATE SECTION (NO APPROVED WRITE) ---------- */
+  /* ---------- AUTO-CREATE SECTION + EMAIL TRAINER ---------- */
   useEffect(() => {
     if (!uid || !tasks.length) return;
     if (!tasks.every((t) => t.done)) return;
 
+    // Write section completion (unchanged)
     setDoc(
       doc(db, "users", uid, "sections", "day1"),
       { completed: true, completedAt: serverTimestamp() },
       { merge: true }
     );
+
+    // Look up trainee profile to get supervisorUid, then email the trainer
+    (async () => {
+      try {
+        const traineeSnap = await getDoc(doc(db, "users", uid));
+        const traineeData = traineeSnap.data();
+        const traineeName: string = traineeData?.name ?? traineeData?.email ?? "Your trainee";
+        const supervisorUid: string | undefined = traineeData?.supervisorUid;
+        if (!supervisorUid) return;
+
+        const trainerSnap = await getDoc(doc(db, "users", supervisorUid));
+        const trainerEmail: string | undefined = trainerSnap.data()?.email;
+        if (!trainerEmail) return;
+
+        const completedDate = new Date().toLocaleDateString("en-CA", {
+          year: "numeric", month: "long", day: "numeric",
+        });
+
+        await addDoc(collection(db, "mail"), {
+          to: trainerEmail,
+          message: {
+            subject: `${traineeName} completed Day 1 Orientation`,
+            html: `
+              <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                <div style="background:#0b3d91;padding:20px 24px;">
+                  <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                </div>
+                <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                  <p>Hi,</p>
+                  <p>Your trainee <strong>${traineeName}</strong> has completed
+                     <strong>Day 1 Orientation</strong> on <strong>${completedDate}</strong>.</p>
+                  <p style="color:#555;font-size:14px;">
+                    Please log in to the Mr Lube Training portal to review their progress
+                    and approve Day 1 when ready.
+                  </p>
+                </div>
+              </div>
+            `,
+          },
+        });
+      } catch (e) {
+        console.warn("[day1 notify] email failed:", e);
+      }
+    })();
   }, [uid, tasks]);
 
   const doneCount = tasks.filter((t) => t.done).length;
@@ -255,13 +294,7 @@ export default function Day1Page() {
           marginBottom: 18,
         }}
       >
-        <div
-          style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: YELLOW,
-          }}
-        />
+        <div style={{ width: `${pct}%`, height: "100%", background: YELLOW }} />
       </div>
 
       {err && <p style={{ color: "crimson" }}>{err}</p>}

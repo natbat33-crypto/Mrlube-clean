@@ -8,6 +8,8 @@ import { getStoreId } from "@/lib/getStoreId";
 import {
   collection,
   getDocs,
+  getDoc,
+  addDoc,
   orderBy,
   query,
   setDoc,
@@ -52,7 +54,6 @@ export default function Week3Page() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // 🔒 Week 2 authority
   const [week2Approved, setWeek2Approved] = useState<boolean | null>(null);
 
   /* ----------------------------------
@@ -67,16 +68,14 @@ export default function Week3Page() {
   }, []);
 
   /* ----------------------------------
-     🔒 WEEK 2 AUTHORITY (LIVE)
+     WEEK 2 AUTHORITY (LIVE)
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
     const ref = doc(db, "users", uid, "sections", "week2");
     const unsub = onSnapshot(ref, (snap) => {
       setWeek2Approved(snap.exists() && snap.data()?.approved === true);
     });
-
     return unsub;
   }, [uid]);
 
@@ -85,36 +84,24 @@ export default function Week3Page() {
   ---------------------------------- */
   useEffect(() => {
     let alive = true;
-
     (async () => {
       try {
         const col = collection(db, "modules", "week3", "tasks");
         const q = query(col, orderBy("order", "asc"));
         const snap = await getDocs(q);
-
         const list: Task[] = snap.docs.map((d) => ({
           id: d.id,
           ...(d.data() as Partial<Task>),
           done: false,
         }));
-
-        if (alive) {
-          setTasks(list);
-          setErr(null);
-        }
+        if (alive) { setTasks(list); setErr(null); }
       } catch (e: any) {
-        if (alive) {
-          setErr(e?.message ?? String(e));
-          setTasks([]);
-        }
+        if (alive) { setErr(e?.message ?? String(e)); setTasks([]); }
       } finally {
         if (alive) setLoading(false);
       }
     })();
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   /* ----------------------------------
@@ -122,12 +109,10 @@ export default function Week3Page() {
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
     const ref = doc(db, "users", uid, "sections", "week3");
     const unsub = onSnapshot(ref, (snap) => {
       setWeekApproved(snap.data()?.approved === true);
     });
-
     return unsub;
   }, [uid]);
 
@@ -136,17 +121,12 @@ export default function Week3Page() {
   ---------------------------------- */
   useEffect(() => {
     if (!uid || tasks.length === 0) return;
-
     const unsubs = tasks.map((task) => {
       const key = `modules__week3__tasks__${task.id}`;
       return onSnapshot(doc(db, "users", uid, "progress", key), (snap) => {
-        setApprovedById((prev) => ({
-          ...prev,
-          [task.id]: !!snap.data()?.approved,
-        }));
+        setApprovedById((prev) => ({ ...prev, [task.id]: !!snap.data()?.approved }));
       });
     });
-
     return () => unsubs.forEach((u) => u());
   }, [uid, tasks]);
 
@@ -155,26 +135,18 @@ export default function Week3Page() {
   ---------------------------------- */
   useEffect(() => {
     if (!uid || tasks.length === 0) return;
-
     (async () => {
       try {
         const snap = await getDocs(
-          query(
-            collection(db, "users", uid, "progress"),
-            where("week", "==", "week3")
-          )
+          query(collection(db, "users", uid, "progress"), where("week", "==", "week3"))
         );
-
         const doneMap: Record<string, boolean> = {};
         snap.forEach((d) => {
           if (!d.data()?.done) return;
           const parts = d.id.split("__");
           doneMap[parts[parts.length - 1]] = true;
         });
-
-        setTasks((prev) =>
-          prev.map((t) => ({ ...t, done: !!doneMap[t.id] }))
-        );
+        setTasks((prev) => prev.map((t) => ({ ...t, done: !!doneMap[t.id] })));
       } catch (e) {
         console.error("[Week3] load done error:", e);
       }
@@ -182,22 +154,63 @@ export default function Week3Page() {
   }, [uid, tasks.length]);
 
   /* ----------------------------------
-     AUTO CREATE SECTION (COMPLETE ONLY)
+     AUTO CREATE SECTION + EMAIL TRAINER
   ---------------------------------- */
   useEffect(() => {
     if (!uid) return;
-
     const allDone = tasks.length > 0 && tasks.every((t) => t.done);
     if (!allDone) return;
 
+    // Write section completion (unchanged)
     setDoc(
       doc(db, "users", uid, "sections", "week3"),
-      {
-        completed: true,
-        completedAt: serverTimestamp(),
-      },
+      { completed: true, completedAt: serverTimestamp() },
       { merge: true }
     );
+
+    // Look up trainer email and send notification
+    (async () => {
+      try {
+        const traineeSnap = await getDoc(doc(db, "users", uid));
+        const traineeData = traineeSnap.data();
+        const traineeName: string = traineeData?.name ?? traineeData?.email ?? "Your trainee";
+        const supervisorUid: string | undefined = traineeData?.supervisorUid;
+        if (!supervisorUid) return;
+
+        const trainerSnap = await getDoc(doc(db, "users", supervisorUid));
+        const trainerEmail: string | undefined = trainerSnap.data()?.email;
+        if (!trainerEmail) return;
+
+        const completedDate = new Date().toLocaleDateString("en-CA", {
+          year: "numeric", month: "long", day: "numeric",
+        });
+
+        await addDoc(collection(db, "mail"), {
+          to: trainerEmail,
+          message: {
+            subject: `${traineeName} completed Week 3`,
+            html: `
+              <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                <div style="background:#0b3d91;padding:20px 24px;">
+                  <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                </div>
+                <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                  <p>Hi,</p>
+                  <p>Your trainee <strong>${traineeName}</strong> has completed
+                     <strong>Week 3</strong> on <strong>${completedDate}</strong>.</p>
+                  <p style="color:#555;font-size:14px;">
+                    Please log in to the Mr Lube Training portal to review their progress
+                    and approve Week 3 when ready.
+                  </p>
+                </div>
+              </div>
+            `,
+          },
+        });
+      } catch (e) {
+        console.warn("[week3 notify] email failed:", e);
+      }
+    })();
   }, [uid, tasks]);
 
   /* ----------------------------------
@@ -205,16 +218,11 @@ export default function Week3Page() {
   ---------------------------------- */
   async function toggleTask(id: string, next: boolean) {
     if (!uid) return;
-
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, done: next } : t))
-    );
-
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: next } : t)));
     try {
       const storeId = await getStoreId();
       const task = tasks.find((t) => t.id === id);
       const key = `modules__week3__tasks__${id}`;
-
       await setDoc(
         doc(db, "users", uid, "progress", key),
         {
@@ -230,9 +238,7 @@ export default function Week3Page() {
         { merge: true }
       );
     } catch (e) {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, done: !next } : t))
-      );
+      setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !next } : t)));
     }
   }
 
@@ -240,7 +246,6 @@ export default function Week3Page() {
      DERIVED
   ---------------------------------- */
   const locked = week2Approved === false;
-
   const doneCount = useMemo(() => tasks.filter((t) => t.done).length, [tasks]);
   const pct = useMemo(
     () => (tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0),
@@ -252,7 +257,7 @@ export default function Week3Page() {
   }
 
   /* ----------------------------------
-     UI (MIRRORED FROM WEEK 1)
+     UI
   ---------------------------------- */
   return (
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
@@ -310,13 +315,7 @@ export default function Week3Page() {
           opacity: locked ? 0.5 : 1,
         }}
       >
-        <div
-          style={{
-            height: "100%",
-            width: `${pct}%`,
-            background: YELLOW,
-          }}
-        />
+        <div style={{ height: "100%", width: `${pct}%`, background: YELLOW }} />
       </div>
 
       {err && <p style={{ color: "crimson" }}>{err}</p>}
@@ -392,7 +391,6 @@ export default function Week3Page() {
                 <div style={{ fontWeight: 600 }}>
                   {order}. {t.title ?? t.id}
                 </div>
-
                 {approved && (
                   <span
                     style={{

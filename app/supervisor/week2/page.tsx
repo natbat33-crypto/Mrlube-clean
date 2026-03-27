@@ -10,6 +10,7 @@ import {
   collection,
   doc,
   getDocs,
+  addDoc,
   onSnapshot,
   query,
   setDoc,
@@ -23,7 +24,7 @@ import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
 /* ----------------------------------
-   HELPERS — invariant persistence
+   HELPERS
 ---------------------------------- */
 function getStoredReviewUid(): string | null {
   if (typeof window === "undefined") return null;
@@ -82,21 +83,16 @@ export default function SupervisorWeek2Page() {
       setStoredReviewUid(asParam);
       return;
     }
-
     const stored = getStoredReviewUid();
-    if (!traineeId && stored) {
-      setTraineeId(stored);
-    }
+    if (!traineeId && stored) setTraineeId(stored);
   }, [asParam, traineeId]);
 
   /* ---------------- LOAD TRAINEES (FALLBACK ONLY) ---------------- */
   useEffect(() => {
     if (traineeId) return;
-
     (async () => {
       const sup = auth.currentUser;
       if (!sup) return;
-
       const snap = await getDocs(
         query(
           collection(db, "stores", "24", "trainees"),
@@ -104,48 +100,28 @@ export default function SupervisorWeek2Page() {
           where("supervisorId", "==", sup.uid)
         )
       );
-
       const list: Trainee[] = [];
-
       for (const d of snap.docs) {
         const uSnap = await getDoc(doc(db, "users", d.id));
         const u = uSnap.exists() ? uSnap.data() : {};
-        list.push({
-          id: d.id,
-          name: (u as any).name || (u as any).email || d.id,
-        });
+        list.push({ id: d.id, name: (u as any).name || (u as any).email || d.id });
       }
-
       setTrainees(list);
-
       const stored = getStoredReviewUid();
-      const resolved =
-        (stored && list.find((t) => t.id === stored)?.id) || list[0]?.id;
-
-      if (resolved) {
-        setTraineeId(resolved);
-        setStoredReviewUid(resolved);
-      }
+      const resolved = (stored && list.find((t) => t.id === stored)?.id) || list[0]?.id;
+      if (resolved) { setTraineeId(resolved); setStoredReviewUid(resolved); }
     })();
   }, [traineeId]);
 
   /* ---------------- LOAD TASKS ---------------- */
   useEffect(() => {
     (async () => {
-      const snap = await getDocs(
-        collection(db, "modules", "week2", "tasks")
-      );
-
+      const snap = await getDocs(collection(db, "modules", "week2", "tasks"));
       setTasks(
         snap.docs
           .map((d) => ({ id: d.id, ...(d.data() as any) }))
-          .sort(
-            (a, b) =>
-              num(a.order ?? a.sort_order) -
-              num(b.order ?? b.sort_order)
-          )
+          .sort((a, b) => num(a.order ?? a.sort_order) - num(b.order ?? b.sort_order))
       );
-
       setLoading(false);
     })();
   }, []);
@@ -153,21 +129,16 @@ export default function SupervisorWeek2Page() {
   /* ---------------- LISTEN TO PROGRESS ---------------- */
   useEffect(() => {
     if (!traineeId) return;
-
     const qRef = query(
       collection(db, "users", traineeId, "progress"),
       where("week", "==", "week2")
     );
-
     return onSnapshot(qRef, (snap) => {
       const map: ProgressMap = {};
       snap.forEach((d) => {
         const taskId = d.id.split("__").pop()!;
         const data = d.data() as any;
-        map[taskId] = {
-          done: !!data.done,
-          approved: !!data.approved,
-        };
+        map[taskId] = { done: !!data.done, approved: !!data.approved };
       });
       setProgress(map);
     });
@@ -176,11 +147,7 @@ export default function SupervisorWeek2Page() {
   /* ---------------- AUTO-SECTION APPROVAL ---------------- */
   useEffect(() => {
     if (!traineeId || tasks.length === 0) return;
-
-    const allApproved = tasks.every(
-      (t) => progress[t.id]?.approved === true
-    );
-
+    const allApproved = tasks.every((t) => progress[t.id]?.approved === true);
     setDoc(
       doc(db, "users", traineeId, "sections", "week2"),
       {
@@ -191,7 +158,7 @@ export default function SupervisorWeek2Page() {
     );
   }, [traineeId, tasks, progress]);
 
-  /* ---------------- APPROVE TOGGLE ---------------- */
+  /* ---------------- APPROVE TOGGLE + EMAIL TRAINEE ---------------- */
   async function toggleApprove(taskId: string, next: boolean) {
     if (!traineeId) return;
 
@@ -205,18 +172,57 @@ export default function SupervisorWeek2Page() {
       },
       { merge: true }
     );
+
+    if (next) {
+      try {
+        const updatedProgress = {
+          ...progress,
+          [taskId]: { ...progress[taskId], approved: true },
+        };
+        const allApproved = tasks.every(
+          (t) => updatedProgress[t.id]?.approved === true
+        );
+
+        if (allApproved) {
+          const traineeSnap = await getDoc(doc(db, "users", traineeId));
+          const traineeData = traineeSnap.data();
+          const traineeEmail: string | undefined = traineeData?.email;
+          const traineeName: string = traineeData?.name ?? traineeData?.email ?? "Trainee";
+
+          if (traineeEmail) {
+            await addDoc(collection(db, "mail"), {
+              to: traineeEmail,
+              message: {
+                subject: `Week 2 approved!`,
+                html: `
+                  <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+                    <div style="background:#0b3d91;padding:20px 24px;">
+                      <h2 style="color:#FFC20E;margin:0;">Mr Lube Training</h2>
+                    </div>
+                    <div style="padding:24px;border:1px solid #e0e0e0;border-top:none;">
+                      <p>Hi ${traineeName},</p>
+                      <p>Your <strong>Week 2</strong> has been approved by your trainer!</p>
+                      <p style="color:#555;font-size:14px;">
+                        Log in to the Mr Lube Training portal to continue to Week 3.
+                      </p>
+                    </div>
+                  </div>
+                `,
+              },
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("[week2 approve notify] email failed:", e);
+      }
+    }
   }
 
   if (loading) return <div className="p-6">Loading…</div>;
   if (!traineeId) return <div className="p-6">No trainee selected.</div>;
 
-  const approvedCount = tasks.filter(
-    (t) => progress[t.id]?.approved
-  ).length;
-
-  const pct = tasks.length
-    ? Math.round((approvedCount / tasks.length) * 100)
-    : 0;
+  const approvedCount = tasks.filter((t) => progress[t.id]?.approved).length;
+  const pct = tasks.length ? Math.round((approvedCount / tasks.length) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -253,9 +259,7 @@ export default function SupervisorWeek2Page() {
                     disabled={!done}
                     onClick={() => toggleApprove(t.id, !approved)}
                     className={`px-3 py-1.5 rounded text-sm ${
-                      approved
-                        ? "bg-green-600 text-white"
-                        : "border"
+                      approved ? "bg-green-600 text-white" : "border"
                     } ${!done ? "opacity-50" : ""}`}
                   >
                     {approved ? "Unapprove" : "Approve"}
