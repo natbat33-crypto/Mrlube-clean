@@ -67,7 +67,7 @@ export default function AdminStoreNotesPage() {
     return p.name?.trim() ? p.name : p.email || null;
   }
 
-  // ------------------ NOTES ------------------
+  /* ---------------- NOTES ---------------- */
   useEffect(() => {
     if (!storeId) return;
 
@@ -93,12 +93,14 @@ export default function AdminStoreNotesPage() {
     return () => unsub();
   }, [storeId]);
 
-  // ------------------ LOAD USERS (FIXED) ------------------
+  /* ---------------- FIXED EMPLOYEES LOAD ---------------- */
   useEffect(() => {
     if (!storeId) return;
 
     (async () => {
-      // get all users ONCE
+      const rows: Person[] = [];
+
+      // get ALL users once
       const usersSnap = await getDocs(collection(db, "users"));
       const userMap: Record<string, any> = {};
 
@@ -106,29 +108,33 @@ export default function AdminStoreNotesPage() {
         userMap[doc.id] = doc.data();
       });
 
-      // get store employees
+      // get employees
       const empSnap = await getDocs(
         collection(db, "stores", String(storeId), "employees")
       );
 
-      const rows: Person[] = [];
-
-      for (const d of empSnap.docs) {
-        const data = d.data() as any;
-        const u = userMap[d.id];
+      for (const emp of empSnap.docs) {
+        const data = emp.data() as any;
+        const u = userMap[emp.id];
 
         rows.push({
-          uid: d.id,
-          name: u?.name || u?.displayName || "",
+          uid: emp.id,
+          name: u?.displayName || u?.name || "",
           role: data.role || "",
           email: u?.email || "",
         });
       }
 
       setPeople(rows);
+    })();
+  }, [storeId]);
 
-      // also store all users for fallback
-      const all: Person[] = usersSnap.docs.map((d) => {
+  /* ---------------- ALL USERS (unchanged) ---------------- */
+  useEffect(() => {
+    (async () => {
+      const snap = await getDocs(collection(db, "users"));
+
+      const rows: Person[] = snap.docs.map((d) => {
         const data = d.data() as any;
         return {
           uid: d.id,
@@ -138,11 +144,11 @@ export default function AdminStoreNotesPage() {
         };
       });
 
-      setAllUsers(all);
+      setAllUsers(rows);
     })();
-  }, [storeId]);
+  }, []);
 
-  // ------------------ SEND NOTE ------------------
+  /* ---------------- SEND NOTE ---------------- */
   async function sendNote() {
     const clean = text.trim();
     if (!clean || !storeId) return;
@@ -179,7 +185,7 @@ export default function AdminStoreNotesPage() {
     }
   }
 
-  // ------------------ DELETE NOTE ------------------
+  /* ---------------- DELETE NOTE ---------------- */
   async function removeNote(id: string) {
     if (!confirm("Delete this note?")) return;
     try {
@@ -189,51 +195,101 @@ export default function AdminStoreNotesPage() {
     }
   }
 
-  if (!storeId) return <main className="p-6">Missing storeId</main>;
+  /* ---------------- UI (UNCHANGED) ---------------- */
+  if (!storeId)
+    return (
+      <main className="mx-auto max-w-3xl p-6">
+        Missing ?store=STORE_ID
+      </main>
+    );
 
   return (
-    <main className="mx-auto max-w-3xl p-4 space-y-6">
-      <h1 className="text-xl font-semibold">Store Notes</h1>
+    <main className="admin-notes mx-auto max-w-3xl p-4 lg:p-6">
+      <div className="mb-5 flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Store Notes</h1>
 
-      {/* NOTES */}
-      {loading ? (
-        <p>Loading…</p>
-      ) : (
-        notes.map((n) => (
-          <div key={n.id}>
-            <div>
-              {resolveName(n.createdBy)} → {resolveName(n.targetUid)}
-            </div>
-            <div>{n.text}</div>
-          </div>
-        ))
-      )}
+        <Link
+          href={`/admin/stores/${storeId}`}
+          className="inline-flex items-center rounded-full border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          ← Back to Store
+        </Link>
+      </div>
 
-      {/* SEND */}
-      <select
-        value={selectedRecipient}
-        onChange={(e) => setSelectedRecipient(e.target.value)}
-      >
-        <option value="">Send to…</option>
-        {people.map((p) => (
-          <option key={p.uid} value={p.uid}>
-            {(p.name || p.email || p.uid) + " — " + prettyRole(p.role)}
-          </option>
-        ))}
-      </select>
+      <section className="section">
+        <div className="section-title">All Store Messages</div>
 
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
+        {loading ? (
+          <div className="text-sm text-muted-foreground">Loading…</div>
+        ) : notes.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No messages yet.</div>
+        ) : (
+          <ul className="space-y-2">
+            {notes.map((n) => {
+              const senderName =
+                resolveName(n.createdBy) || prettyRole(n.fromRole);
 
-      <button onClick={sendNote}>Send</button>
+              const recipientName =
+                resolveName(n.targetUid) || prettyRole(n.toRole);
 
-      <Link href={`/admin/stores/${storeId}`}>
-        ← Back to Store
-      </Link>
+              return (
+                <li key={n.id} className="item-row">
+                  <div className="min-w-0">
+                    <div className="meta">
+                      {senderName} → {recipientName}
+                    </div>
+                    <div className="text-sm whitespace-pre-wrap">{n.text}</div>
+                  </div>
+
+                  <button
+                    onClick={() => removeNote(n.id)}
+                    className="link-danger"
+                  >
+                    Remove
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="section">
+        <div className="section-title">Send a Note</div>
+
+        <select
+          value={selectedRecipient}
+          onChange={(e) => setSelectedRecipient(e.target.value)}
+          className="input mb-2"
+        >
+          <option value="">Send to…</option>
+
+          {people.map((p) => (
+            <option key={p.uid} value={p.uid}>
+              {(p.name || p.email || p.uid) + " — " + prettyRole(p.role)}
+            </option>
+          ))}
+        </select>
+
+        <textarea
+          rows={3}
+          placeholder="Type your note…"
+          className="input"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+
+        <div className="actions">
+          <button
+            onClick={sendNote}
+            disabled={sending || !text.trim()}
+            className="btn-neutral"
+          >
+            Send
+          </button>
+        </div>
+      </section>
     </main>
   );
 }
-
 
