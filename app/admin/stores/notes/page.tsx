@@ -13,6 +13,7 @@ import {
   getDocs,
   deleteDoc,
   doc,
+  getDoc,
   serverTimestamp,
 } from "firebase/firestore";
 
@@ -45,6 +46,7 @@ export default function AdminStoreNotesPage() {
   const [allUsers, setAllUsers] = useState<Person[]>([]);
 
   const [selectedRecipient, setSelectedRecipient] = useState("");
+
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -59,69 +61,55 @@ export default function AdminStoreNotesPage() {
 
   function resolveName(uid?: string | null) {
     if (!uid) return null;
-
     let p = people.find((x) => x.uid === uid);
     if (!p) p = allUsers.find((x) => x.uid === uid);
-
     if (!p) return null;
     return p.name?.trim() ? p.name : p.email || null;
   }
 
-  /* ---------------- NOTES ---------------- */
+  /* ---------------- LOAD NOTES ---------------- */
   useEffect(() => {
     if (!storeId) return;
-
+    setLoading(true);
     const qy = query(
       collection(db, "notes"),
       where("storeId", "==", String(storeId))
     );
-
     const unsub = onSnapshot(qy, (snap) => {
       const rows = snap.docs.map((d) => ({
         id: d.id,
         ...(d.data() as any),
       })) as Note[];
-
       rows.sort(
         (a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
       );
-
       setNotes(rows);
       setLoading(false);
     });
-
     return () => unsub();
   }, [storeId]);
 
-  /* ---------------- FIXED EMPLOYEES LOAD ---------------- */
+  /* ---------------- LOAD EMPLOYEES (reads name/email from users doc) ---------------- */
   useEffect(() => {
     if (!storeId) return;
 
     (async () => {
-      const rows: Person[] = [];
-
-      // get ALL users once
-      const usersSnap = await getDocs(collection(db, "users"));
-      const userMap: Record<string, any> = {};
-
-      usersSnap.forEach((doc) => {
-        userMap[doc.id] = doc.data();
-      });
-
-      // get employees
       const empSnap = await getDocs(
         collection(db, "stores", String(storeId), "employees")
       );
 
+      const rows: Person[] = [];
+
       for (const emp of empSnap.docs) {
         const data = emp.data() as any;
-        const u = userMap[emp.id];
+        const userSnap = await getDoc(doc(db, "users", emp.id));
+        const u = userSnap.exists() ? (userSnap.data() as any) : {};
 
         rows.push({
           uid: emp.id,
-          name: u?.displayName || u?.name || "",
+          name: u.displayName || u.name || "",
           role: data.role || "",
-          email: u?.email || "",
+          email: u.email || "",
         });
       }
 
@@ -129,11 +117,10 @@ export default function AdminStoreNotesPage() {
     })();
   }, [storeId]);
 
-  /* ---------------- ALL USERS (unchanged) ---------------- */
+  /* ---------------- LOAD ALL USERS ---------------- */
   useEffect(() => {
     (async () => {
       const snap = await getDocs(collection(db, "users"));
-
       const rows: Person[] = snap.docs.map((d) => {
         const data = d.data() as any;
         return {
@@ -143,7 +130,6 @@ export default function AdminStoreNotesPage() {
           email: data.email || "",
         };
       });
-
       setAllUsers(rows);
     })();
   }, []);
@@ -176,9 +162,8 @@ export default function AdminStoreNotesPage() {
         createdBy: auth.currentUser?.uid ?? null,
         createdAt: serverTimestamp(),
       });
-
       setText("");
-    } catch {
+    } catch (e) {
       alert("Could not send note.");
     } finally {
       setSending(false);
@@ -195,12 +180,10 @@ export default function AdminStoreNotesPage() {
     }
   }
 
-  /* ---------------- UI (UNCHANGED) ---------------- */
+  /* ---------------- UI ---------------- */
   if (!storeId)
     return (
-      <main className="mx-auto max-w-3xl p-6">
-        Missing ?store=STORE_ID
-      </main>
+      <main className="mx-auto max-w-3xl p-6">Missing ?store=STORE_ID</main>
     );
 
   return (
@@ -228,7 +211,6 @@ export default function AdminStoreNotesPage() {
             {notes.map((n) => {
               const senderName =
                 resolveName(n.createdBy) || prettyRole(n.fromRole);
-
               const recipientName =
                 resolveName(n.targetUid) || prettyRole(n.toRole);
 
@@ -236,7 +218,11 @@ export default function AdminStoreNotesPage() {
                 <li key={n.id} className="item-row">
                   <div className="min-w-0">
                     <div className="meta">
-                      {senderName} → {recipientName}
+                      {senderName} → {recipientName}{" "}
+                      {n.createdAt?.seconds
+                        ? "• " +
+                          new Date(n.createdAt.seconds * 1000).toLocaleString()
+                        : ""}
                     </div>
                     <div className="text-sm whitespace-pre-wrap">{n.text}</div>
                   </div>
@@ -263,10 +249,13 @@ export default function AdminStoreNotesPage() {
           className="input mb-2"
         >
           <option value="">Send to…</option>
-
           {people.map((p) => (
             <option key={p.uid} value={p.uid}>
-              {(p.name || p.email || p.uid) + " — " + prettyRole(p.role)}
+              {(p.name || p.email || p.uid) +
+                " (" +
+                (p.email || "no email") +
+                ") — " +
+                prettyRole(p.role)}
             </option>
           ))}
         </select>
@@ -289,7 +278,64 @@ export default function AdminStoreNotesPage() {
           </button>
         </div>
       </section>
+
+      <style jsx global>{`
+        .admin-notes {
+          --line: #eaecef;
+          --muted: #f8f9fb;
+        }
+        .section {
+          padding: 12px 0 18px;
+          border-top: 1px solid var(--line);
+        }
+        .section:first-of-type {
+          border-top: none;
+        }
+        .section-title {
+          font-size: 14px;
+          font-weight: 600;
+          margin-bottom: 8px;
+        }
+        .item-row {
+          padding: 10px 12px;
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          background: white;
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .meta {
+          font-size: 12px;
+          color: #6b7280;
+          margin-bottom: 4px;
+        }
+        .input {
+          width: 100%;
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          padding: 10px 12px;
+          font-size: 14px;
+          background: white;
+        }
+        .actions {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 8px;
+        }
+        .btn-neutral {
+          border: 1px solid var(--line);
+          padding: 6px 12px;
+          border-radius: 8px;
+          background: white;
+        }
+        .link-danger {
+          color: #ef4444;
+          font-size: 12px;
+        }
+      `}</style>
     </main>
   );
 }
+
 
