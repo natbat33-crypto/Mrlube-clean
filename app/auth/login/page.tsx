@@ -166,7 +166,9 @@ function LoginContent() {
       setResetError(null);
       setResetMsg(null);
 
-      await sendPasswordResetEmail(auth, email.trim());
+      await sendPasswordResetEmail(auth, email.trim()), {
+        url: `${window.location.origin}/auth/login`,
+      };
 
       setResetMsg("Password reset email sent. Check your inbox.");
     } catch (err: any) {
