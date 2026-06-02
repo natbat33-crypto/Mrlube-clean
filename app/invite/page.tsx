@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 
@@ -12,25 +12,29 @@ import {
 
 import {
   doc,
-  getDoc,
-  updateDoc,
-  writeBatch,
   serverTimestamp,
+  getDoc,
+  writeBatch,
   collection,
   getDocs,
 } from "firebase/firestore";
 
 export default function InviteSignupPage() {
+  return (
+    <Suspense fallback={<div className="p-10 text-center">Loading…</div>}>
+      <InviteSignupContent />
+    </Suspense>
+  );
+}
+
+function InviteSignupContent() {
   const params = useParams();
   const token = String(params.token || "");
 
   const [invite, setInvite] = useState<any>(null);
-  const [stores, setStores] = useState<any[]>([]);
-
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
+  const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState("");
   const [status, setStatus] = useState<string | null>("Loading invite…");
   const [loading, setLoading] = useState(false);
@@ -38,26 +42,21 @@ export default function InviteSignupPage() {
   useEffect(() => {
     async function loadInvite() {
       try {
-        const inviteRef = doc(db, "invites", token);
-        const snap = await getDoc(inviteRef);
+        const snap = await getDoc(doc(db, "invites", token));
 
-        if (!snap.exists()) {
-          setStatus("❌ Invalid invite link.");
-          return;
-        }
+        if (!snap.exists()) return setStatus("❌ Invalid invite link.");
 
         const data = snap.data();
 
-        if (data.used) {
-          setStatus("❌ This invite has already been used.");
-          return;
-        }
+        if (data.disabled) return setStatus("❌ This invite is disabled.");
+        if (data.used) return setStatus("❌ This invite has already been used.");
+        if (!data.email || !data.role)
+          return setStatus("❌ Invite is missing email or role.");
 
         setInvite(data);
-        if (data.email) setEmail(data.email);
         setStatus(null);
-      } catch (err) {
-        console.error(err);
+      } catch (e) {
+        console.error("Invite load error:", e);
         setStatus("❌ Could not load invite.");
       }
     }
@@ -67,17 +66,19 @@ export default function InviteSignupPage() {
 
   useEffect(() => {
     async function loadStores() {
-      const snap = await getDocs(collection(db, "stores"));
-      const arr: any[] = [];
-
-      snap.forEach((d) => {
-        arr.push({
-          id: d.id,
-          name: d.data().name || d.id,
+      try {
+        const snap = await getDocs(collection(db, "stores"));
+        const arr: any[] = [];
+        snap.forEach((d) => {
+          arr.push({
+            id: d.id,
+            name: d.data().name || d.id,
+          });
         });
-      });
-
-      setStores(arr);
+        setStores(arr);
+      } catch (e) {
+        console.error("Store load error:", e);
+      }
     }
 
     loadStores();
@@ -89,26 +90,21 @@ export default function InviteSignupPage() {
 
     if (!invite) return setStatus("❌ Invalid invite.");
     if (!name.trim()) return setStatus("❌ Enter your full name.");
-    if (!email.includes("@")) return setStatus("❌ Invalid email.");
     if (password.length < 6)
       return setStatus("❌ Password must be at least 6 characters.");
 
-    const role = invite.role;
+    const email = String(invite.email).trim().toLowerCase();
+    const role = String(invite.role).trim().toLowerCase();
 
-    if (role !== "admin" && !storeId) {
+    if (role !== "admin" && !storeId)
       return setStatus("❌ Please select your store.");
-    }
 
     setLoading(true);
 
     try {
-      const cred = await createUserWithEmailAndPassword(
-        auth,
-        email.trim(),
-        password
-      );
-
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
       const uid = cred.user.uid;
+
       const batch = writeBatch(db);
 
       batch.set(
@@ -116,7 +112,7 @@ export default function InviteSignupPage() {
         {
           uid,
           name: name.trim(),
-          email: email.trim(),
+          email,
           role,
           storeId: role === "admin" ? null : storeId,
           active: true,
@@ -132,7 +128,7 @@ export default function InviteSignupPage() {
           {
             uid,
             name: name.trim(),
-            email: email.trim(),
+            email,
             role,
             storeId,
             active: true,
@@ -143,14 +139,17 @@ export default function InviteSignupPage() {
         );
       }
 
+      batch.set(
+        doc(db, "invites", token),
+        {
+          used: true,
+          usedBy: uid,
+          usedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
       await batch.commit();
-
-      await updateDoc(doc(db, "invites", token), {
-        used: true,
-        usedBy: uid,
-        usedAt: serverTimestamp(),
-      });
-
       await sendEmailVerification(cred.user);
       await signOut(auth);
 
@@ -158,9 +157,8 @@ export default function InviteSignupPage() {
     } catch (err: any) {
       console.error("Invite signup error:", err);
       let m = err?.message || "❌ Something went wrong.";
-      if (String(err?.code).includes("email-already-in-use")) {
+      if (String(err?.code).includes("email-already-in-use"))
         m = "❌ Email already in use.";
-      }
       setStatus(m);
     } finally {
       setLoading(false);
@@ -170,8 +168,8 @@ export default function InviteSignupPage() {
   if (status && !invite) {
     return (
       <main className="min-h-[100svh] grid place-items-center bg-gray-50">
-        <div className="bg-white rounded-xl shadow-xl p-6 w-[min(440px,92vw)]">
-          <p className="text-center">{status}</p>
+        <div className="w-[min(440px,92vw)] bg-white rounded-xl shadow-xl p-6 text-center">
+          {status}
         </div>
       </main>
     );
@@ -182,7 +180,7 @@ export default function InviteSignupPage() {
       <div className="w-[min(440px,92vw)] bg-white rounded-xl shadow-xl p-6">
         <h1 className="text-2xl font-bold mb-2">Accept Invite</h1>
         <p className="text-gray-600 mb-4">
-          Create your account for role: <b>{invite?.role}</b>
+          Create your account as <b>{invite?.role}</b>
         </p>
 
         <form onSubmit={onSubmit} className="grid gap-4">
@@ -213,12 +211,9 @@ export default function InviteSignupPage() {
 
           <input
             type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email"
-            className="border rounded-lg p-3"
-            required
-            disabled={!!invite?.email}
+            value={invite?.email || ""}
+            className="border rounded-lg p-3 bg-gray-100"
+            disabled
           />
 
           <input
