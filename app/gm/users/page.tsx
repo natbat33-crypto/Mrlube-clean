@@ -377,15 +377,7 @@ function UserRow({
         <div className="font-medium">{user.name || user.email}</div>
         <div className="text-xs text-gray-600">{roleLabel}</div>
       </div>
-
-      {!readOnly && (
-        <button
-          onClick={onDeactivate}
-          className="text-xs border rounded px-2 py-1 hover:bg-gray-50"
-        >
-          Deactivate
-        </button>
-      )}
     </div>
+
   );
 }
