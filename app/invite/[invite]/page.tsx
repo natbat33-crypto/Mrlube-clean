@@ -29,7 +29,10 @@ export default function InviteSignupPage() {
 
 function InviteSignupContent() {
   const params = useParams();
-  const token = String(params.token || "");
+
+const token = Array.isArray(params.token)
+  ? params.token[0]
+  : (params.token as string) || "";
 
   const [invite, setInvite] = useState<any>(null);
   const [name, setName] = useState("");
@@ -40,29 +43,47 @@ function InviteSignupContent() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    async function loadInvite() {
-      try {
-        const snap = await getDoc(doc(db, "invites", token));
+  if (!token) {
+    setStatus("❌ Missing invite token.");
+    return;
+  }
 
-        if (!snap.exists()) return setStatus("❌ Invalid invite link.");
+  async function loadInvite() {
+    try {
+      const snap = await getDoc(doc(db, "invites", token));
 
-        const data = snap.data();
-
-        if (data.disabled) return setStatus("❌ This invite is disabled.");
-        if (data.used) return setStatus("❌ This invite has already been used.");
-        if (!data.email || !data.role)
-          return setStatus("❌ Invite is missing email or role.");
-
-        setInvite(data);
-        setStatus(null);
-      } catch (e) {
-        console.error("Invite load error:", e);
-        setStatus("❌ Could not load invite.");
+      if (!snap.exists()) {
+        setStatus("❌ Invalid invite link.");
+        return;
       }
-    }
 
-    if (token) loadInvite();
-  }, [token]);
+      const data = snap.data();
+
+      if (data.disabled) {
+        setStatus("❌ Invite disabled.");
+        return;
+      }
+
+      if (data.used) {
+        setStatus("❌ Invite already used.");
+        return;
+      }
+
+      if (!data.email || !data.role) {
+        setStatus("❌ Invite missing email or role.");
+        return;
+      }
+
+      setInvite(data);
+      setStatus(null);
+    } catch (e) {
+      console.error("Invite load error:", e);
+      setStatus("❌ Could not load invite.");
+    }
+  }
+
+  loadInvite();
+}, [token]);
 
   useEffect(() => {
     async function loadStores() {
