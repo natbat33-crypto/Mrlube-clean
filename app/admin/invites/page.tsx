@@ -2,11 +2,7 @@
 
 import { useState } from "react";
 import { db } from "@/lib/firebase";
-import {
-  doc,
-  setDoc,
-  serverTimestamp,
-} from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 function makeToken() {
   return crypto.randomUUID();
@@ -14,7 +10,7 @@ function makeToken() {
 
 export default function AdminInvitesPage() {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState("trainee");
+  const [role, setRole] = useState("employee");
   const [link, setLink] = useState("");
   const [status, setStatus] = useState("");
 
@@ -63,8 +59,7 @@ export default function AdminInvitesPage() {
             onChange={(e) => setRole(e.target.value)}
             className="border rounded-lg p-3"
           >
-            <option value="trainee">Trainee</option>
-            <option value="trainer">Trainer</option>
+            <option value="employee">Employee / Trainee</option>
             <option value="manager">Manager</option>
             <option value="gm">General Manager</option>
             <option value="admin">Admin</option>
