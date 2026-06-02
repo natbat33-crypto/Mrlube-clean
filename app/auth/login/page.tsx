@@ -266,17 +266,6 @@ function LoginContent() {
             </p>
           )}
 
-          <div className="mt-4 text-center">
-            <p className="text-sm text-slate-600">
-              Don’t have an account?{" "}
-              <a
-                href="/signup"
-                className="text-[#0b3d91] font-semibold hover:underline"
-              >
-                Sign up
-              </a>
-            </p>
-          </div>
         </form>
       </div>
     </main>
