@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 import { db } from "@/lib/firebase";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import {
+  doc,
+  setDoc,
+  addDoc,
+  collection,
+  serverTimestamp,
+} from "firebase/firestore";
 
 function makeToken() {
   return crypto.randomUUID();
@@ -35,8 +41,27 @@ export default function AdminInvitesPage() {
     });
 
     const inviteLink = `${window.location.origin}/invite/${token}`;
+
+    // Send email through Firebase mail collection
+    await addDoc(collection(db, "mail"), {
+      to: [email.trim().toLowerCase()],
+      message: {
+        subject: "You're Invited to Mr. Lube Training",
+        html: `
+          <h2>Welcome to Mr. Lube Training</h2>
+          <p>You have been invited to create your account.</p>
+          <p><strong>Role:</strong> ${role}</p>
+          <p>
+            <a href="${inviteLink}">
+              Click here to accept your invite
+            </a>
+          </p>
+        `,
+      },
+    });
+
     setLink(inviteLink);
-    setStatus("Invite created.");
+    setStatus("Invite created and email sent.");
   }
 
   return (
@@ -66,7 +91,7 @@ export default function AdminInvitesPage() {
           </select>
 
           <button className="bg-blue-700 text-white rounded-lg py-3 font-bold">
-            Generate Invite
+            Generate & Send Invite
           </button>
         </form>
 
