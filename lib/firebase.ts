@@ -12,7 +12,6 @@ import {
 } from "firebase/firestore";
 
 // ---- ENV CONFIG ----
-// Uses NEXT_PUBLIC_* vars (correct for Next + Capacitor)
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN!,
@@ -29,18 +28,18 @@ const app: FirebaseApp =
 // ---- AUTH ----
 const auth = getAuth(app);
 
-/**
- * ✅ CRITICAL FOR iOS / TESTFLIGHT
- * indexedDBLocalPersistence works in WebViews
- * browserLocalPersistence does NOT
- */
-setPersistence(auth, indexedDBLocalPersistence).catch((err) => {
+// Keep the Firebase user signed in between app launches.
+// Other parts of the app can wait for this before checking auth.
+const authPersistenceReady = setPersistence(
+  auth,
+  indexedDBLocalPersistence
+).catch((err) => {
   console.warn("Auth persistence could not be set:", err);
 });
 
 // ---- FIRESTORE ----
 const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true, // ✅ required for iOS network stability
+  experimentalForceLongPolling: true,
 });
 
 // ---- DEV LOGGING ----
@@ -49,4 +48,10 @@ if (process.env.NODE_ENV === "development") {
   console.log("Firebase initialized (project):", app.options.projectId);
 }
 
-export { app, auth, db, firebaseConfig };
+export {
+  app,
+  auth,
+  db,
+  firebaseConfig,
+  authPersistenceReady,
+};

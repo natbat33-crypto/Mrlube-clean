@@ -7,6 +7,9 @@ import {
   signInWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
+  setPersistence,
+  indexedDBLocalPersistence,
+  inMemoryPersistence,
 } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -34,6 +37,7 @@ function LoginContent() {
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
   // Password reset state
   const [resetMsg, setResetMsg] = useState<string | null>(null);
@@ -123,12 +127,18 @@ function LoginContent() {
     setLoading(true);
 
     try {
-      const cred = await signInWithEmailAndPassword(
-        auth,
-        email.trim(),
-        password
-      );
-      const u = cred.user;
+  await setPersistence(
+    auth,
+    rememberMe ? indexedDBLocalPersistence : inMemoryPersistence
+  );
+
+  const cred = await signInWithEmailAndPassword(
+    auth,
+    email.trim(),
+    password
+  );
+
+  const u = cred.user;
 
       await u.reload();
       if (!u.emailVerified) {
@@ -234,6 +244,25 @@ function LoginContent() {
               className="block w-full rounded-lg border border-slate-300 px-3 py-2 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#0b3d91]"
             />
           </div>
+
+          <div className="flex items-center gap-2">
+  <input
+    id="rememberMe"
+    type="checkbox"
+    checked={rememberMe}
+    onChange={(e) => setRememberMe(e.target.checked)}
+    className="h-4 w-4"
+  />
+
+  <label
+    htmlFor="rememberMe"
+    className="text-sm text-slate-700"
+  >
+    Remember me on this device
+  </label>
+</div>
+
+<div className="text-right"></div>
 
           <div className="text-right">
             <button

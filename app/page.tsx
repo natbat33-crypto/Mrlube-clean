@@ -4,37 +4,48 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, authPersistenceReady } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
 export default function HomeRedirect() {
   const router = useRouter();
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        router.replace('/auth/login');
-        return;
-      }
+    let unsub: (() => void) | undefined;
 
-      // 🔥 CHECK IF USER IS ACTIVE
-      const snap = await getDoc(doc(db, 'users', user.uid));
+    const startAuth = async () => {
+      // Wait for Firebase to restore the saved login first
+      await authPersistenceReady;
 
-      if (snap.exists() && snap.data().active === false) {
-        console.log('User is inactive → signing out');
+      unsub = onAuthStateChanged(auth, async (user) => {
+        if (!user) {
+          router.replace('/auth/login');
+          return;
+        }
 
-        await signOut(auth);
+        // 🔥 CHECK IF USER IS ACTIVE
+        const snap = await getDoc(doc(db, 'users', user.uid));
 
-        // Optional message (replace with your own page if you want)
-        router.replace('/auth/login?disabled=1');
-        return;
-      }
+        if (snap.exists() && snap.data().active === false) {
+          console.log('User is inactive → signing out');
 
-      // If user is active → continue to dashboard
-      router.replace('/dashboard');
-    });
+          await signOut(auth);
 
-    return () => unsub();
+          // Optional message (replace with your own page if you want)
+          router.replace('/auth/login?disabled=1');
+          return;
+        }
+
+        // If user is active → continue to dashboard
+        router.replace('/dashboard');
+      });
+    };
+
+    startAuth();
+
+    return () => {
+      if (unsub) unsub();
+    };
   }, [router]);
 
   return <div className="safe-area" />;
