@@ -127,18 +127,18 @@ function LoginContent() {
     setLoading(true);
 
     try {
-  await setPersistence(
-    auth,
-    rememberMe ? indexedDBLocalPersistence : inMemoryPersistence
-  );
+      await setPersistence(
+        auth,
+        rememberMe ? indexedDBLocalPersistence : inMemoryPersistence
+      );
 
-  const cred = await signInWithEmailAndPassword(
-    auth,
-    email.trim(),
-    password
-  );
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
 
-  const u = cred.user;
+      const u = cred.user;
 
       await u.reload();
       if (!u.emailVerified) {
@@ -223,6 +223,8 @@ function LoginContent() {
             </label>
             <input
               type="email"
+              name="email"
+              autoComplete="username"
               required
               placeholder="Your email"
               value={email}
@@ -237,6 +239,8 @@ function LoginContent() {
             </label>
             <input
               type="password"
+              name="password"
+              autoComplete="current-password"
               required
               placeholder="••••••••"
               value={password}
@@ -246,23 +250,21 @@ function LoginContent() {
           </div>
 
           <div className="flex items-center gap-2">
-  <input
-    id="rememberMe"
-    type="checkbox"
-    checked={rememberMe}
-    onChange={(e) => setRememberMe(e.target.checked)}
-    className="h-4 w-4"
-  />
+            <input
+              id="rememberMe"
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="h-4 w-4"
+            />
 
-  <label
-    htmlFor="rememberMe"
-    className="text-sm text-slate-700"
-  >
-    Remember me on this device
-  </label>
-</div>
-
-<div className="text-right"></div>
+            <label
+              htmlFor="rememberMe"
+              className="text-sm text-slate-700"
+            >
+              Remember me on this device
+            </label>
+          </div>
 
           <div className="text-right">
             <button
@@ -296,7 +298,6 @@ function LoginContent() {
               {resetError}
             </p>
           )}
-
         </form>
       </div>
     </main>

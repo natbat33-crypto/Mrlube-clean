@@ -1,17 +1,22 @@
 "use client";
 
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
+
 import {
+  initializeAuth,
   getAuth,
-  setPersistence,
   indexedDBLocalPersistence,
+  browserLocalPersistence,
+  type Auth,
 } from "firebase/auth";
+
 import {
   initializeFirestore,
   setLogLevel,
 } from "firebase/firestore";
 
 // ---- ENV CONFIG ----
+
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN!,
@@ -22,31 +27,49 @@ const firebaseConfig = {
 };
 
 // ---- SINGLETON APP ----
+
 const app: FirebaseApp =
   getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 // ---- AUTH ----
-const auth = getAuth(app);
+// Persistent login:
+// 1. Try IndexedDB
+// 2. Fall back to localStorage if IndexedDB isn't available
 
-// Keep the Firebase user signed in between app launches.
-// Other parts of the app can wait for this before checking auth.
-const authPersistenceReady = setPersistence(
-  auth,
-  indexedDBLocalPersistence
-).catch((err) => {
-  console.warn("Auth persistence could not be set:", err);
-});
+let auth: Auth;
+
+try {
+  auth = initializeAuth(app, {
+    persistence: [
+      indexedDBLocalPersistence,
+      browserLocalPersistence,
+    ],
+  });
+} catch {
+  // Auth may already exist during Next.js hot reload.
+  auth = getAuth(app);
+}
+
+// app/page.tsx already waits for this.
+// initializeAuth configures persistence synchronously,
+// so keep this export without changing the rest of the app.
+
+const authPersistenceReady: Promise<void> = Promise.resolve();
 
 // ---- FIRESTORE ----
+
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
 });
 
 // ---- DEV LOGGING ----
+
 if (process.env.NODE_ENV === "development") {
   setLogLevel("debug");
   console.log("Firebase initialized (project):", app.options.projectId);
 }
+
+// ---- EXPORTS ----
 
 export {
   app,
